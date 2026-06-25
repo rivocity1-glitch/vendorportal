@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   ShoppingBag, Clock, IndianRupee, TrendingUp, Package,
-  AlertTriangle, Star, Radio, ArrowUp, ArrowDown
+  AlertTriangle, Star, ArrowUp, ArrowDown
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -9,7 +9,7 @@ import {
 } from "recharts";
 
 // Correct path linking to your newly created client profile
-import { supabase } from "../../../lib/supabaseClient"; 
+import { supabase } from "../../../lib/supabase"; 
 
 const statusColors: Record<string, string> = {
   pending: "bg-[#FEF3C7] text-[#92400E]",
@@ -57,7 +57,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
   const [period, setPeriod] = useState<"week" | "month">("week");
   const [loading, setLoading] = useState(true);
 
-  // Dynamic state hooks for live rendering
+  // Live state metrics (hardcoded dummy attributes safely scrubbed)
   const [metrics, setMetrics] = useState({
     todayOrders: 0,
     pendingOrders: 0,
@@ -65,9 +65,6 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
     revenueWeekly: 0,
     activeProducts: 0,
     lowStockCount: 0,
-    rating: "4.5★",
-    storeStatus: "Open",
-    deliveryTime: "28 min",
   });
 
   const [recentOrdersList, setRecentOrdersList] = useState<any[]>([]);
@@ -122,27 +119,39 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
         const oneWeekAgo = new Date();
         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
+        // Track sales analytics dynamically over 7 running days using a calendar map
+        const dailyRevenueMap: Record<string, number> = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
+        const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
         if (orderItems) {
           orderItems.forEach((item: any) => {
             const itemDate = new Date(item.created_at);
             const itemDateStr = itemDate.toISOString().split('T')[0];
             const isToday = itemDateStr === todayStr;
-            const isPending = item.fulfillment_status === "pending";
+            const isPending = item.fulfillment_status === "pending" || item.fulfillment_status?.toLowerCase() === "pending";
 
             if (isToday) todayOrdersCount++;
             if (isPending) pendingOrdersCount++;
-            if (isToday && item.fulfillment_status === "delivered") {
-              todayRevenueSum += Number(item.price) * (item.quantity || 1);
+            
+            const rowRevenue = Number(item.price || 0) * (item.quantity || 1);
+
+            // Accumulate active daily earnings
+            if (isToday && (item.fulfillment_status === "delivered" || item.fulfillment_status === "packed" || item.fulfillment_status === "preparing")) {
+              todayRevenueSum += rowRevenue;
             }
-            if (item.fulfillment_status === "delivered" && itemDate >= oneWeekAgo) {
-              weeklyRevenueSum += Number(item.price) * (item.quantity || 1);
+            
+            // Build historical window trends cleanly
+            if (itemDate >= oneWeekAgo && item.fulfillment_status !== "cancelled") {
+              weeklyRevenueSum += rowRevenue;
+              const dayName = weekdays[itemDate.getDay()];
+              dailyRevenueMap[dayName] += rowRevenue;
             }
 
             if (processedOrders.length < 5) {
               processedOrders.push({
-                id: `ORD-${item.order_id?.slice(0, 4).toUpperCase()}`,
+                id: item.order_id ? `ORD-${item.order_id.slice(0, 4).toUpperCase()}` : "ORD-NEW",
                 customer: "Store Customer",
-                amount: `₹${Number(item.price * item.quantity).toLocaleString("en-IN")}`,
+                amount: `₹${rowRevenue.toLocaleString("en-IN")}`,
                 status: item.fulfillment_status || "Pending",
                 time: isToday ? "Today" : itemDate.toLocaleDateString()
               });
@@ -151,27 +160,31 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
         }
 
         // Hydrate data properties smoothly
-        setMetrics(prev => ({
-          ...prev,
+        setMetrics({
           activeProducts: activeCount || 0,
           lowStockCount: lowStockItemsCount,
           todayOrders: todayOrdersCount,
           pendingOrders: pendingOrdersCount,
           revenueToday: todayRevenueSum,
           revenueWeekly: weeklyRevenueSum,
-        }));
+        });
 
         setStockAlertsList(processedStockAlerts);
         setRecentOrdersList(processedOrders);
 
-        // Map live properties directly onto charts
-        setSalesAnalytics([
-          { day: "Mon", revenue: todayRevenueSum || 2000 },
-          { day: "Tue", revenue: todayRevenueSum * 1.2 || 3500 },
-          { day: "Wed", revenue: todayRevenueSum * 0.9 || 4100 },
-        ]);
+        // Format chart arrays strictly matching current localized database parameters
+        const mappedAnalytics = weekdays.map(day => ({
+          day,
+          revenue: dailyRevenueMap[day]
+        }));
+        setSalesAnalytics(mappedAnalytics);
+
         setOrderTrends([
-          { time: "12 PM", pending: pendingOrdersCount, completed: todayOrdersCount },
+          { 
+            name: "Live Status Balance", 
+            Completed: todayOrdersCount - pendingOrdersCount > 0 ? todayOrdersCount - pendingOrdersCount : 0, 
+            Pending: pendingOrdersCount 
+          },
         ]);
 
       } catch (err) {
@@ -197,36 +210,37 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
         <StatCard title="Revenue Today" value={`₹${metrics.revenueToday.toLocaleString("en-IN")}`} icon={IndianRupee} iconColor="text-[#10B981]" iconBg="bg-[#ECFDF5]" />
         <StatCard title="Revenue This Week" value={`₹${metrics.revenueWeekly.toLocaleString("en-IN")}`} icon={TrendingUp} iconColor="text-[#3B82F6]" iconBg="bg-[#EFF6FF]" />
         <StatCard title="Active Products" value={metrics.activeProducts} icon={Package} iconColor="text-[#8B5CF6]" iconBg="bg-[#EDE9FE]" />
-        <StatCard title="Low Stock Products" value={metrics.lowStockCount} subtitle="Needs restocking" icon={AlertTriangle} iconColor="text-[#F59E0B]" iconBg="bg-[#FEF3C7]" />
-        <StatCard title="Customer Rating" value={metrics.rating} icon={Star} iconColor="text-[#F59E0B]" iconBg="bg-[#FEF3C7]" />
-        <StatCard title="Store Status" value={metrics.storeStatus} subtitle={`Avg ${metrics.deliveryTime} delivery`} icon={Radio} iconColor="text-[#10B981]" iconBg="bg-[#ECFDF5]" />
+        <StatCard title="Low Stock Products" value={metrics.lowStockCount} subtitle="Needs restocking" icon={AlertTriangle} iconColor="text-[#EF4444]" iconBg="bg-[#FEF2F2]" />
+        
+        {/* 🟢 Customer Rating Card - Restored with values cleared out */}
+        <StatCard title="Customer Rating" value="—" icon={Star} iconColor="text-[#F59E0B]" iconBg="bg-[#FEF3C7]" />
       </div>
 
       {/* Analytics Rows */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold text-foreground mb-4">Sales Analytics</h3>
+          <h3 className="font-semibold text-foreground mb-4">Sales Analytics (7-Day Running Revenue)</h3>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={salesAnalytics}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="day" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip />
+              <Tooltip formatter={(value) => Number(value) === 0 ? [null, null] : [`₹${Number(value).toLocaleString("en-IN")}`, "Revenue"]} />
               <Area type="monotone" dataKey="revenue" stroke="#10B981" fillOpacity={0.1} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
         <div className="bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold text-foreground mb-4">Order Trend</h3>
+          <h3 className="font-semibold text-foreground mb-4">Live Action Balance</h3>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={orderTrends} barSize={8}>
+            <BarChart data={orderTrends} barSize={16}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="time" tick={{ fontSize: 10 }} />
+              <XAxis dataKey="name" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 10 }} />
               <Tooltip />
-              <Bar dataKey="completed" fill="#10B981" name="Completed" />
-              <Bar dataKey="pending" fill="#F59E0B" name="Pending" />
+              <Bar dataKey="Completed" fill="#10B981" name="Completed/Active" />
+              <Bar dataKey="Pending" fill="#F59E0B" name="Pending Review" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -260,7 +274,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
 
         <div className="bg-card rounded-xl border border-border p-4">
           <h3 className="font-semibold text-foreground flex items-center gap-2 mb-3">
-            <AlertTriangle className="w-4 h-4 text-[#F59E0B]" /> Warehouse Stock Alerts
+            <AlertTriangle className="w-4 h-4 text-[#EF4444]" /> Warehouse Stock Alerts
           </h3>
           <div className="space-y-2.5">
             {stockAlertsList.length === 0 ? (

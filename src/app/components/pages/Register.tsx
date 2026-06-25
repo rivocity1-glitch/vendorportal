@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Eye, EyeOff, Zap, CheckCircle2 } from "lucide-react";
-import { supabase } from "../../../lib/supabaseClient";
+import { supabase } from "../../../lib/supabase";
 
 interface RegisterProps {
   onNavigateToLogin: () => void;
@@ -17,6 +17,15 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
+  // Clean Proper Case Categories mapping to new database validation rules
+  const categories = [
+    { id: "Grocery", name: "Grocery" },
+    { id: "Medical", name: "Medical" },
+    { id: "Electronics", name: "Electronics" },
+    { id: "Fashion", name: "Fashion" },
+    { id: "Home & Living", name: "Home & Living" },
+  ];
+
   // Interface Utility States
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -29,7 +38,7 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
     setError("");
     setSuccessMessage("");
 
-    // 1. Validate All Required Fields
+    // 1. Validate All Required Fields (Removed shopScale)
     if (!shopName || !ownerName || !email || !phone || !address || !category || !password || !confirmPassword) {
       setError("Please fill in all required registration fields.");
       return;
@@ -50,33 +59,79 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
 
     try {
       // 3. Provision the Core Supabase Auth Account
+      console.log("Executing Step 1: Supabase Auth Sign Up for", email);
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-      });
+  email,
+  password,
+  options: {
+    emailRedirectTo: undefined
+  }
+})
 
-      if (authError) throw authError;
+      if (authError) {
+        console.error("Auth Sign-up Error trace:", authError);
+        throw new Error(`Authentication setup failed: ${authError.message}`);
+      }
       if (!authData?.user) throw new Error("Could not initialize authentication profile records.");
 
-      // 4. Inject Verified Metadata into the Vendors Data Row (Updated Column Naming)
-      const { error: dbError } = await supabase.from("vendors").insert([
-        {
-          name: shopName,         // Changed from store_name -> name
-          owner_name: ownerName,
-          email: email,
-          phone: phone,
-          address: address,
-          category: category,     // Changed from category_name -> category
+      // Generate a dynamic clean, pseudo-random unique structural shop identifier string
+      const uniqueSuffix = Math.floor(1000 + Math.random() * 9000);
+      const generatedShopCode = `RIVO-${uniqueSuffix}`;
+
+      // 4. Insert core vendor record
+      console.log("Executing Step 2: Inserting Vendor Core Record");
+      const { data: vendorData, error: vendorError } = await supabase
+        .from("vendors")
+        .insert({
           auth_user_id: authData.user.id,
-          status: "pending",
-          plan_type: "trial",
-        },
-      ]);
+          shop_name: shopName,
+          owner_name: ownerName,
+          email: email.trim(),
+          phone,
+          shop_code: generatedShopCode,
+          status: "pending"
+        })
+        .select()
+        .single();
 
-      if (dbError) throw dbError;
+      if (vendorError) {
+        console.error("Vendor Table Insertion Error trace:", vendorError);
+        throw new Error(`Core vendor record provisioning failed: ${vendorError.message}`);
+      }
 
-      // 5. Establish Success State Flags (Without logging the user in automatically)
-      setSuccessMessage("Registration submitted. Awaiting admin approval.");
+      // 5. Initialize the secondary profile table
+      console.log("Executing Step 3: Inserting Vendor Profile Row");
+      const { error: profileError } = await supabase
+        .from("vendor_profiles")
+        .insert({
+          vendor_id: vendorData.id,
+          categories: [category],
+          address_line1: address,
+          store_status: "open"
+        });
+
+      if (profileError) {
+        console.error("Vendor Profile Table Insertion Error trace:", profileError);
+        throw new Error(`Secondary extended profile instantiation failed: ${profileError.message}`);
+      }
+
+      // 6. Establish Success State Flags / Subscription Setup
+      console.log("Executing Step 4: Registering Free Tier Subscription");
+      const { error: subscriptionError } = await supabase
+        .from("subscriptions")
+        .insert({
+          vendor_id: vendorData.id,
+          plan_name: "FREE",
+          commission_percent: 5,
+          status: "active"
+        });
+
+      if (subscriptionError) {
+        console.error("Subscription Assignment Error trace:", subscriptionError);
+        throw new Error(`Default subscription package tie-in failed: ${subscriptionError.message}`);
+      }
+
+      setSuccessMessage(`Registration submitted. Your assigned login identifier code is ${generatedShopCode}. Account profile is currently awaiting admin approval.`);
       
       // Clear tracking hooks out of system variables safely
       setShopName("");
@@ -89,6 +144,7 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
       setConfirmPassword("");
     } catch (err: any) {
       setError(err.message || "An unexpected system registration variance occurred.");
+      console.error("Registration operational trace crash details:", err);
     } finally {
       setLoading(false);
     }
@@ -187,12 +243,12 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                     onChange={(e) => setCategory(e.target.value)}
                     className="w-full h-10 px-3 rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] text-[#0F172A] focus:outline-none focus:border-[#10B981] focus:ring-2 focus:ring-[#10B981]/20 transition-all"
                   >
-                    <option value="" disabled>Select business classification category</option>
-                    <option value="Grocery">Grocery & Daily Essentials</option>
-                    <option value="Fruits & Vegetables">Fruits & Vegetables</option>
-                    <option value="Dairy & Bakery">Dairy & Bakery</option>
-                    <option value="Personal Care">Personal Care & Wellness</option>
-                    <option value="Snacks & Instant Food">Snacks & Instant Food</option>
+                    <option value="" disabled>Select store category</option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 

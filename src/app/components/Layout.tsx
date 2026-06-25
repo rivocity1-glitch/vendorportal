@@ -4,6 +4,7 @@ import {
   Wallet, Star, Bell, Store, User, Settings, Zap, Menu, X,
   ChevronRight, Moon, Sun, LogOut
 } from "lucide-react";
+import { supabase } from "../../lib/supabase";
 
 type Page =
   | "dashboard" | "orders" | "products" | "add-product" | "inventory"
@@ -17,6 +18,8 @@ interface LayoutProps {
   isDark: boolean;
   onToggleTheme: () => void;
   children: React.ReactNode;
+  // ✅ Added dynamic meta details type configuration
+  vendorMeta?: { store_name: string; shop_code: string } | null;
 }
 
 const navItems = [
@@ -34,8 +37,22 @@ const navItems = [
   { id: "settings", label: "Settings", icon: Settings },
 ] as const;
 
-export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleTheme, children }: LayoutProps) {
+export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleTheme, children, vendorMeta }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Secure Sign-Out Interceptor Pipeline
+  const handleSignOut = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error("Sign out transaction request timed out:", err);
+    } finally {
+      localStorage.clear();
+      sessionStorage.clear();
+      onLogout();
+      window.location.href = "/login";
+    }
+  };
 
   const pageLabels: Record<string, string> = {
     dashboard: "Dashboard",
@@ -51,6 +68,12 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
     store: "Store Management",
     profile: "Profile",
     settings: "Settings",
+  };
+
+  // Safe header abbreviation calculator
+  const getInitials = () => {
+    if (!vendorMeta?.store_name) return "VB";
+    return vendorMeta.store_name.slice(0, 2).toUpperCase();
   };
 
   return (
@@ -126,12 +149,18 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
 
         {/* Bottom */}
         <div className="px-2 py-3 border-t border-[var(--sidebar-border)] space-y-1">
-          <div className="px-3 py-2 rounded-lg bg-[var(--muted)]/50">
-            <p className="text-xs font-medium text-[var(--foreground)] truncate">Green Basket Grocery</p>
-            <p className="text-[10px] text-[var(--muted-foreground)]">SHOP-001 · Koramangala</p>
+          {/* ✅ FIXED: Render live dynamic vendor store context attributes */}
+          <div className="px-3 py-2 rounded-lg bg-[var(--muted)]/50 min-w-0">
+            <p className="text-xs font-bold text-[var(--foreground)] truncate">
+              {vendorMeta?.store_name || "Syncing Profile..."}
+            </p>
+            <p className="text-[10px] font-medium text-[var(--muted-foreground)] truncate mt-0.5">
+              {vendorMeta?.shop_code || "SHOP-PENDING"}
+            </p>
           </div>
           <button
-            onClick={onLogout}
+            type="button"
+            onClick={handleSignOut}
             className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[var(--muted-foreground)] hover:text-[#EF4444] hover:bg-[#FEF2F2] transition-all"
           >
             <LogOut className="w-4 h-4" />
@@ -169,11 +198,12 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
               <Bell className="w-4 h-4" />
               <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#EF4444]" />
             </button>
+            {/* ✅ FIXED: Render dynamic initials directly in top navigation ring */}
             <button
               onClick={() => onNavigate("profile")}
-              className="w-8 h-8 rounded-full bg-[#10B981] flex items-center justify-center text-white text-xs font-bold hover:bg-[#059669] transition-colors"
+              className="w-8 h-8 rounded-full bg-[#10B981] flex items-center justify-center text-white text-xs font-bold hover:bg-[#059669] transition-colors uppercase"
             >
-              GB
+              {getInitials()}
             </button>
           </div>
         </header>

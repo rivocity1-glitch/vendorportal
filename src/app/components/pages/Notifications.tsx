@@ -1,85 +1,170 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ShoppingBag, Package, Wallet, Tag, Settings, Trash2, CheckCheck, Bell, Filter } from "lucide-react";
+import { supabase } from "../../../lib/supabase";
+import { notificationSync } from "../../../lib/notificationSync";
 
-const initialNotifications = [
-  { id: 1, category: "Orders", icon: ShoppingBag, iconColor: "text-[#3B82F6]", iconBg: "bg-[#EFF6FF]", title: "New Order Received", message: "Order #ORD-4822 from Neha Gupta · ₹420", time: "2 min ago", read: false },
-  { id: 2, category: "Orders", icon: ShoppingBag, iconColor: "text-[#F59E0B]", iconBg: "bg-[#FEF3C7]", title: "Order Pending Action", message: "Order #ORD-4820 has been waiting for 18 minutes. Please accept or reject.", time: "18 min ago", read: false },
-  { id: 3, category: "Inventory", icon: Package, iconColor: "text-[#EF4444]", iconBg: "bg-[#FEE2E2]", title: "Critical Stock Alert", message: "Coca-Cola 2L is down to 2 units — below threshold of 12", time: "32 min ago", read: false },
-  { id: 4, category: "Orders", icon: ShoppingBag, iconColor: "text-[#10B981]", iconBg: "bg-[#ECFDF5]", title: "Order Delivered", message: "Order #ORD-4819 was successfully delivered to Ananya Singh", time: "45 min ago", read: true },
-  { id: 5, category: "Settlements", icon: Wallet, iconColor: "text-[#10B981]", iconBg: "bg-[#ECFDF5]", title: "Settlement Processed", message: "₹68,420 has been credited to your bank account · UTR24121500847", time: "2 hrs ago", read: true },
-  { id: 6, category: "Inventory", icon: Package, iconColor: "text-[#F59E0B]", iconBg: "bg-[#FEF3C7]", title: "Low Stock Warning", message: "Lay's Classic Salted 100g — only 5 units remaining", time: "3 hrs ago", read: true },
-  { id: 7, category: "Marketing", icon: Tag, iconColor: "text-[#8B5CF6]", iconBg: "bg-[#EDE9FE]", title: "Offer Expiring Soon", message: "Your 'Breakfast Combo Deal' offer expires in 2 days", time: "5 hrs ago", read: true },
-  { id: 8, category: "System", icon: Settings, iconColor: "text-[#64748B]", iconBg: "bg-muted", title: "System Maintenance", message: "Scheduled maintenance on Dec 20 from 2–4 AM. Services may be briefly unavailable.", time: "Yesterday", read: true },
-  { id: 9, category: "Orders", icon: ShoppingBag, iconColor: "text-[#EF4444]", iconBg: "bg-[#FEE2E2]", title: "Order Cancelled", message: "Order #ORD-4816 was cancelled by customer Arjun Reddy", time: "Yesterday", read: true },
-  { id: 10, category: "Settlements", icon: Wallet, iconColor: "text-[#3B82F6]", iconBg: "bg-[#EFF6FF]", title: "Upcoming Settlement", message: "Your weekly settlement of ~₹38,200 is expected on Dec 22, 2024", time: "Yesterday", read: true },
-];
+interface NotificationItem {
+  id: string;
+  category: "Orders" | "Inventory" | "Settlements" | "Marketing" | "System";
+  title: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+// Deterministic Visual Asset Configuration Mapping Dictionary
+const categoryConfig: Record<string, { icon: any; color: string; bg: string }> = {
+  Orders: { icon: ShoppingBag, color: "text-blue-500", bg: "bg-blue-50 dark:bg-blue-950/40" },
+  Inventory: { icon: Package, color: "text-red-500", bg: "bg-red-50 dark:bg-red-950/40" },
+  Settlements: { icon: Wallet, color: "text-emerald-500", bg: "bg-emerald-50 dark:bg-emerald-950/40" },
+  Marketing: { icon: Tag, color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-950/40" },
+  System: { icon: Settings, color: "text-slate-500", bg: "bg-slate-50 dark:bg-slate-950/40" }
+};
 
 const categories = ["All", "Orders", "Inventory", "Settlements", "Marketing", "System"];
 
 export function Notifications() {
-  const [notifications, setNotifications] = useState(initialNotifications);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [activeCategory, setActiveCategory] = useState("All");
+  const [loading, setLoading] = useState(true);
 
-  const filtered = notifications.filter(n =>
-    activeCategory === "All" || n.category === activeCategory
-  );
+  // Core Data Fetch Routine Engine Pipeline
+  const fetchNotifications = async () => {
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth?.user) return;
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("*")
+        .eq("vendor_id", auth.user.id)
+        .order("created_at", { ascending: false });
 
-  const markRead = (id: number) => {
-    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+      if (!error && data) {
+        setNotifications(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch relational notification logs:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const markAllRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  useEffect(() => {
+    fetchNotifications();
+  }, []);
+
+  // Compute conversational relative timestamps cleanly from backend metadata formats
+  const formatTimeAgo = (timestamp: string) => {
+    const delta = Math.floor((new Date().getTime() - new Date(timestamp).getTime()) / 1000);
+    if (delta < 60) return "Just now";
+    const mins = Math.floor(delta / 60);
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} hr${hrs > 1 ? "s" : ""} ago`;
+    return new Date(timestamp).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   };
 
-  const deleteNotif = (id: number) => {
+  const filtered = notifications.filter(n => activeCategory === "All" || n.category === activeCategory);
+  const totalUnreadCount = notifications.filter(n => !n.is_read).length;
+
+  const triggerNotificationSync = () => {
+    if (typeof (notificationSync as any).emit === "function") {
+      (notificationSync as any).emit();
+    } else {
+      notificationSync.start();
+    }
+  };
+
+  const markRead = async (id: string) => {
+    // Optimistic UI updates
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    
+    await supabase.from("notifications").update({ is_read: true }).eq("id", id);
+    triggerNotificationSync(); // Fire immediate real-time synchronization out to Layout topbars
+  };
+
+  const markAllRead = async () => {
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    
+    const { data: auth } = await supabase.auth.getUser();
+    if (!auth?.user) return;
+
+    await supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("vendor_id", auth.user.id)
+      .eq("is_read", false);
+      
+    triggerNotificationSync();
+  };
+
+  const deleteNotif = async (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
+    
+    await supabase.from("notifications").delete().eq("id", id);
+    triggerNotificationSync();
   };
+
+  if (loading) {
+    return (
+      <div className="p-6 text-center text-xs font-semibold tracking-widest text-muted-foreground animate-pulse uppercase">
+        Loading operational notifications matrix...
+      </div>
+    );
+  }
 
   return (
-    <div className="p-4 lg:p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+    <div className="p-4 lg:p-6 space-y-4">
+      
+      {/* 1. Header Action Panel Controls Row */}
+      <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <Bell className="w-5 h-5 text-foreground" />
-          {unreadCount > 0 && (
-            <span className="bg-[#EF4444] text-white text-xs font-bold px-2 py-0.5 rounded-full">{unreadCount} unread</span>
+          <Bell className="w-4 h-4 text-foreground" />
+          {totalUnreadCount > 0 && (
+            <span className="bg-red-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-full">
+              {totalUnreadCount} unread
+            </span>
           )}
         </div>
         <div className="flex gap-2">
-          {unreadCount > 0 && (
-            <button onClick={markAllRead} className="h-8 px-3 rounded-lg border border-border bg-card text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+          {totalUnreadCount > 0 && (
+            <button 
+              type="button"
+              onClick={markAllRead} 
+              className="h-8 px-3 rounded-lg border border-border bg-card text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors font-medium"
+            >
               <CheckCheck className="w-3.5 h-3.5" /> Mark all read
             </button>
           )}
-          <button className="h-8 px-3 rounded-lg border border-border bg-card text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors">
+          <button type="button" className="h-8 px-3 rounded-lg border border-border bg-card text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors font-medium">
             <Filter className="w-3.5 h-3.5" /> Filter
           </button>
         </div>
       </div>
 
-      {/* Category tabs */}
-      <div className="flex gap-1.5 overflow-x-auto pb-2 mb-4 scrollbar-hide">
+      {/* 2. Interactive Section Category Tab Triggers */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1 mb-2 scrollbar-none">
         {categories.map(cat => {
           const catCount = cat === "All"
-            ? notifications.filter(n => !n.read).length
-            : notifications.filter(n => n.category === cat && !n.read).length;
+            ? notifications.filter(n => !n.is_read).length
+            : notifications.filter(n => n.category === cat && !n.is_read).length;
+          
           return (
             <button
               key={cat}
+              type="button"
               onClick={() => setActiveCategory(cat)}
-              className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+              className={`shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
                 activeCategory === cat
-                  ? "bg-[#10B981] text-white"
-                  : "bg-card border border-border text-muted-foreground hover:text-foreground"
+                  ? "bg-[#10B981] border-[#10B981] text-white shadow-sm"
+                  : "bg-card border-border text-muted-foreground hover:text-foreground"
               }`}
             >
               {cat}
               {catCount > 0 && (
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                  activeCategory === cat ? "bg-white/20 text-white" : "bg-[#EF4444] text-white"
+                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${
+                  activeCategory === cat ? "bg-white/20 text-white" : "bg-red-500 text-white"
                 }`}>
                   {catCount}
                 </span>
@@ -89,43 +174,64 @@ export function Notifications() {
         })}
       </div>
 
-      {/* Notification list */}
+      {/* 3. Main Data Feed Render Loop Container */}
       <div className="space-y-2">
         {filtered.length === 0 && (
-          <div className="bg-card rounded-xl border border-border p-12 text-center">
-            <Bell className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-40" />
-            <p className="text-sm text-muted-foreground">No notifications in this category</p>
+          <div className="bg-card rounded-xl border border-dashed border-border p-12 text-center">
+            <Bell className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-30" />
+            <p className="text-xs text-muted-foreground">No dynamic alert cards found in this log category.</p>
           </div>
         )}
+
         {filtered.map(n => {
-          const Icon = n.icon;
+          const cfg = categoryConfig[n.category] || categoryConfig.System;
+          const CategoryIcon = cfg.icon;
+
           return (
             <div
               key={n.id}
-              className={`bg-card rounded-xl border transition-all ${n.read ? "border-border" : "border-[#10B981]/30 bg-[#ECFDF5]/30 dark:bg-[#064E3B]/20"}`}
+              className={`bg-card rounded-xl border transition-all ${
+                n.is_read 
+                  ? "border-border opacity-85 hover:opacity-100" 
+                  : "border-[#10B981]/30 bg-[#ECFDF5]/20 dark:bg-[#064E3B]/10"
+              }`}
             >
               <div className="flex items-start gap-3 p-4">
-                <div className={`w-9 h-9 rounded-xl ${n.iconBg} flex items-center justify-center shrink-0 mt-0.5`}>
-                  <Icon className={`w-4 h-4 ${n.iconColor}`} />
+                <div className={`w-9 h-9 rounded-xl ${cfg.bg} flex items-center justify-center shrink-0 mt-0.5`}>
+                  <CategoryIcon className={`w-4 h-4 ${cfg.color}`} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className={`text-sm font-medium ${n.read ? "text-foreground" : "text-foreground"}`}>{n.title}</p>
-                        {!n.read && <span className="w-2 h-2 rounded-full bg-[#10B981] shrink-0" />}
-                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">{n.category}</span>
+                        <p className="text-sm font-semibold text-foreground tracking-tight truncate">{n.title}</p>
+                        {!n.is_read && <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] shrink-0" />}
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md">
+                          {n.category}
+                        </span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">{n.message}</p>
-                      <p className="text-[10px] text-muted-foreground mt-1.5">{n.time}</p>
+                      <p className="text-xs text-muted-foreground mt-1 font-normal leading-relaxed">{n.message}</p>
+                      <p className="text-[10px] text-muted-foreground/70 mt-2 font-medium">{formatTimeAgo(n.created_at)}</p>
                     </div>
-                    <div className="flex gap-1 shrink-0">
-                      {!n.read && (
-                        <button onClick={() => markRead(n.id)} className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-[#10B981] hover:bg-[#ECFDF5] transition-all" title="Mark read">
+
+                    {/* Operational Row Mutation Button Controls */}
+                    <div className="flex gap-1 shrink-0 items-center">
+                      {!n.is_read && (
+                        <button 
+                          type="button"
+                          onClick={() => markRead(n.id)} 
+                          className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-[#10B981] hover:bg-[#ECFDF5] dark:hover:bg-[#064E3B]/30 transition-all" 
+                          title="Mark read"
+                        >
                           <CheckCheck className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button onClick={() => deleteNotif(n.id)} className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-[#EF4444] hover:bg-[#FEF2F2] transition-all" title="Delete">
+                      <button 
+                        type="button"
+                        onClick={() => deleteNotif(n.id)} 
+                        className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all" 
+                        title="Delete"
+                      >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -136,6 +242,7 @@ export function Notifications() {
           );
         })}
       </div>
+
     </div>
   );
 }

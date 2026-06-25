@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-import { Search, Filter, Download, X, MapPin, Phone, Package, CreditCard, User, Bike, ChevronRight } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Search, Filter, Download, X, MapPin, Phone, Package, CreditCard, User, Bike, ChevronRight, Loader2 } from "lucide-react";
+import { supabase } from "../../../lib/supabase"; 
 
 const statusColors: Record<string, { bg: string; text: string; dot: string }> = {
   Pending: { bg: "bg-[#FEF3C7]", text: "text-[#92400E]", dot: "bg-[#F59E0B]" },
@@ -11,91 +12,6 @@ const statusColors: Record<string, { bg: string; text: string; dot: string }> = 
   Cancelled: { bg: "bg-[#FEE2E2]", text: "text-[#991B1B]", dot: "bg-[#EF4444]" },
   Refunded: { bg: "bg-[#FEF3C7]", text: "text-[#92400E]", dot: "bg-[#F97316]" },
 };
-
-const orders = [
-  {
-    id: "ORD-4821", customer: "Priya Sharma", phone: "+91 98765 43210", amount: "₹348", paymentStatus: "Paid", orderStatus: "Preparing",
-    date: "Today, 11:42 AM", address: "12, Green Meadows, Koramangala, Bangalore - 560034",
-    items: [
-      { name: "Amul Milk 1L", qty: 2, price: "₹64" },
-      { name: "Britannia Bread", qty: 1, price: "₹35" },
-      { name: "Lay's Chips 100g", qty: 3, price: "₹60" },
-      { name: "Colgate 150g", qty: 1, price: "₹105" },
-    ],
-    rider: "Suresh Kumar · +91 90000 12345",
-    paymentMethod: "UPI · Google Pay",
-  },
-  {
-    id: "ORD-4820", customer: "Rahul Mehta", phone: "+91 87654 32109", amount: "₹512", paymentStatus: "Paid", orderStatus: "Pending",
-    date: "Today, 11:28 AM", address: "45, HSR Layout Sector 3, Bangalore - 560102",
-    items: [
-      { name: "Eggs (12 pcs)", qty: 2, price: "₹190" },
-      { name: "Maggi Noodles 12pk", qty: 1, price: "₹192" },
-      { name: "Dettol Soap 75g", qty: 2, price: "₹130" },
-    ],
-    rider: "Unassigned",
-    paymentMethod: "Card · HDFC",
-  },
-  {
-    id: "ORD-4819", customer: "Ananya Singh", phone: "+91 76543 21098", amount: "₹224", paymentStatus: "Paid", orderStatus: "Delivered",
-    date: "Today, 10:55 AM", address: "88, Indiranagar 7th Cross, Bangalore - 560038",
-    items: [
-      { name: "Parle-G 800g", qty: 2, price: "₹60" },
-      { name: "Sunflower Oil 1L", qty: 1, price: "₹164" },
-    ],
-    rider: "Ramesh D · +91 90111 22334",
-    paymentMethod: "UPI · PhonePe",
-  },
-  {
-    id: "ORD-4818", customer: "Vikram Nair", phone: "+91 65432 10987", amount: "₹780", paymentStatus: "Paid", orderStatus: "Packed",
-    date: "Today, 10:12 AM", address: "23, Whitefield Main Road, Bangalore - 560066",
-    items: [
-      { name: "Basmati Rice 5kg", qty: 1, price: "₹480" },
-      { name: "Toor Dal 1kg", qty: 2, price: "₹300" },
-    ],
-    rider: "Kiran M · +91 90222 33445",
-    paymentMethod: "COD",
-  },
-  {
-    id: "ORD-4817", customer: "Deepika Patel", phone: "+91 54321 09876", amount: "₹156", paymentStatus: "Paid", orderStatus: "Delivered",
-    date: "Today, 9:30 AM", address: "7, BTM Layout 2nd Stage, Bangalore - 560076",
-    items: [
-      { name: "Dove Shampoo 180ml", qty: 1, price: "₹156" },
-    ],
-    rider: "Sanjay B · +91 90333 44556",
-    paymentMethod: "UPI · Paytm",
-  },
-  {
-    id: "ORD-4816", customer: "Arjun Reddy", phone: "+91 43210 98765", amount: "₹420", paymentStatus: "Pending", orderStatus: "Cancelled",
-    date: "Today, 8:48 AM", address: "156, Jayanagar 4th Block, Bangalore - 560041",
-    items: [
-      { name: "Fresh Vegetables Box", qty: 1, price: "₹280" },
-      { name: "Amul Butter 500g", qty: 1, price: "₹140" },
-    ],
-    rider: "Unassigned",
-    paymentMethod: "UPI · Google Pay",
-  },
-  {
-    id: "ORD-4815", customer: "Sneha Iyer", phone: "+91 32109 87654", amount: "₹895", paymentStatus: "Paid", orderStatus: "Delivered",
-    date: "Yesterday, 7:15 PM", address: "34, Electronic City Phase 1, Bangalore - 560100",
-    items: [
-      { name: "Kissan Jam 500g", qty: 2, price: "₹270" },
-      { name: "Haldiram's Namkeen", qty: 3, price: "₹315" },
-      { name: "Tropicana 1L", qty: 2, price: "₹310" },
-    ],
-    rider: "Praveen K · +91 90444 55667",
-    paymentMethod: "Card · Axis",
-  },
-  {
-    id: "ORD-4814", customer: "Karthik Raj", phone: "+91 21098 76543", amount: "₹230", paymentStatus: "Refunded", orderStatus: "Refunded",
-    date: "Yesterday, 4:22 PM", address: "78, Yelahanka New Town, Bangalore - 560064",
-    items: [
-      { name: "Fortune Atta 5kg", qty: 1, price: "₹230" },
-    ],
-    rider: "Unassigned",
-    paymentMethod: "UPI · Google Pay",
-  },
-];
 
 const tabs = ["All", "Pending", "Accepted", "Preparing", "Packed", "Delivered", "Cancelled"];
 
@@ -118,37 +34,175 @@ const actionButtons: Record<string, { label: string; color: string }[]> = {
 export function Orders() {
   const [activeTab, setActiveTab] = useState("All");
   const [search, setSearch] = useState("");
-  const [selectedOrder, setSelectedOrder] = useState<typeof orders[0] | null>(null);
-  const [orderStatuses, setOrderStatuses] = useState<Record<string, string>>(() =>
-    Object.fromEntries(orders.map(o => [o.id, o.orderStatus]))
-  );
+  const [ordersList, setOrdersList] = useState<any[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const filtered = orders.filter(o => {
-    const matchTab = activeTab === "All" || orderStatuses[o.id] === activeTab;
+  const formatStatusString = (rawStatus: string): string => {
+    if (!rawStatus) return "Pending";
+    const formatted = rawStatus.trim().toLowerCase();
+    if (formatted === "ready_for_pickup" || formatted === "ready for pickup") return "Ready For Pickup";
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  };
+
+  const fetchLiveOrders = async () => {
+    try {
+      setLoading(true);
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData?.user) return;
+
+      // Relational Select: Fetch order_items AND pull structural order details from the parent table link
+      const { data: itemsData, error } = await supabase
+        .from("order_items")
+        .select(`
+          id,
+          order_id,
+          quantity,
+          price,
+          fulfillment_status,
+          created_at,
+          products (
+            name
+          ),
+          orders (
+            id,
+            customer_id,
+            subtotal,
+            delivery_fee,
+            total_amount,
+            payment_method,
+            payment_status,
+            delivery_address,
+            vendor_name,
+            customers (
+              name,
+              phone
+            )
+          )
+        `)
+        .eq("vendor_id", authData.user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      if (itemsData) {
+        const groupedOrders: Record<string, any> = {};
+
+        itemsData.forEach((item: any) => {
+          const oId = item.order_id || "UNKNOWN";
+          const parentOrder = item.orders || {};
+          const customerProfile = parentOrder.customers || {};
+          
+          const rawPrice = Number(item.price || 0);
+          const rawQty = Number(item.quantity || 1);
+          const currentStatus = formatStatusString(item.fulfillment_status);
+
+          if (!groupedOrders[oId]) {
+            groupedOrders[oId] = {
+              id: oId,
+              customer: customerProfile.name || parentOrder.vendor_name || "Store Customer",
+              phone: customerProfile.phone || "—",
+              totalAmount: 0, // Recalculated dynamically based on vendor item allocation split
+              paymentStatus: parentOrder.payment_status || "Paid", 
+              orderStatus: currentStatus,
+              date: item.created_at ? new Date(item.created_at).toLocaleString("en-IN", {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit"
+              }) : "Just Now",
+              address: parentOrder.delivery_address || "Customer Delivery Address",
+              items: [],
+              rider: "Unassigned",
+              paymentMethod: parentOrder.payment_method || "Online Payment",
+            };
+          }
+
+          groupedOrders[oId].totalAmount += rawPrice * rawQty;
+          groupedOrders[oId].items.push({
+            name: item.products?.name || "Product Item",
+            qty: rawQty,
+            price: `₹${rawPrice.toLocaleString("en-IN")}`
+          });
+        });
+
+        setOrdersList(Object.values(groupedOrders));
+      }
+    } catch (err) {
+      console.error("Exception experienced fetching active order items loop:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveOrders();
+  }, []);
+
+  const handleAction = async (orderId: string, action: string) => {
+    const statusMap: Record<string, string> = {
+      Accept: "accepted",
+      Reject: "cancelled",
+      "Mark Preparing": "preparing",
+      "Mark Packed": "packed",
+      "Mark Ready": "ready_for_pickup",
+    };
+
+    const nextDbStatus = statusMap[action];
+    if (!nextDbStatus) return;
+
+    try {
+      setActionLoading(`${orderId}-${action}`);
+      
+      // Update the backend record field
+      const { error } = await supabase
+        .from("order_items")
+        .update({ fulfillment_status: nextDbStatus })
+        .eq("order_id", orderId);
+
+      if (error) throw error;
+
+      // Sync application memory structures instantly
+      setOrdersList(prevList => 
+        prevList.map(order => 
+          order.id === orderId 
+            ? { ...order, orderStatus: formatStatusString(nextDbStatus) } 
+            : order
+        )
+      );
+
+      // Re-map active side sheet drawers if open
+      if (selectedOrder && selectedOrder.id === orderId) {
+        setSelectedOrder((prev: any | null) => prev ? { ...prev, orderStatus: formatStatusString(nextDbStatus) } : null);
+      }
+
+    } catch (err) {
+      console.error("Failed to commit status pipeline transaction changes:", err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const filtered = ordersList.filter(o => {
+    const matchTab = activeTab === "All" || o.orderStatus === activeTab;
     const matchSearch = o.id.toLowerCase().includes(search.toLowerCase()) ||
       o.customer.toLowerCase().includes(search.toLowerCase());
     return matchTab && matchSearch;
   });
 
-  const handleAction = (orderId: string, action: string) => {
-    const next: Record<string, string> = {
-      Accept: "Accepted",
-      Reject: "Cancelled",
-      "Mark Preparing": "Preparing",
-      "Mark Packed": "Packed",
-      "Mark Ready": "Ready For Pickup",
-    };
-    if (next[action]) {
-      setOrderStatuses(prev => ({ ...prev, [orderId]: next[action] }));
-      if (selectedOrder?.id === orderId) {
-        setSelectedOrder(prev => prev ? { ...prev, orderStatus: next[action] } : null);
-      }
-    }
-  };
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 text-sm text-muted-foreground gap-2">
+        <Loader2 className="w-6 h-6 animate-spin text-[#10B981]" />
+        <span>Syncing incoming order flows...</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-4 lg:p-6">
-      {/* Header actions */}
+    <div className="p-4 lg:p-6 bg-background text-foreground min-h-screen">
+      {/* Header Actions */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -170,7 +224,7 @@ export function Orders() {
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Navigation Filter Tabs */}
       <div className="flex gap-1 overflow-x-auto pb-2 mb-4 scrollbar-hide">
         {tabs.map(tab => (
           <button
@@ -184,14 +238,14 @@ export function Orders() {
           >
             {tab}
             <span className="ml-1.5 opacity-70">
-              {tab === "All" ? orders.length : orders.filter(o => orderStatuses[o.id] === tab).length}
+              {tab === "All" ? ordersList.length : ordersList.filter(o => o.orderStatus === tab).length}
             </span>
           </button>
         ))}
       </div>
 
-      {/* Table */}
-      <div className="bg-card rounded-xl border border-border overflow-hidden">
+      {/* Main Data Table */}
+      <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -207,35 +261,28 @@ export function Orders() {
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map(order => {
-                const status = orderStatuses[order.id];
+                const status = order.orderStatus;
                 const s = statusColors[status] || statusColors.Pending;
                 const actions = actionButtons[status] || [];
                 return (
-                  <tr
-                    key={order.id}
-                    className="hover:bg-muted/30 transition-colors"
-                  >
+                  <tr key={order.id} className="hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3">
                       <button
                         onClick={() => setSelectedOrder(order)}
-                        className="font-mono text-xs text-[#10B981] hover:underline font-medium flex items-center gap-1"
+                        className="font-mono text-xs text-[#10B981] hover:underline font-semibold flex items-center gap-0.5"
                       >
-                        {order.id} <ChevronRight className="w-3 h-3" />
+                        {order.id.slice(0, 8).toUpperCase()} <ChevronRight className="w-3 h-3" />
                       </button>
                     </td>
                     <td className="px-4 py-3">
                       <p className="text-sm font-medium text-foreground">{order.customer}</p>
                       <p className="text-xs text-muted-foreground">{order.phone}</p>
                     </td>
-                    <td className="px-4 py-3 text-sm font-semibold text-foreground">{order.amount}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-foreground">₹{order.totalAmount.toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        order.paymentStatus === "Paid" ? "bg-[#D1FAE5] text-[#065F46]" :
-                        order.paymentStatus === "Pending" ? "bg-[#FEF3C7] text-[#92400E]" :
-                        "bg-[#FEE2E2] text-[#991B1B]"
-                      }`}>
-                        {order.paymentStatus}
-                      </span>
+                        order.paymentStatus === "Paid" ? "bg-[#D1FAE5] text-[#065F46]" : "bg-[#FEF3C7] text-[#92400E]"
+                      }`}>{order.paymentStatus}</span>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium ${s.bg} ${s.text}`}>
@@ -246,15 +293,20 @@ export function Orders() {
                     <td className="px-4 py-3 text-xs text-muted-foreground">{order.date}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-1.5 flex-wrap">
-                        {actions.map(a => (
-                          <button
-                            key={a.label}
-                            onClick={() => handleAction(order.id, a.label)}
-                            className={`text-xs px-2 py-1 rounded-md font-medium transition-colors ${a.color}`}
-                          >
-                            {a.label}
-                          </button>
-                        ))}
+                        {actions.map(a => {
+                          const isBtnLoading = actionLoading === `${order.id}-${a.label}`;
+                          return (
+                            <button
+                              key={a.label}
+                              disabled={actionLoading !== null}
+                              onClick={() => handleAction(order.id, a.label)}
+                              className={`text-xs px-2 py-1 rounded-md font-medium flex items-center gap-1 transition-colors disabled:opacity-40 ${a.color}`}
+                            >
+                              {isBtnLoading && <Loader2 className="w-3 h-3 anonymity-spin animate-spin" />}
+                              {a.label}
+                            </button>
+                          );
+                        })}
                         {actions.length === 0 && (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
@@ -275,26 +327,25 @@ export function Orders() {
         </div>
       </div>
 
-      {/* Order Detail Drawer */}
+      {/* Side Slide Drawer Panel */}
       {selectedOrder && (
         <div className="fixed inset-0 z-50 flex">
-          <div className="flex-1 bg-black/40" onClick={() => setSelectedOrder(null)} />
-          <div className="w-full max-w-md bg-card border-l border-border overflow-y-auto">
-            <div className="sticky top-0 bg-card border-b border-border px-4 py-3 flex items-center justify-between">
+          <div className="flex-1 bg-black/40 backdrop-blur-sm" onClick={() => setSelectedOrder(null)} />
+          <div className="w-full max-w-md bg-card border-l border-border overflow-y-auto shadow-2xl animate-in slide-in-from-right duration-200">
+            <div className="sticky top-0 bg-card border-b border-border px-4 py-3 flex items-center justify-between z-10">
               <div>
-                <p className="font-mono text-xs text-muted-foreground">{selectedOrder.id}</p>
+                <p className="font-mono text-xs text-muted-foreground">{selectedOrder.id.toUpperCase()}</p>
                 <h2 className="font-semibold text-foreground">Order Details</h2>
               </div>
-              <button onClick={() => setSelectedOrder(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted">
+              <button onClick={() => setSelectedOrder(null)} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted border border-transparent hover:border-border transition-all">
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div className="p-4 space-y-4">
-              {/* Status */}
               <div className="flex items-center justify-between">
                 {(() => {
-                  const status = orderStatuses[selectedOrder.id];
+                  const status = selectedOrder.orderStatus;
                   const s = statusColors[status] || statusColors.Pending;
                   return (
                     <span className={`inline-flex items-center gap-1.5 text-sm px-3 py-1 rounded-full font-medium ${s.bg} ${s.text}`}>
@@ -306,31 +357,31 @@ export function Orders() {
                 <span className="text-xs text-muted-foreground">{selectedOrder.date}</span>
               </div>
 
-              {/* Customer */}
-              <div className="bg-muted/40 rounded-xl p-3 space-y-2">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Customer</p>
-                <div className="flex items-center gap-2">
+              {/* Customer Info Box */}
+              <div className="bg-muted/40 border border-border/50 rounded-xl p-3 space-y-2">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Customer Info</p>
+                <div className="flex items-center gap-2 text-sm text-foreground">
                   <User className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">{selectedOrder.customer}</span>
+                  <span className="font-medium">{selectedOrder.customer}</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 text-sm text-foreground">
                   <Phone className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm text-foreground">{selectedOrder.phone}</span>
+                  <span>{selectedOrder.phone}</span>
                 </div>
-                <div className="flex items-start gap-2">
+                <div className="flex items-start gap-2 text-sm text-foreground">
                   <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-                  <span className="text-sm text-foreground">{selectedOrder.address}</span>
+                  <span>{selectedOrder.address}</span>
                 </div>
               </div>
 
-              {/* Items */}
+              {/* Dynamic Summary List */}
               <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
-                  <Package className="w-3.5 h-3.5" /> Ordered Items
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
+                  <Package className="w-3.5 h-3.5 text-[#10B981]" /> Ordered Items
                 </p>
-                <div className="space-y-2">
-                  {selectedOrder.items.map((item, i) => (
-                    <div key={i} className="flex justify-between items-center py-2 border-b border-border last:border-0">
+                <div className="space-y-1 bg-muted/20 border border-border/40 rounded-xl p-3">
+                  {selectedOrder.items.map((item: any, i: number) => (
+                    <div key={i} className="flex justify-between items-center py-2 border-b border-border/40 last:border-0">
                       <div>
                         <p className="text-sm font-medium text-foreground">{item.name}</p>
                         <p className="text-xs text-muted-foreground">Qty: {item.qty}</p>
@@ -338,49 +389,54 @@ export function Orders() {
                       <p className="text-sm font-semibold text-foreground">{item.price}</p>
                     </div>
                   ))}
-                  <div className="flex justify-between items-center pt-1">
-                    <p className="text-sm font-bold text-foreground">Total</p>
-                    <p className="text-sm font-bold text-[#10B981]">{selectedOrder.amount}</p>
+                  <div className="flex justify-between items-center pt-3 border-t border-border mt-2">
+                    <p className="text-sm font-bold text-foreground">Total Payout</p>
+                    <p className="text-base font-black text-[#10B981]">₹{selectedOrder.totalAmount.toLocaleString("en-IN")}</p>
                   </div>
                 </div>
               </div>
 
-              {/* Payment */}
-              <div className="bg-muted/40 rounded-xl p-3 space-y-1.5">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Payment</p>
-                <div className="flex items-center gap-2">
+              {/* Payout Channels */}
+              <div className="bg-muted/40 border border-border/50 rounded-xl p-3 space-y-1.5">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Payment Status</p>
+                <div className="flex items-center gap-2 text-sm text-foreground">
                   <CreditCard className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm text-foreground">{selectedOrder.paymentMethod}</span>
+                  <span>{selectedOrder.paymentMethod}</span>
                   <span className={`ml-auto text-xs px-2 py-0.5 rounded-full font-medium ${
                     selectedOrder.paymentStatus === "Paid" ? "bg-[#D1FAE5] text-[#065F46]" : "bg-[#FEF3C7] text-[#92400E]"
                   }`}>{selectedOrder.paymentStatus}</span>
                 </div>
               </div>
 
-              {/* Rider */}
-              <div className="bg-muted/40 rounded-xl p-3 space-y-1.5">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Assigned Rider</p>
-                <div className="flex items-center gap-2">
+              {/* Fleet Deliveries */}
+              <div className="bg-muted/40 border border-border/50 rounded-xl p-3 space-y-1.5">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide">Assigned Rider</p>
+                <div className="flex items-center gap-2 text-sm text-foreground">
                   <Bike className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm text-foreground">{selectedOrder.rider}</span>
+                  <span>{selectedOrder.rider}</span>
                 </div>
               </div>
 
-              {/* Actions */}
+              {/* Interactive Drawer Action Controls */}
               {(() => {
-                const status = orderStatuses[selectedOrder.id];
+                const status = selectedOrder.orderStatus;
                 const actions = actionButtons[status] || [];
                 return actions.length > 0 ? (
                   <div className="flex gap-2 pt-2">
-                    {actions.map(a => (
-                      <button
-                        key={a.label}
-                        onClick={() => handleAction(selectedOrder.id, a.label)}
-                        className={`flex-1 h-10 rounded-lg text-sm font-medium transition-colors ${a.color}`}
-                      >
-                        {a.label}
-                      </button>
-                    ))}
+                    {actions.map(a => {
+                      const isBtnLoading = actionLoading === `${selectedOrder.id}-${a.label}`;
+                      return (
+                        <button
+                          key={a.label}
+                          disabled={actionLoading !== null}
+                          onClick={() => handleAction(selectedOrder.id, a.label)}
+                          className={`flex-1 h-10 rounded-lg text-sm font-semibold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-40 ${a.color}`}
+                        >
+                          {isBtnLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                          {a.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 ) : null;
               })()}

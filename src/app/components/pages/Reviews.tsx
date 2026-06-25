@@ -1,30 +1,23 @@
-import React, { useState } from "react";
-import { Star, MessageSquare, ThumbsUp, Filter } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Star, MessageSquare, ThumbsUp, Filter, MessageCircleHeart } from "lucide-react";
+import { supabase } from "../../../lib/supabase";
 
-const reviews = [
-  { id: 1, customer: "Priya Sharma", avatar: "PS", rating: 5, review: "Excellent quality products! The delivery was super fast, within 20 minutes. Packaging was neat and everything was fresh. Will definitely order again.", date: "Dec 16, 2024", product: "Amul Milk 1L", helpful: 12 },
-  { id: 2, customer: "Rahul Mehta", avatar: "RM", rating: 5, review: "Amazing service! The store is well-stocked and the app is easy to use. Delivery boy was very polite too.", date: "Dec 15, 2024", product: "Maggi Noodles", helpful: 8 },
-  { id: 3, customer: "Ananya Singh", avatar: "AS", rating: 4, review: "Good experience overall. Products were fresh and delivery was timely. One item was slightly different from the image but still fine.", date: "Dec 14, 2024", product: "Mixed Order", helpful: 5 },
-  { id: 4, customer: "Vikram Nair", avatar: "VN", rating: 4, review: "Very reliable store. Never had any issues with quality. Price is slightly higher than market but the convenience is worth it.", date: "Dec 13, 2024", product: "Grocery Bundle", helpful: 3 },
-  { id: 5, customer: "Deepika Patel", avatar: "DP", rating: 5, review: "Best hyperlocal store in Koramangala! Fast, reliable, and great quality. Highly recommend.", date: "Dec 12, 2024", product: "Dairy Products", helpful: 18 },
-  { id: 6, customer: "Arjun Kumar", avatar: "AK", rating: 3, review: "Decent service but the delivery took longer than expected today. Products were good quality though.", date: "Dec 11, 2024", product: "Bread & Eggs", helpful: 2 },
-  { id: 7, customer: "Sneha Iyer", avatar: "SI", rating: 5, review: "Absolutely love this store! Fresh produce every time. The price is reasonable and delivery is lightning fast.", date: "Dec 10, 2024", product: "Fruits & Veggies", helpful: 14 },
-  { id: 8, customer: "Karthik Raj", avatar: "KR", rating: 2, review: "One item was out of stock but wasn't updated in the app. Had to wait for a refund which took 2 days. Please update stock in real-time.", date: "Dec 9, 2024", product: "Tropicana 1L", helpful: 1 },
-];
-
-const ratingDist = [
-  { stars: 5, count: 642, pct: 65 },
-  { stars: 4, count: 248, pct: 25 },
-  { stars: 3, count: 89, pct: 9 },
-  { stars: 2, count: 15, pct: 1 },
-  { stars: 1, count: 5, pct: 0.5 },
-];
+interface ReviewItem {
+  id: string;
+  customer_name: string;
+  avatar_initials: string;
+  rating: number;
+  review_text: string;
+  created_at: string;
+  ordered_product: string;
+  helpful_count: number;
+}
 
 function StarRow({ rating }: { rating: number }) {
   return (
     <div className="flex gap-0.5">
       {[1, 2, 3, 4, 5].map(s => (
-        <Star key={s} className={`w-3.5 h-3.5 ${s <= rating ? "text-[#F59E0B] fill-[#F59E0B]" : "text-muted"}`} />
+        <Star key={s} className={`w-3.5 h-3.5 ${s <= rating ? "text-[#F59E0B] fill-[#F59E0B]" : "text-muted-foreground/20"}`} />
       ))}
     </div>
   );
@@ -32,40 +25,129 @@ function StarRow({ rating }: { rating: number }) {
 
 export function Reviews() {
   const [filter, setFilter] = useState<number | "all">("all");
-  const [helpfulMap, setHelpfulMap] = useState<Record<number, boolean>>({});
+  const [helpfulMap, setHelpfulMap] = useState<Record<string, boolean>>({});
+  const [loading, setLoading] = useState(true);
+
+  // Live Database Repositories
+  const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [ratingDist, setRatingDist] = useState([
+    { stars: 5, count: 0, pct: 0 },
+    { stars: 4, count: 0, pct: 0 },
+    { stars: 3, count: 0, pct: 0 },
+    { stars: 2, count: 0, pct: 0 },
+    { stars: 1, count: 0, pct: 0 },
+  ]);
+
+  const [metrics, setMetrics] = useState({
+    fiveStarCount: 0,
+    fourStarCount: 0,
+    responseRate: "0%",
+    repeatCustomersPct: "0%"
+  });
+
+  useEffect(() => {
+    const fetchReviewsAndSummary = async () => {
+      try {
+        setLoading(true);
+        const { data: authResult } = await supabase.auth.getUser();
+        if (!authResult?.user) return;
+
+        const vendorId = authResult.user.id;
+
+        // 1. Fire asynchronous parallel requests to grab rows and analytics summaries at once
+        const [reviewsResponse, summaryResponse] = await Promise.all([
+          supabase
+            .from("reviews")
+            .select("*")
+            .eq("vendor_id", vendorId)
+            .order("created_at", { ascending: false }),
+          supabase
+            .rpc("get_vendor_reviews_summary", { target_vendor_id: vendorId })
+        ]);
+
+        if (reviewsResponse.error) throw reviewsResponse.error;
+        if (summaryResponse.error) throw summaryResponse.error;
+
+        // 2. Map data feeds straight into live components
+        if (reviewsResponse.data) {
+          setReviews(reviewsResponse.data);
+        }
+
+        if (summaryResponse.data) {
+          setMetrics(summaryResponse.data.metrics);
+          if (summaryResponse.data.distribution) {
+            setRatingDist(summaryResponse.data.distribution);
+          }
+        }
+
+      } catch (err) {
+        console.error("Failed to compile database feedback records:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchReviewsAndSummary();
+  }, []);
 
   const filtered = filter === "all" ? reviews : reviews.filter(r => r.rating === filter);
-  const avgRating = (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1);
+  
+  const totalReviewsCount = reviews.length;
+  const avgRating = totalReviewsCount > 0 
+    ? (reviews.reduce((s, r) => s + r.rating, 0) / totalReviewsCount).toFixed(1) 
+    : "0.0";
 
-  const markHelpful = (id: number, count: number) => {
+  const markHelpful = async (id: string, currentCount: number) => {
     if (helpfulMap[id]) return;
+    
+    // Optimistic UI change update immediately for smoothness
     setHelpfulMap(prev => ({ ...prev, [id]: true }));
+
+    try {
+      await supabase
+        .from("reviews")
+        .update({ helpful_count: currentCount + 1 })
+        .eq("id", id);
+    } catch (err) {
+      console.error("Could not register helpful increment step:", err);
+    }
   };
+
+  if (loading) {
+    return (
+      <div className="p-6 text-center text-xs font-semibold tracking-widest text-muted-foreground animate-pulse uppercase">
+        Syncing live customer evaluation metrics...
+      </div>
+    );
+  }
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
-      {/* Overview */}
+      
+      {/* Overview Aggregations */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Rating summary */}
+        
+        {/* Cumulative Rating Summary Card */}
         <div className="bg-card rounded-xl border border-border p-6 flex flex-col items-center justify-center">
-          <p className="text-6xl font-bold text-foreground">{avgRating}</p>
+          <p className="text-6xl font-black text-foreground tracking-tight">{avgRating}</p>
           <div className="flex gap-1 mt-2">
             {[1, 2, 3, 4, 5].map(s => (
-              <Star key={s} className={`w-5 h-5 ${s <= Math.round(+avgRating) ? "text-[#F59E0B] fill-[#F59E0B]" : "text-muted"}`} />
+              <Star key={s} className={`w-5 h-5 ${s <= Math.round(parseFloat(avgRating)) ? "text-[#F59E0B] fill-[#F59E0B]" : "text-muted-foreground/20"}`} />
             ))}
           </div>
-          <p className="text-sm text-muted-foreground mt-2">Based on {reviews.length.toLocaleString()} reviews</p>
+          <p className="text-xs text-muted-foreground mt-3">Based on {totalReviewsCount.toLocaleString()} real-time reviews</p>
         </div>
 
-        {/* Rating distribution */}
+        {/* Interactive Rating Distribution Bar Graph */}
         <div className="lg:col-span-2 bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold text-foreground mb-4">Rating Distribution</h3>
+          <h3 className="font-semibold text-foreground mb-4 text-sm">Rating Distribution</h3>
           <div className="space-y-2.5">
             {ratingDist.map(r => (
               <div key={r.stars} className="flex items-center gap-3">
                 <button
+                  type="button"
                   onClick={() => setFilter(filter === r.stars ? "all" : r.stars)}
-                  className={`flex items-center gap-1 text-xs font-medium w-12 shrink-0 transition-colors ${filter === r.stars ? "text-[#10B981]" : "text-muted-foreground hover:text-foreground"}`}
+                  className={`flex items-center gap-1 text-xs font-bold w-12 shrink-0 transition-colors ${filter === r.stars ? "text-[#10B981]" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   <Star className={`w-3 h-3 ${filter === r.stars ? "fill-[#10B981] text-[#10B981]" : "fill-[#F59E0B] text-[#F59E0B]"}`} />
                   {r.stars}
@@ -76,20 +158,20 @@ export function Reviews() {
                     style={{ width: `${r.pct}%` }}
                   />
                 </div>
-                <span className="text-xs text-muted-foreground w-8 text-right">{r.count}</span>
+                <span className="text-xs font-mono text-muted-foreground w-8 text-right">{r.count}</span>
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Stats chips */}
+      {/* Structured Metric Performance Summary Chips */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "5★ Reviews", value: "642", icon: Star, color: "text-[#F59E0B]", bg: "bg-[#FEF3C7]" },
-          { label: "4★ Reviews", value: "248", icon: Star, color: "text-[#10B981]", bg: "bg-[#ECFDF5]" },
-          { label: "Response Rate", value: "94%", icon: MessageSquare, color: "text-[#3B82F6]", bg: "bg-[#EFF6FF]" },
-          { label: "Repeat Customers", value: "68%", icon: ThumbsUp, color: "text-[#8B5CF6]", bg: "bg-[#EDE9FE]" },
+          { label: "5★ Reviews", value: metrics.fiveStarCount.toString(), icon: Star, color: "text-[#F59E0B]", bg: "bg-[#FEF3C7]" },
+          { label: "4★ Reviews", value: metrics.fourStarCount.toString(), icon: Star, color: "text-[#10B981]", bg: "bg-[#ECFDF5]" },
+          { label: "Response Rate", value: metrics.responseRate, icon: MessageCircleHeart, color: "text-[#3B82F6]", bg: "bg-[#EFF6FF]" },
+          { label: "Repeat Customers", value: metrics.repeatCustomersPct, icon: ThumbsUp, color: "text-[#8B5CF6]", bg: "bg-[#EDE9FE]" },
         ].map((s, i) => {
           const Icon = s.icon;
           return (
@@ -98,60 +180,78 @@ export function Reviews() {
                 <Icon className={`w-4 h-4 ${s.color}`} />
               </div>
               <div>
-                <p className="text-lg font-bold text-foreground">{s.value}</p>
-                <p className="text-xs text-muted-foreground">{s.label}</p>
+                <p className="text-base font-bold text-foreground">{s.value}</p>
+                <p className="text-[11px] text-muted-foreground tracking-tight">{s.label}</p>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Reviews list */}
+      {/* Filterable Live Review Feed List Container */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-foreground">
+          <h3 className="font-semibold text-foreground text-sm">
             Customer Reviews {filter !== "all" && <span className="text-[#10B981]">· {filter}★ only</span>}
           </h3>
-          <button onClick={() => setFilter("all")} className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+          <button 
+            type="button"
+            onClick={() => setFilter("all")} 
+            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 bg-card px-2.5 py-1 rounded-lg border border-border transition-colors"
+          >
             <Filter className="w-3.5 h-3.5" />
-            {filter !== "all" ? "Clear filter" : "Filter"}
+            {filter !== "all" ? "Clear Filter" : "Filter Options"}
           </button>
         </div>
+
         <div className="space-y-3">
           {filtered.map(r => (
             <div key={r.id} className="bg-card rounded-xl border border-border p-4">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-full bg-[#10B981] flex items-center justify-center text-white text-xs font-bold shrink-0">
-                  {r.avatar}
+                  {r.avatar_initials || "U"}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <p className="text-sm font-semibold text-foreground">{r.customer}</p>
+                    <p className="text-sm font-semibold text-foreground">{r.customer_name}</p>
                     <StarRow rating={r.rating} />
-                    <span className="text-xs text-muted-foreground ml-auto">{r.date}</span>
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {new Date(r.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                    </span>
                   </div>
-                  <p className="text-xs text-muted-foreground mb-2">Ordered: {r.product}</p>
-                  <p className="text-sm text-foreground leading-relaxed">{r.review}</p>
-                  <div className="flex items-center gap-3 mt-3">
+                  <p className="text-[11px] text-muted-foreground mb-2">Ordered: {r.ordered_product}</p>
+                  <p className="text-sm text-foreground leading-relaxed font-normal">{r.review_text}</p>
+                  
+                  <div className="flex items-center gap-4 mt-3">
                     <button
-                      onClick={() => markHelpful(r.id, r.helpful)}
-                      className={`flex items-center gap-1.5 text-xs transition-colors ${helpfulMap[r.id] ? "text-[#10B981]" : "text-muted-foreground hover:text-foreground"}`}
+                      type="button"
+                      onClick={() => markHelpful(r.id, r.helpful_count)}
+                      className={`flex items-center gap-1 text-xs font-medium transition-colors ${helpfulMap[r.id] ? "text-[#10B981]" : "text-muted-foreground hover:text-foreground"}`}
                     >
                       <ThumbsUp className="w-3.5 h-3.5" />
-                      Helpful ({r.helpful + (helpfulMap[r.id] ? 1 : 0)})
+                      Helpful ({r.helpful_count + (helpfulMap[r.id] ? 1 : 0)})
                     </button>
-                    <button className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-[#10B981] transition-colors">
+                    <button type="button" className="flex items-center gap-1 text-xs text-muted-foreground hover:text-[#10B981] transition-colors font-medium">
                       <MessageSquare className="w-3.5 h-3.5" />
                       Reply
                     </button>
+                    
                     {r.rating <= 2 && (
-                      <span className="ml-auto text-xs bg-[#FEF3C7] text-[#92400E] px-2 py-0.5 rounded-full font-medium">Needs Response</span>
+                      <span className="ml-auto text-[10px] uppercase tracking-wide bg-[#FEF3C7] text-[#92400E] px-2 py-0.5 rounded-md font-bold">
+                        Needs Response
+                      </span>
                     )}
                   </div>
                 </div>
               </div>
             </div>
           ))}
+
+          {filtered.length === 0 && (
+            <div className="bg-card rounded-xl border border-dashed border-border p-12 text-center text-xs text-muted-foreground">
+              No product experience testimonials logged for this rating metric filter.
+            </div>
+          )}
         </div>
       </div>
     </div>

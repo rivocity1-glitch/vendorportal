@@ -1,28 +1,6 @@
-import React, { useState } from "react";
-import { Search, AlertTriangle, Package, XCircle, TrendingDown, Edit2, Check, X, Clock } from "lucide-react";
-
-const initialInventory = [
-  { id: 1, name: "Amul Full Cream Milk 1L", category: "Dairy", stock: 48, threshold: 10, unit: "pcs", lastUpdated: "2 hrs ago" },
-  { id: 2, name: "Britannia Bread 400g", category: "Bakery", stock: 22, threshold: 15, unit: "pcs", lastUpdated: "4 hrs ago" },
-  { id: 3, name: "Lay's Classic Salted 100g", category: "Snacks", stock: 5, threshold: 15, unit: "pcs", lastUpdated: "1 hr ago" },
-  { id: 4, name: "Colgate MaxFresh 150g", category: "Personal Care", stock: 34, threshold: 10, unit: "pcs", lastUpdated: "Yesterday" },
-  { id: 5, name: "Maggi Noodles 12-Pack", category: "Instant Food", stock: 19, threshold: 10, unit: "pcs", lastUpdated: "5 hrs ago" },
-  { id: 6, name: "Fortune Basmati Rice 5kg", category: "Grains", stock: 12, threshold: 8, unit: "bags", lastUpdated: "Yesterday" },
-  { id: 7, name: "Coca-Cola 2L", category: "Beverages", stock: 2, threshold: 12, unit: "bottles", lastUpdated: "30 min ago" },
-  { id: 8, name: "Amul Butter 500g", category: "Dairy", stock: 3, threshold: 10, unit: "packs", lastUpdated: "3 hrs ago" },
-  { id: 9, name: "Parle-G Biscuits 800g", category: "Snacks", stock: 67, threshold: 20, unit: "packs", lastUpdated: "Yesterday" },
-  { id: 10, name: "Dettol Soap 75g", category: "Personal Care", stock: 4, threshold: 10, unit: "bars", lastUpdated: "2 hrs ago" },
-  { id: 11, name: "Tropicana Orange 1L", category: "Beverages", stock: 0, threshold: 8, unit: "cartons", lastUpdated: "Yesterday" },
-  { id: 12, name: "Toor Dal 1kg", category: "Grains", stock: 28, threshold: 10, unit: "bags", lastUpdated: "3 days ago" },
-];
-
-const stockHistory = [
-  { product: "Amul Milk 1L", change: "+50", reason: "Restock", time: "Today 9:00 AM" },
-  { product: "Coca-Cola 2L", change: "-10", reason: "Orders", time: "Today 8:40 AM" },
-  { product: "Lay's 100g", change: "-20", reason: "Orders", time: "Today 7:15 AM" },
-  { product: "Amul Butter 500g", change: "+30", reason: "Restock", time: "Yesterday 5:00 PM" },
-  { product: "Parle-G 800g", change: "-15", reason: "Orders", time: "Yesterday 3:30 PM" },
-];
+import React, { useState, useEffect } from "react";
+import { Search, AlertTriangle, Package, XCircle, Edit2, Check, X, Clock } from "lucide-react";
+import { supabase } from "../../../lib/supabase";
 
 function getStockStatus(stock: number, threshold: number) {
   if (stock === 0) return { label: "Out of Stock", bg: "bg-[#FEE2E2]", text: "text-[#991B1B]", bar: "bg-[#EF4444]", pct: 0 };
@@ -32,17 +10,84 @@ function getStockStatus(stock: number, threshold: number) {
 }
 
 export function Inventory() {
-  const [inventory, setInventory] = useState(initialInventory);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [stockHistory, setStockHistory] = useState<any[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editStock, setEditStock] = useState("");
   const [editThreshold, setEditThreshold] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "low" | "out">("all");
   const [showHistory, setShowHistory] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const fetchInventoryData = async () => {
+    try {
+      setLoading(true);
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData?.user) return;
+
+      const user = authData.user;
+
+      // 1. Fetch real-time products state directly from the database table
+      const { data: productsData, error: prodError } = await supabase
+        .from("products")
+        .select("*")
+        .eq("vendor_id", user.id)
+        .order("name", { ascending: true });
+
+      if (prodError) throw prodError;
+
+      if (productsData) {
+        const mappedInventory = productsData.map((p: any) => ({
+          id: p.id,
+          name: p.name || "Unnamed Product",
+          category: p.category || "General",
+          stock: Number(p.stock ?? 0),
+          threshold: Number(p.threshold ?? 10), // Safeguard default threshold value
+          unit: p.weight || "pcs",
+          lastUpdated: p.updated_at ? new Date(p.updated_at).toLocaleDateString() : "Recently"
+        }));
+        setInventory(mappedInventory);
+      }
+
+      // 2. Fetch history records dynamically from transaction entries (using historical order items as context map logs)
+      const { data: historyData } = await supabase
+        .from("order_items")
+        .select(`
+          id,
+          quantity,
+          created_at,
+          products (
+            name
+          )
+        `)
+        .eq("vendor_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(10);
+
+      if (historyData) {
+        const mappedHistory = historyData.map((item: any) => ({
+          product: item.products?.name || "Product Item",
+          change: `-${item.quantity || 1}`,
+          reason: "Order Sale",
+          time: item.created_at ? new Date(item.created_at).toLocaleString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "Today"
+        }));
+        setStockHistory(mappedHistory);
+      }
+
+    } catch (err) {
+      console.error("Failed to compile active warehouse inventory tracking metrics:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchInventoryData();
+  }, []);
 
   const filtered = inventory.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
-    const status = getStockStatus(p.stock, p.threshold);
     const matchFilter =
       filter === "all" ? true :
       filter === "low" ? (p.stock > 0 && p.stock <= p.threshold) :
@@ -50,23 +95,38 @@ export function Inventory() {
     return matchSearch && matchFilter;
   });
 
-  const startEdit = (item: typeof inventory[0]) => {
+  const startEdit = (item: any) => {
     setEditingId(item.id);
     setEditStock(String(item.stock));
     setEditThreshold(String(item.threshold));
   };
 
-  const saveEdit = (id: number) => {
-    setInventory(prev => prev.map(p => p.id === id
-      ? { ...p, stock: Number(editStock), threshold: Number(editThreshold), lastUpdated: "Just now" }
-      : p
-    ));
-    setEditingId(null);
+  const saveEdit = async (id: number) => {
+    try {
+      const { error } = await supabase
+        .from("products")
+        .update({
+          stock: Number(editStock),
+          threshold: Number(editThreshold)
+        })
+        .eq("id", id);
+
+      if (error) throw error;
+
+      setEditingId(null);
+      await fetchInventoryData();
+    } catch (err) {
+      console.error("Failed to commit inventory modifications back to Supabase payload logs:", err);
+    }
   };
 
   const total = inventory.length;
   const lowStock = inventory.filter(p => p.stock > 0 && p.stock <= p.threshold).length;
   const outOfStock = inventory.filter(p => p.stock === 0).length;
+
+  if (loading) {
+    return <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">Syncing live item stock counters...</div>;
+  }
 
   return (
     <div className="p-4 lg:p-6">
@@ -209,19 +269,23 @@ export function Inventory() {
               <Clock className="w-4 h-4 text-muted-foreground" /> Stock History
             </h3>
             <div className="space-y-3">
-              {stockHistory.map((h, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${h.change.startsWith("+") ? "bg-[#D1FAE5] text-[#065F46]" : "bg-[#FEE2E2] text-[#991B1B]"}`}>
-                    {h.change.startsWith("+") ? "▲" : "▼"}
+              {stockHistory.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-6">No historical inventory alerts captured yet.</p>
+              ) : (
+                stockHistory.map((h, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${h.change.startsWith("+") ? "bg-[#D1FAE5] text-[#065F46]" : "bg-[#FEE2E2] text-[#991B1B]"}`}>
+                      {h.change.startsWith("+") ? "▲" : "▼"}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">{h.product}</p>
+                      <p className="text-xs text-muted-foreground">{h.reason}</p>
+                      <p className="text-[10px] text-muted-foreground">{h.time}</p>
+                    </div>
+                    <span className={`text-xs font-bold shrink-0 ${h.change.startsWith("+") ? "text-[#10B981]" : "text-[#EF4444]"}`}>{h.change}</span>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground truncate">{h.product}</p>
-                    <p className="text-xs text-muted-foreground">{h.reason}</p>
-                    <p className="text-[10px] text-muted-foreground">{h.time}</p>
-                  </div>
-                  <span className={`text-xs font-bold shrink-0 ${h.change.startsWith("+") ? "text-[#10B981]" : "text-[#EF4444]"}`}>{h.change}</span>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         )}
