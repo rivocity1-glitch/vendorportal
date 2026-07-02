@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Store, User, FileText, MapPin, Building, Check, Camera, ShieldAlert, RefreshCw, Loader2 } from "lucide-react";
+import { Store, User, FileText, MapPin, Building, Check, Camera, ShieldAlert, RefreshCw, Loader2, Save, LifeBuoy, Mail, Phone, Send, Image } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
 interface ProfileState {
@@ -28,11 +28,8 @@ interface ProfileState {
   account_number: string;
   ifsc_code: string;
   upi_id: string;
-  auth_user_id: string;
-  is_account_verified: boolean;
-  is_pan_verified: boolean;
-  is_gst_verified: boolean;
-  is_bank_verified: boolean;
+  vendor_id: string;
+  status: string; 
 }
 
 interface StoreCategory {
@@ -40,9 +37,6 @@ interface StoreCategory {
   name: string;
 }
 
-// =========================================================================
-// 🌐 LOCAL TRANSLATION DICTIONARY (मराठी आणि इंग्रजी भाषांतर पर्याय)
-// =========================================================================
 const translations = {
   en: {
     store_details: "Store Details",
@@ -74,16 +68,9 @@ const translations = {
     acc_num: "Account Number",
     ifsc: "IFSC Code",
     upi: "UPI ID Vector (Alternative Payout Target Endpoint)",
-    bank_verified: "Settlement metrics validated. Automatic transaction cycles clear accounts on weekly intervals.",
-    bank_missing: "Bank verification status currently missing. Click check down below to run verification.",
-    btn_verify: "Verify via Penny Drop",
-    btn_verified: "Verified ✓",
-    btn_run_verify: "Run Verification",
     discard: "Discard Changes",
     save: "Save Profile",
     saving: "Saving Changes...",
-    account_verified: "Account Verified",
-    btn_verify_acc: "Verify Account",
     placeholder_store_title: "Store trade title",
     placeholder_banner: "Brief marketplace banner statement"
   },
@@ -117,19 +104,19 @@ const translations = {
     acc_num: "खाते क्रमांक",
     ifsc: "आयएफएससी कोड (IFSC)",
     upi: "युपीआय आयडी (UPI ID)",
-    bank_verified: "बँक खाते सत्यापित केले गेले आहे. साप्ताहिक सेटलमेंट केली जाईल.",
-    bank_missing: "बँक खाते पडताळणी प्रलंबित आहे. खालील बटणावर क्लिक करून पडताळणी करा.",
-    btn_verify: "पेनी ड्रॉपद्वारे तपासा",
-    btn_verified: "सत्यापित ✓",
-    btn_run_verify: "पडताळणी करा",
     discard: "बदल रद्द करा",
     save: "प्रोफाइल जतन करा",
     saving: "जतन होत आहे...",
-    account_verified: "खाते सत्यापित आहे",
-    btn_verify_acc: "खाते सत्यापित करा",
     placeholder_store_title: "तुमच्या दुकानाचे व्यावसायिक नाव",
     placeholder_banner: "दुकानाचा संक्षिप्त संदेश किंवा माहिती"
   }
+};
+
+const approvalBadgeConfig: Record<string, { bg: string; label: string }> = {
+  approved: { bg: "bg-white text-[#065F46]", label: "Account Verified" },
+  pending: { bg: "bg-[#FEF3C7] text-[#92400E]", label: "Pending Approval" },
+  suspended: { bg: "bg-[#FEE2E2] text-[#991B1B]", label: "Rejected" },
+  rejected: { bg: "bg-[#FEE2E2] text-[#991B1B]", label: "Rejected" }
 };
 
 const Section = ({ title, icon: Icon, children }: { title: string; icon: React.ElementType; children: React.ReactNode }) => (
@@ -147,7 +134,7 @@ const Field = ({ label, value, onChange, placeholder, type = "text", disabled = 
     <label className="block text-xs font-bold text-muted-foreground">{label}</label>
     <input
       type={type}
-      value={value}
+      value={value || ""}
       disabled={disabled}
       onChange={e => onChange(e.target.value)}
       placeholder={placeholder}
@@ -157,13 +144,11 @@ const Field = ({ label, value, onChange, placeholder, type = "text", disabled = 
 );
 
 export function Profile() {
-  // 🌐 Language State
   const [lang, setLang] = useState<"en" | "mr">("en");
   const t = (key: keyof typeof translations["en"]) => translations[lang][key] || translations["en"][key];
 
   const [profile, setProfile] = useState<ProfileState | null>(null);
   const [dbBackup, setDbBackup] = useState<ProfileState | null>(null); 
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -171,7 +156,19 @@ export function Profile() {
   const [validationError, setValidationError] = useState("");
   const [availableCategories, setAvailableCategories] = useState<StoreCategory[]>([]);
   
+  // Support & Help Ticket Form Local States
+  const [showTicketForm, setShowTicketForm] = useState(false);
+  const [ticketType, setTicketType] = useState("Technical Issue");
+  const [ticketTitle, setTicketTitle] = useState("");
+  const [ticketDesc, setTicketDesc] = useState("");
+  const [ticketPriority, setTicketPriority] = useState("medium");
+  const [ticketFile, setTicketFile] = useState<File | null>(null);
+  const [submittingTicket, setSubmittingTicket] = useState(false);
+  const [ticketSuccessMsg, setTicketSuccessMsg] = useState("");
+  const [ticketErrorMsg, setTicketErrorMsg] = useState("");
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
 
   const fetchProfileData = async () => {
     try {
@@ -183,44 +180,54 @@ export function Profile() {
         return;
       }
 
-      setCurrentUserId(auth.user.id);
-
       const { data: categories } = await supabase
-        .from("store_categories")
-        .select("*")
-        .eq("is_active", true);
+        .from("product_categories")
+        .select("id, name");
       setAvailableCategories(categories || []);
 
-      const { data: vendorCore } = await supabase
+      const { data: vendorCore, error: coreErr } = await supabase
         .from("vendors")
         .select("*")
         .eq("auth_user_id", auth.user.id)
         .maybeSingle();
 
-      const { data: profileExtended } = await supabase
+      console.log("Loaded raw vendor data payload from source:", vendorCore, coreErr);
+
+      if (!vendorCore) {
+        setLoading(false);
+        return;
+      }
+
+      const { data: profileExtended, error: profileErr } = await supabase
         .from("vendor_profiles")
         .select("*")
-        .eq("auth_user_id", auth.user.id)
+        .eq("vendor_id", vendorCore.id)
         .maybeSingle();
 
+      console.log("Loaded raw profile data details from source:", profileExtended, profileErr);
+
+      const parsedCategories = profileExtended?.categories 
+        ? (Array.isArray(profileExtended.categories) ? profileExtended.categories : [profileExtended.categories])
+        : (vendorCore.categories ? (Array.isArray(vendorCore.categories) ? vendorCore.categories : [vendorCore.categories]) : ["Grocery"]);
+
       const validatedState: ProfileState = {
-        store_name: profileExtended?.store_name || vendorCore?.name || "",
-        owner_name: profileExtended?.owner_name || vendorCore?.owner_name || "",
-        email_address: profileExtended?.email_address || vendorCore?.email || auth.user.email || "", 
-        primary_phone: profileExtended?.primary_phone || vendorCore?.phone || "", 
+        store_name: vendorCore.shop_name || "",
+        owner_name: vendorCore.owner_name || "",
+        email_address: vendorCore.email || auth.user.email || "", 
+        primary_phone: vendorCore.phone || "", 
         tagline: profileExtended?.tagline || "",
-        store_categories: Array.isArray(profileExtended?.store_categories) ? profileExtended.store_categories : ["Grocery"],
-        store_code: profileExtended?.store_code || "NEW-SHOP",
+        store_categories: parsedCategories,
+        store_code: vendorCore.shop_code || "NEW-SHOP",
         avatar_url: profileExtended?.avatar_url || "",
-        alternate_phone: profileExtended?.alternate_phone || "",
+        alternate_phone: "", 
         pan_number: profileExtended?.pan_number || "",
         gst_number: profileExtended?.gst_number || "",
         fssai_license: profileExtended?.fssai_license || "",
         drug_license: profileExtended?.drug_license || "",
         drug_license_expiry: profileExtended?.drug_license_expiry || "",
-        address_line1: profileExtended?.address_line1 || vendorCore?.address || "",
+        address_line1: profileExtended?.address_line1 || "",
         address_line2: profileExtended?.address_line2 || "",
-        landmark: profileExtended?.landmark || "",
+        landmark: "", 
         city: profileExtended?.city || "",
         state: profileExtended?.state || "",
         pin_code: profileExtended?.pin_code || "",
@@ -229,11 +236,8 @@ export function Profile() {
         account_number: profileExtended?.account_number || "",
         ifsc_code: profileExtended?.ifsc_code || "",
         upi_id: profileExtended?.upi_id || "",
-        auth_user_id: profileExtended?.auth_user_id || auth.user.id,
-        is_account_verified: profileExtended?.is_account_verified || false,
-        is_pan_verified: profileExtended?.is_pan_verified || false,
-        is_gst_verified: profileExtended?.is_gst_verified || false,
-        is_bank_verified: profileExtended?.is_bank_verified || false,
+        vendor_id: vendorCore.id,
+        status: vendorCore.status?.toLowerCase() || "pending"
       };
       
       setProfile(validatedState);
@@ -247,20 +251,6 @@ export function Profile() {
 
   useEffect(() => {
     fetchProfileData();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-        fetchProfileData();
-      } else if (event === "SIGNED_OUT") {
-        setProfile(null);
-        setDbBackup(null);
-        setCurrentUserId(null);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, []);
 
   if (loading) {
@@ -273,7 +263,6 @@ export function Profile() {
 
   if (!profile) return null;
 
-  // 📸 Image Upload handler Engine
   const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
       setValidationError("");
@@ -286,20 +275,17 @@ export function Profile() {
       }
 
       setUploadingImage(true);
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth?.user) return;
-
       const fileExt = file.name.split('.').pop();
-      const filePath = `${auth.user.id}/avatar-${Date.now()}.${fileExt}`;
+      const filePath = `${profile.vendor_id}/avatar-${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
-        .from("avatars")
+        .from("vendor-avatars")
         .upload(filePath, file, { upsert: true });
 
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage
-        .from("avatars")
+        .from("vendor-avatars")
         .getPublicUrl(filePath);
 
       setProfile(prev => prev ? { ...prev, avatar_url: publicUrl } : null);
@@ -335,27 +321,37 @@ export function Profile() {
     setValidationError("");
     setSavedMessage("");
 
-    if (!profile.pan_number.trim()) {
-      setValidationError("PAN Number is a universally mandatory requirement for all platform merchants.");
+    if (!profile.store_name.trim() || !profile.owner_name.trim() || !profile.primary_phone.trim()) {
+      setValidationError("Store Name, Owner Name, and Primary Phone are strict requirements.");
       return;
     }
 
     try {
       setSaving(true);
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth?.user) return;
+
+      let primaryCategoryId: string | null = null;
+      const primaryCategoryName = profile.store_categories[0];
+
+      if (primaryCategoryName) {
+        const { data: matchedCategory, error: catFetchError } = await supabase
+          .from("product_categories")
+          .select("id")
+          .eq("name", primaryCategoryName)
+          .maybeSingle();
+
+        if (catFetchError) {
+          console.error("Warning: Exception encountered resolving product mapping reference:", catFetchError);
+        }
+        if (matchedCategory) {
+          primaryCategoryId = matchedCategory.id;
+        }
+      }
 
       const profilePayload = {
-        auth_user_id: auth.user.id,
-        store_name: profile.store_name.trim() || "My Storefront", 
-        owner_name: profile.owner_name.trim() || "Merchant Owner",
-        email_address: profile.email_address.trim() || auth.user.email,
-        primary_phone: profile.primary_phone.trim() || "0000000000",
+        vendor_id: profile.vendor_id,
         tagline: profile.tagline,
-        store_categories: profile.store_categories,
-        store_code: profile.store_code,
+        categories: profile.store_categories,
         avatar_url: profile.avatar_url,
-        alternate_phone: profile.alternate_phone,
         pan_number: profile.pan_number,
         gst_number: profile.gst_number,
         fssai_license: profile.fssai_license,
@@ -363,7 +359,6 @@ export function Profile() {
         drug_license_expiry: !profile.drug_license_expiry || profile.drug_license_expiry.trim() === "" ? null : profile.drug_license_expiry,
         address_line1: profile.address_line1,
         address_line2: profile.address_line2,
-        landmark: profile.landmark,
         city: profile.city,
         state: profile.state,
         pin_code: profile.pin_code,
@@ -372,68 +367,113 @@ export function Profile() {
         account_number: profile.account_number,
         ifsc_code: profile.ifsc_code,
         upi_id: profile.upi_id,
-        is_account_verified: profile.is_account_verified,
-        is_pan_verified: profile.is_pan_verified,
-        is_gst_verified: profile.is_gst_verified,
-        is_bank_verified: profile.is_bank_verified,
         updated_at: new Date().toISOString()
       };
 
       const { error: profileError } = await supabase
         .from("vendor_profiles")
-        .upsert(profilePayload, { onConflict: "auth_user_id" });
+        .upsert(profilePayload, { onConflict: "vendor_id" });
 
       if (profileError) throw profileError;
 
       const { error: coreError } = await supabase
         .from("vendors")
         .update({
-          name: profile.store_name,
+          shop_name: profile.store_name,
           owner_name: profile.owner_name,
           email: profile.email_address,
           phone: profile.primary_phone,
-          address: profile.address_line1,
-          category: profile.store_categories[0] || null,
-          categories: profile.store_categories,
+          category_id: primaryCategoryId, 
           updated_at: new Date().toISOString()
         })
-        .eq("auth_user_id", auth.user.id);
+        .eq("id", profile.vendor_id);
 
       if (coreError) throw coreError;
 
+      setSavedMessage("Store operational updates saved successfully!");
       setDbBackup(JSON.parse(JSON.stringify(profile)));
-      setSavedMessage("Profile metrics committed successfully!");
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
-      setValidationError(err.message || "Failed to commit parameters to database schema.");
+      console.error("Database update failure:", err);
+      setValidationError(err.message || "Failed to apply profile parameter changes.");
     } finally {
       setSaving(false);
     }
   };
 
-  const requestVerification = async (field: "is_account_verified" | "is_pan_verified" | "is_gst_verified" | "is_bank_verified") => {
+  const contactAdminWhatsApp = () => {
+    const mobileNo = "919021404487";
+    const textContent = encodeURIComponent(`Hello Admin, I need help with my store.\n\nStore Name: ${profile.store_name}\nVendor ID: ${profile.vendor_id}`);
+    window.open(`https://wa.me/${mobileNo}?text=${textContent}`, "_blank");
+  };
+
+  const handleSupportTicketSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTicketErrorMsg("");
+    setTicketSuccessMsg("");
+
+    if (!ticketTitle.trim() || !ticketDesc.trim()) {
+      setTicketErrorMsg("Please configure a Ticket Title and Description text string.");
+      return;
+    }
+
     try {
-      setSavedMessage(`Processing serverless verification routing...`);
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth?.user) return;
+      setSubmittingTicket(true);
+      let screenshotUrl = "";
 
-      setProfile(prev => prev ? { ...prev, [field]: true } : null);
-      
-      await supabase
-        .from("vendor_profiles")
-        .upsert({ auth_user_id: auth.user.id, [field]: true }, { onConflict: "auth_user_id" });
+      if (ticketFile) {
+        const fileExt = ticketFile.name.split('.').pop();
+        const filePath = `${profile.vendor_id}/ticket-${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from("ticket-attachments")
+          .upload(filePath, ticketFile, { upsert: true });
 
-      setSavedMessage(`Verification verification flag active.`);
-      setTimeout(() => setSavedMessage(""), 2500);
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from("ticket-attachments")
+          .getPublicUrl(filePath);
+
+        screenshotUrl = publicUrl;
+      }
+
+      const ticketPayload = {
+        vendor_id: profile.vendor_id,
+        issue_type: ticketType,
+        title: ticketTitle,
+        description: ticketDesc,
+        priority: ticketPriority,
+        screenshot_url: screenshotUrl,
+        status: "open",
+        created_at: new Date().toISOString()
+      };
+
+      const { error: ticketError } = await supabase
+        .from("vendor_support_tickets")
+        .insert(ticketPayload);
+
+      if (ticketError) throw ticketError;
+
+      setTicketSuccessMsg("Your support request ticket has been saved successfully!");
+      setTicketTitle("");
+      setTicketDesc("");
+      setTicketFile(null);
+      if (screenshotInputRef.current) screenshotInputRef.current.value = "";
+      setTimeout(() => setShowTicketForm(false), 2500);
     } catch (err: any) {
-      setValidationError(err.message || "Identity transaction route aborted.");
+      console.error("Support ticket save exception error:", err);
+      setTicketErrorMsg(err.message || "Failed to finalize ticket request log entry.");
+    } finally {
+      setSubmittingTicket(false);
     }
   };
+
+  const currentBadge = approvalBadgeConfig[profile.status] || approvalBadgeConfig.pending;
 
   return (
     <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-5">
       
-      {/* Hidden File Input UI Trigger */}
       <input 
         type="file"
         ref={fileInputRef}
@@ -442,7 +482,6 @@ export function Profile() {
         className="hidden"
       />
 
-      {/* 🌐 Language Selection Switcher Navbar Row */}
       <div className="flex justify-end gap-2 mb-2">
         <button 
           onClick={() => setLang("en")} 
@@ -458,12 +497,10 @@ export function Profile() {
         </button>
       </div>
 
-      {/* Dynamic Store Header */}
       <div className="bg-gradient-to-r from-[#10B981] to-[#059669] rounded-2xl p-6 text-white shadow-md relative overflow-hidden">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10">
           <div className="flex items-start gap-4">
             <div className="relative">
-              {/* Profile Avatar Frame block */}
               <div className="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-xl font-black text-white uppercase border border-white/10 overflow-hidden shadow-inner">
                 {uploadingImage ? (
                   <Loader2 className="w-6 h-6 animate-spin text-white" />
@@ -488,7 +525,6 @@ export function Profile() {
               <h2 className="text-xl font-black tracking-tight">{profile.store_name || "New Storefront"}</h2>
               <p className="text-white/80 text-xs mt-0.5 font-medium italic">{profile.tagline || "No description set yet"}</p>
               <div className="flex flex-wrap gap-1.5 mt-2.5">
-                {/* Fixed Shop Code fetched dynamically */}
                 <span className="bg-white/20 text-white text-[10px] font-bold px-2 py-0.5 rounded-md border border-white/5 uppercase tracking-wide">
                   {profile.store_code}
                 </span>
@@ -502,19 +538,12 @@ export function Profile() {
           </div>
 
           <div className="shrink-0">
-            {profile.is_account_verified ? (
-              <div className="bg-white text-[#065F46] font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm">
-                <Check className="w-3.5 h-3.5 stroke-[3]" /> {t("account_verified")}
-              </div>
-            ) : (
-              <button 
-                type="button"
-                onClick={() => requestVerification("is_account_verified")}
-                className="bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs px-3 py-1.5 rounded-xl shadow-sm flex items-center gap-1.5 transition-colors"
-              >
-                <RefreshCw className="w-3 h-3" /> {t("btn_verify_acc")}
-              </button>
-            )}
+            <div className={`font-bold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm ${currentBadge.bg}`}>
+              {profile.status === "approved" && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+              {profile.status === "pending" && <RefreshCw className="w-3 h-3 animate-spin" />}
+              {(profile.status === "suspended" || profile.status === "rejected") && <ShieldAlert className="w-3.5 h-3.5" />}
+              {currentBadge.label}
+            </div>
           </div>
         </div>
       </div>
@@ -526,7 +555,13 @@ export function Profile() {
         </div>
       )}
 
-      {/* Section 1: Store Details */}
+      {savedMessage && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 flex items-start gap-2 text-xs font-semibold shadow-sm">
+          <Check className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
+          <p>{savedMessage}</p>
+        </div>
+      )}
+
       <Section title={t("store_details")} icon={Store}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label={t("store_name")} value={profile.store_name} onChange={v => setProfile(s => s ? ({ ...s, store_name: v }) : null)} placeholder={t("placeholder_store_title")} />
@@ -544,12 +579,11 @@ export function Profile() {
                     onClick={() => handleCategoryToggle(cat.name)}
                     className={`h-9 px-3 rounded-lg border text-xs font-bold transition-all text-left flex items-center justify-between ${
                       isChecked 
-                        ? "bg-[#ECFDF5] border-[#10B981] text-[#065F46]" 
+                        ? "bg-[#ECFDF5] border-[#10B981] text-[#065F46] ring-2 ring-[#10B981]/10 dark:bg-[#10B981]/10"
                         : "bg-background border-border text-muted-foreground hover:text-foreground"
                     }`}
                   >
                     <span>{cat.name}</span>
-                    {isChecked && <Check className="w-3.5 h-3.5 stroke-[3] text-[#10B981]" />}
                   </button>
                 );
               })}
@@ -558,156 +592,232 @@ export function Profile() {
         </div>
       </Section>
 
-      {/* Section 2: Owner Details */}
       <Section title={t("owner_details")} icon={User}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label={t("owner_name")} value={profile.owner_name} onChange={v => setProfile(o => o ? ({ ...o, owner_name: v }) : null)} placeholder="Legal registration name" />
-          <Field label={t("email")} value={profile.email_address} onChange={v => setProfile(o => o ? ({ ...o, email_address: v }) : null)} type="email" placeholder="owner@store.com" />
-          <Field label={t("primary_phone")} value={profile.primary_phone} onChange={v => setProfile(o => o ? ({ ...o, primary_phone: v }) : null)} placeholder="+91 XXXXX XXXXX" />
-          <Field label={t("alt_phone")} value={profile.alternate_phone} onChange={v => setProfile(o => o ? ({ ...o, alternate_phone: v }) : null)} placeholder="Fallback mobile string" />
+          <Field label={t("owner_name")} value={profile.owner_name} onChange={v => setProfile(s => s ? ({ ...s, owner_name: v }) : null)} />
+          <Field label={t("email")} value={profile.email_address} onChange={v => setProfile(s => s ? ({ ...s, email_address: v }) : null)} disabled />
+          <Field label={t("primary_phone")} value={profile.primary_phone} onChange={v => setProfile(s => s ? ({ ...s, primary_phone: v }) : null)} />
+          <Field label={t("alt_phone")} value={profile.alternate_phone} onChange={v => setProfile(s => s ? ({ ...s, alternate_phone: v }) : null)} />
         </div>
       </Section>
 
-      {/* Section 3: GST & Compliance */}
       <Section title={t("gst_compliance")} icon={FileText}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-muted-foreground">{t("pan_card")}</label>
-              <button 
-                type="button"
-                onClick={() => requestVerification("is_pan_verified")}
-                className={`text-[10px] font-black uppercase tracking-wider hover:underline ${profile.is_pan_verified ? "text-[#10B981]" : "text-blue-500"}`}
-              >
-                {profile.is_pan_verified ? t("btn_verified") : t("btn_run_verify")}
-              </button>
-            </div>
-            <input
-              type="text"
-              maxLength={10}
-              value={profile.pan_number}
-              onChange={e => setProfile(p => p ? ({ ...p, pan_number: e.target.value.toUpperCase() }) : null)}
-              placeholder="10-Digit Alphanumeric Code"
-              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground uppercase tracking-widest focus:outline-none focus:border-[#10B981]"
-            />
+          <Field label={t("pan_card")} value={profile.pan_number} onChange={v => setProfile(s => s ? ({ ...s, pan_number: v }) : null)} />
+          <Field label={t("gstin")} value={profile.gst_number} onChange={v => setProfile(s => s ? ({ ...s, gst_number: v }) : null)} />
+          <Field label={t("fssai")} value={profile.fssai_license} onChange={v => setProfile(s => s ? ({ ...s, fssai_license: v }) : null)} />
+          <div className="grid grid-cols-2 gap-2">
+            <Field label={t("drug_license")} value={profile.drug_license} onChange={v => setProfile(s => s ? ({ ...s, drug_license: v }) : null)} />
+            <Field label={t("drug_expiry")} value={profile.drug_license_expiry} onChange={v => setProfile(s => s ? ({ ...s, drug_license_expiry: v }) : null)} type="date" />
           </div>
+        </div>
+      </Section>
 
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-muted-foreground">{t("gstin")}</label>
-              <button 
-                type="button"
-                onClick={() => requestVerification("is_gst_verified")}
-                className={`text-[10px] font-black uppercase tracking-wider hover:underline ${profile.is_gst_verified ? "text-[#10B981]" : "text-blue-500"}`}
-              >
-                {profile.is_gst_verified ? t("btn_verified") : t("btn_run_verify")}
-              </button>
-            </div>
-            <input
-              type="text"
-              maxLength={15}
-              value={profile.gst_number}
-              onChange={e => setProfile(p => p ? ({ ...p, gst_number: e.target.value.toUpperCase() }) : null)}
-              placeholder="15-Digit Identity Node"
-              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm font-mono text-foreground uppercase tracking-wider focus:outline-none focus:border-[#10B981]"
-            />
+      <Section title={t("address_title")} icon={MapPin}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label={t("address1")} value={profile.address_line1} onChange={v => setProfile(s => s ? ({ ...s, address_line1: v }) : null)} />
+          <Field label={t("address2")} value={profile.address_line2} onChange={v => setProfile(s => s ? ({ ...s, address_line2: v }) : null)} />
+          <Field label={t("landmark")} value={profile.landmark} onChange={v => setProfile(s => s ? ({ ...s, landmark: v }) : null)} />
+          <Field label={t("city")} value={profile.city} onChange={v => setProfile(s => s ? ({ ...s, city: v }) : null)} />
+          <Field label={t("state")} value={profile.state} onChange={v => setProfile(s => s ? ({ ...s, state: v }) : null)} />
+          <Field label={t("pincode")} value={profile.pin_code} onChange={v => setProfile(s => s ? ({ ...s, pin_code: v }) : null)} />
+        </div>
+      </Section>
+
+      <Section title={t("bank_title")} icon={Building}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label={t("acc_holder")} value={profile.account_holder_name} onChange={v => setProfile(s => s ? ({ ...s, account_holder_name: v }) : null)} placeholder="Legal trade registration passbook matching name" />
+          <Field label={t("bank_name")} value={profile.bank_name} onChange={v => setProfile(s => s ? ({ ...s, bank_name: v }) : null)} placeholder="Financial house label" />
+          <Field label={t("acc_num")} value={profile.account_number} onChange={v => setProfile(s => s ? ({ ...s, account_number: v }) : null)} placeholder="Clearing destination core string" />
+          <Field label={t("ifsc")} value={profile.ifsc_code} onChange={v => setProfile(s => s ? ({ ...s, ifsc_code: v }) : null)} placeholder="11-Digit Alpha-Numeric Branch Sequence" />
+          <div className="sm:col-span-2">
+            <Field label={t("upi")} value={profile.upi_id} onChange={v => setProfile(s => s ? ({ ...s, upi_id: v }) : null)} placeholder="handle@bankname" />
           </div>
+        </div>
+      </Section>
 
-          <Field label={t("fssai")} value={profile.fssai_license} onChange={v => setProfile(s => s ? ({ ...s, fssai_license: v }) : null)} placeholder="14-Digit Safety Operations Sequence" />
-
-          {profile.store_categories.includes("Pharmacy") ? (
-            <>
-              <Field label={t("drug_license")} value={profile.drug_license} onChange={v => setProfile(s => s ? ({ ...s, drug_license: v }) : null)} placeholder="Form 20/21 Mandatory Licensing Number" />
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-red-500">{t("drug_expiry")}</label>
-                <input 
-                  type="date"
-                  value={profile.drug_license_expiry}
-                  onChange={e => setProfile(s => s ? ({ ...s, drug_license_expiry: e.target.value }) : null)}
-                  className="w-full h-9 px-3 rounded-lg border border-red-300 dark:border-red-950/40 bg-background text-sm text-foreground focus:outline-none"
-                />
+      {/* Replaced Support & Help Section */}
+      <Section title="Support & Help" icon={LifeBuoy}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1">
+          <div className="space-y-4">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Have questions or encountered an operational bottleneck? Reach out to our direct escalation nodes for support.
+            </p>
+            <div className="space-y-2.5">
+              <div className="flex items-center gap-3 text-sm text-foreground">
+                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center border border-border">
+                  <Mail className="w-4 h-4 text-[#10B981]" />
+                </div>
+                <div>
+                  <span className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Support Email</span>
+                  <a href="mailto:rivo.cityhelp1@gmail.com" className="font-semibold text-xs hover:underline text-foreground">rivo.cityhelp1@gmail.com</a>
+                </div>
               </div>
-            </>
-          ) : (
-            <div className="sm:col-span-2 p-3 bg-muted/40 rounded-lg text-[11px] text-muted-foreground font-medium">
-              ℹ️ {t("pharmacy_info")}
+              <div className="flex items-center gap-3 text-sm text-foreground">
+                <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center border border-border">
+                  <Phone className="w-4 h-4 text-[#10B981]" />
+                </div>
+                <div>
+                  <span className="block text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Vendor Helpline</span>
+                  <a href="tel:+919021404487" className="font-semibold text-xs hover:underline text-foreground">+91 90214 04487</a>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={contactAdminWhatsApp}
+                className="h-9 px-4 rounded-lg border border-border bg-background text-xs font-bold text-foreground hover:bg-muted transition-colors flex items-center gap-2 shadow-sm"
+              >
+                <span>Contact Admin</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTicketForm(!showTicketForm);
+                  setTicketSuccessMsg("");
+                  setTicketErrorMsg("");
+                }}
+                className={`h-9 px-4 rounded-lg text-xs font-bold transition-colors flex items-center gap-2 shadow-sm border ${
+                  showTicketForm 
+                    ? "bg-muted border-border text-foreground" 
+                    : "bg-[#10B981]/10 border-[#10B981]/20 text-[#065F46] hover:bg-[#10B981]/20"
+                }`}
+              >
+                <span>Report Issue</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Inline Integrated Support Ticket Creation Panel */}
+          {showTicketForm && (
+            <div className="bg-muted/40 border border-border/60 rounded-xl p-4 space-y-3 shadow-inner">
+              <h4 className="text-xs font-bold text-foreground uppercase tracking-wider border-b border-border/40 pb-1.5">
+                Submit Support Ticket
+              </h4>
+              
+              <form onSubmit={handleSupportTicketSubmit} className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-muted-foreground uppercase">Issue Type</label>
+                    <select
+                      value={ticketType}
+                      onChange={e => setTicketType(e.target.value)}
+                      className="w-full h-8 px-2 rounded-lg border border-border bg-background text-xs font-medium text-foreground focus:outline-none focus:border-[#10B981]"
+                    >
+                      <option value="Technical Issue">Technical Issue</option>
+                      <option value="Payout & Billing">Payout & Billing</option>
+                      <option value="Inventory Sync">Inventory Sync</option>
+                      <option value="Account Settings">Account Settings</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-muted-foreground uppercase">Priority</label>
+                    <select
+                      value={ticketPriority}
+                      onChange={e => setTicketPriority(e.target.value)}
+                      className="w-full h-8 px-2 rounded-lg border border-border bg-background text-xs font-medium text-foreground focus:outline-none focus:border-[#10B981]"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-muted-foreground uppercase">Title</label>
+                  <input
+                    type="text"
+                    value={ticketTitle}
+                    onChange={e => setTicketTitle(e.target.value)}
+                    placeholder="Brief summary of the query"
+                    className="w-full h-8 px-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder-muted-foreground/60 focus:outline-none focus:border-[#10B981]"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-muted-foreground uppercase">Description</label>
+                  <textarea
+                    rows={3}
+                    value={ticketDesc}
+                    onChange={e => setTicketDesc(e.target.value)}
+                    placeholder="Provide granular technical logs or behavior context..."
+                    className="w-full p-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder-muted-foreground/60 focus:outline-none focus:border-[#10B981] resize-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-muted-foreground uppercase">Screenshot Attachment</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="file"
+                      ref={screenshotInputRef}
+                      accept="image/*"
+                      onChange={e => setTicketFile(e.target.files?.[0] || null)}
+                      className="w-full text-xs text-muted-foreground file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-[11px] file:font-bold file:bg-background file:text-foreground file:cursor-pointer hover:file:bg-muted"
+                    />
+                    <Image className="w-4 h-4 shrink-0 text-muted-foreground/80" />
+                  </div>
+                </div>
+
+                {ticketErrorMsg && (
+                  <p className="text-[11px] font-semibold text-red-600">{ticketErrorMsg}</p>
+                )}
+                {ticketSuccessMsg && (
+                  <p className="text-[11px] font-semibold text-emerald-600">{ticketSuccessMsg}</p>
+                )}
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="submit"
+                    disabled={submittingTicket}
+                    className="h-8 px-4 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs font-bold shadow-sm flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                  >
+                    {submittingTicket ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Send className="w-3.5 h-3.5" />
+                    )}
+                    <span>Submit Ticket</span>
+                  </button>
+                </div>
+              </form>
             </div>
           )}
         </div>
       </Section>
 
-      {/* Section 4: Store Address */}
-      <Section title={t("address_title")} icon={MapPin}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="sm:col-span-2">
-            <Field label={t("address1")} value={profile.address_line1} onChange={v => setProfile(a => a ? ({ ...a, address_line1: v }) : null)} placeholder="Building number, Flat details, Estate row" />
-          </div>
-          <Field label={t("address2")} value={profile.address_line2} onChange={v => setProfile(a => a ? ({ ...a, address_line2: v }) : null)} placeholder="Area development logs, Sector tracking" />
-          <Field label={t("landmark")} value={profile.landmark} onChange={v => setProfile(a => a ? ({ ...a, landmark: v }) : null)} placeholder="Adjacent geographic hub markers..." />
-          <Field label="City" value={profile.city} onChange={v => setProfile(a => a ? ({ ...a, city: v }) : null)} placeholder="City boundaries" />
-          <Field label="State" value={profile.state} onChange={v => setProfile(a => a ? ({ ...a, state: v }) : null)} placeholder="State boundaries" />
-          <Field label={t("pincode")} value={profile.pin_code} onChange={v => setProfile(a => a ? ({ ...a, pin_code: v }) : null)} placeholder="6-Digit Postal Index String" />
-        </div>
-      </Section>
-
-      {/* Section 5: Bank Details & Settlements */}
-      <Section title={t("bank_title")} icon={Building}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label={t("acc_holder")} value={profile.account_holder_name} onChange={v => setProfile(b => b ? ({ ...b, account_holder_name: v }) : null)} placeholder="Legal trade registration passbook matching name" />
-          <Field label={t("bank_name")} value={profile.bank_name} onChange={v => setProfile(b => b ? ({ ...b, bank_name: v }) : null)} placeholder="Financial house label" />
-          <Field label={t("acc_num")} value={profile.account_number} onChange={v => setProfile(b => b ? ({ ...b, account_number: v }) : null)} placeholder="Clearing destination core string" />
-          <Field label={t("ifsc")} value={profile.ifsc_code} onChange={v => setProfile(b => b ? ({ ...b, ifsc_code: v }) : null)} placeholder="11-Digit Alpha-Numeric Branch Sequence" />
-          
-          <div className="sm:col-span-2">
-            <Field label={t("upi")} value={profile.upi_id} onChange={v => setProfile(b => b ? ({ ...b, upi_id: v }) : null)} placeholder="handle@bankname" />
-          </div>
-
-          <div className="sm:col-span-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-muted/30 border border-border/60 rounded-xl p-3">
-            <div className="flex items-start gap-2">
-              <Check className={`w-4 h-4 mt-0.5 shrink-0 ${profile.is_bank_verified ? "text-[#10B981]" : "text-muted-foreground"}`} />
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {profile.is_bank_verified ? t("bank_verified") : t("bank_missing")}
-              </p>
-            </div>
-            <button 
-              type="button" 
-              onClick={() => requestVerification("is_bank_verified")}
-              className={`h-7 px-3 rounded-lg text-[11px] font-bold border transition-colors ${
-                profile.is_bank_verified 
-                  ? "bg-[#D1FAE5] border-[#10B981] text-[#065F46] pointer-events-none" 
-                  : "bg-background border-border hover:border-blue-500 text-blue-500"
-              }`}
-            >
-              {profile.is_bank_verified ? t("btn_verified") : t("btn_verify")}
-            </button>
-          </div>
-        </div>
-      </Section>
-
-      {/* Save Action Footer */}
-      <div className="flex items-center justify-end gap-3 pb-6 pt-2">
-        {savedMessage && (
-          <span className="text-xs font-bold text-[#10B981] flex items-center gap-1.5 animate-fade-in">
-            <Check className="w-4 h-4" /> {savedMessage}
-          </span>
-        )}
-        <button 
-          type="button" 
+      <div className="flex items-center justify-end gap-3 pt-2">
+        <button
+          type="button"
           onClick={handleDiscard}
-          className="h-10 px-6 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground transition-colors"
+          disabled={saving}
+          className="h-10 px-5 text-sm font-semibold rounded-xl border border-border bg-background text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
         >
           {t("discard")}
         </button>
-        <button 
-          type="button" 
+        <button
+          type="button"
           onClick={handleSave}
-          disabled={saving || uploadingImage}
-          className="h-10 px-6 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-bold transition-all shadow-md shadow-[#10B981]/10 disabled:opacity-40"
+          disabled={saving}
+          className="h-10 px-6 rounded-xl bg-[#10B981] hover:bg-[#059669] text-white text-sm font-bold shadow-md flex items-center gap-1.5 transition-all disabled:opacity-40"
         >
-          {saving ? t("saving") : t("save")}
+          {saving ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span>{t("saving")}</span>
+            </>
+          ) : (
+            <>
+              <Save className="w-4 h-4" />
+              <span>{t("save")}</span>
+            </>
+          )}
         </button>
       </div>
-
     </div>
   );
 }

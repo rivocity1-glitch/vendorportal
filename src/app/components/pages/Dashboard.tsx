@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   ShoppingBag, Clock, IndianRupee, TrendingUp, Package,
-  AlertTriangle, Star, ArrowUp, ArrowDown
+  AlertTriangle, Star, ArrowUp, ArrowDown, Send
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -57,145 +57,213 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
   const [period, setPeriod] = useState<"week" | "month">("week");
   const [loading, setLoading] = useState(true);
 
-  // Live state metrics (hardcoded dummy attributes safely scrubbed)
+  // Live state metrics
   const [metrics, setMetrics] = useState({
     todayOrders: 0,
     pendingOrders: 0,
-    revenueToday: 0,
-    revenueWeekly: 0,
+    pendingSettlement: 0,
+    salesWeekly: 0,
     activeProducts: 0,
     lowStockCount: 0,
   });
+
+  const [activeVendorId, setActiveVendorId] = useState<string | null>(null);
+  const [hasPendingRequest, setHasPendingRequest] = useState<boolean>(false);
+  const [submittingSettlement, setSubmittingSettlement] = useState<boolean>(false);
 
   const [recentOrdersList, setRecentOrdersList] = useState<any[]>([]);
   const [stockAlertsList, setStockAlertsList] = useState<any[]>([]);
   const [salesAnalytics, setSalesAnalytics] = useState<any[]>([]);
   const [orderTrends, setOrderTrends] = useState<any[]>([]);
 
-  useEffect(() => {
-    async function fetchLiveDashboardMetrics() {
-      try {
-        // Fetch the logged-in user safely from Supabase auth state.
-        const { data, error } = await supabase.auth.getUser();
-        if (error || !data?.user) {
-          setLoading(false);
-          return;
-        }
-        const user = data.user;
-
-        // Query product listings using the exact database variables we confirmed
-        const { data: productsData, count: activeCount } = await supabase
-          .from("products")
-          .select("name, stock", { count: "exact" })
-          .eq("vendor_id", user.id);
-
-        // Fetch related vendor transactional line records 
-        const { data: orderItems } = await supabase
-          .from("order_items")
-          .select("id, quantity, price, fulfillment_status, created_at, order_id")
-          .eq("vendor_id", user.id)
-          .order("created_at", { ascending: false });
-
-        let lowStockItemsCount = 0;
-        const processedStockAlerts: any[] = [];
-        if (productsData) {
-          productsData.forEach((p: any) => {
-            const stockLevel = p.stock ?? 0;
-            if (stockLevel <= 10) { 
-              lowStockItemsCount++;
-              if (processedStockAlerts.length < 5) {
-                processedStockAlerts.push({ name: p.name, stock: stockLevel, threshold: 15 });
-              }
-            }
-          });
-        }
-
-        let todayOrdersCount = 0;
-        let pendingOrdersCount = 0;
-        let todayRevenueSum = 0;
-        let weeklyRevenueSum = 0;
-        const processedOrders: any[] = [];
-        const todayStr = new Date().toISOString().split('T')[0];
-        const oneWeekAgo = new Date();
-        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
-        // Track sales analytics dynamically over 7 running days using a calendar map
-        const dailyRevenueMap: Record<string, number> = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
-        const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-        if (orderItems) {
-          orderItems.forEach((item: any) => {
-            const itemDate = new Date(item.created_at);
-            const itemDateStr = itemDate.toISOString().split('T')[0];
-            const isToday = itemDateStr === todayStr;
-            const isPending = item.fulfillment_status === "pending" || item.fulfillment_status?.toLowerCase() === "pending";
-
-            if (isToday) todayOrdersCount++;
-            if (isPending) pendingOrdersCount++;
-            
-            const rowRevenue = Number(item.price || 0) * (item.quantity || 1);
-
-            // Accumulate active daily earnings
-            if (isToday && (item.fulfillment_status === "delivered" || item.fulfillment_status === "packed" || item.fulfillment_status === "preparing")) {
-              todayRevenueSum += rowRevenue;
-            }
-            
-            // Build historical window trends cleanly
-            if (itemDate >= oneWeekAgo && item.fulfillment_status !== "cancelled") {
-              weeklyRevenueSum += rowRevenue;
-              const dayName = weekdays[itemDate.getDay()];
-              dailyRevenueMap[dayName] += rowRevenue;
-            }
-
-            if (processedOrders.length < 5) {
-              processedOrders.push({
-                id: item.order_id ? `ORD-${item.order_id.slice(0, 4).toUpperCase()}` : "ORD-NEW",
-                customer: "Store Customer",
-                amount: `₹${rowRevenue.toLocaleString("en-IN")}`,
-                status: item.fulfillment_status || "Pending",
-                time: isToday ? "Today" : itemDate.toLocaleDateString()
-              });
-            }
-          });
-        }
-
-        // Hydrate data properties smoothly
-        setMetrics({
-          activeProducts: activeCount || 0,
-          lowStockCount: lowStockItemsCount,
-          todayOrders: todayOrdersCount,
-          pendingOrders: pendingOrdersCount,
-          revenueToday: todayRevenueSum,
-          revenueWeekly: weeklyRevenueSum,
-        });
-
-        setStockAlertsList(processedStockAlerts);
-        setRecentOrdersList(processedOrders);
-
-        // Format chart arrays strictly matching current localized database parameters
-        const mappedAnalytics = weekdays.map(day => ({
-          day,
-          revenue: dailyRevenueMap[day]
-        }));
-        setSalesAnalytics(mappedAnalytics);
-
-        setOrderTrends([
-          { 
-            name: "Live Status Balance", 
-            Completed: todayOrdersCount - pendingOrdersCount > 0 ? todayOrdersCount - pendingOrdersCount : 0, 
-            Pending: pendingOrdersCount 
-          },
-        ]);
-
-      } catch (err) {
-        console.error("Dashboard component data fetching exception:", err);
-      } finally {
+  const fetchLiveDashboardMetrics = async () => {
+    try {
+      // STEP 1: Fetch the logged-in auth user
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user) {
         setLoading(false);
+        return;
       }
-    }
+      const user = authData.user;
 
+      // STEP 2: Find vendor profile ID associated with auth user
+      const { data: vendorData, error: vendorError } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .single();
+
+      if (vendorError || !vendorData) {
+        setLoading(false);
+        return;
+      }
+      const vendorId = vendorData.id;
+      setActiveVendorId(vendorId);
+
+      // Check for an existing 'pending_request' settlement entry
+      const { data: existingSettlements } = await supabase
+        .from("vendor_settlements")
+        .select("id")
+        .eq("vendor_id", vendorId)
+        .eq("status", "pending_request")
+        .limit(1);
+
+      setHasPendingRequest(existingSettlements && existingSettlements.length > 0);
+
+      // Fetch already paid out settlements to calculate true pending balance
+      const { data: paidSettlements } = await supabase
+        .from("vendor_settlements")
+        .select("amount")
+        .eq("vendor_id", vendorId)
+        .eq("status", "paid");
+
+      const paidSettlementsTotal = paidSettlements
+        ? paidSettlements.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+        : 0;
+
+      // STEP 3: Query product listings using the correct vendor relation identifier
+      const { data: productsData, count: activeCount } = await supabase
+        .from("products")
+        .select("name, stock, low_stock_threshold", { count: "exact" })
+        .eq("vendor_id", vendorId);
+
+      // Query vendor transactional records directly from orders table
+      const { data: ordersData } = await supabase
+        .from("orders")
+        .select("id, order_number, total_amount, order_status, created_at")
+        .eq("vendor_id", vendorId)
+        .order("created_at", { ascending: false });
+
+      let lowStockItemsCount = 0;
+      const processedStockAlerts: any[] = [];
+      if (productsData) {
+        productsData.forEach((p: any) => {
+          const stockLevel = p.stock ?? 0;
+          const threshold = p.low_stock_threshold ?? 10;
+          if (stockLevel <= threshold) { 
+            lowStockItemsCount++;
+            if (processedStockAlerts.length < 5) {
+              processedStockAlerts.push({ name: p.name, stock: stockLevel, threshold: threshold || 15 });
+            }
+          }
+        });
+      }
+
+      let todayOrdersCount = 0;
+      let pendingOrdersCount = 0;
+      let deliveredOrdersTotal = 0;
+      let weeklySalesSum = 0;
+      const processedOrders: any[] = [];
+      const todayStr = new Date().toISOString().split('T')[0];
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+      // Track sales analytics dynamically over 7 running days using a calendar map
+      const dailyRevenueMap: Record<string, number> = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
+      const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+      if (ordersData) {
+        ordersData.forEach((order: any) => {
+          const itemDate = new Date(order.created_at);
+          const itemDateStr = itemDate.toISOString().split('T')[0];
+          const isToday = itemDateStr === todayStr;
+          const statusLower = (order.order_status || "").toLowerCase();
+          const isPending = statusLower === "pending";
+
+          if (isToday) todayOrdersCount++;
+          if (isPending) pendingOrdersCount++;
+          
+          const rowAmount = Number(order.total_amount || 0);
+
+          // Calculate running balance based purely on delivered orders configuration
+          if (statusLower === "delivered") {
+            deliveredOrdersTotal += rowAmount;
+          }
+          
+          // Build historical window trends cleanly matching business volume parameters
+          if (itemDate >= oneWeekAgo && statusLower !== "cancelled") {
+            weeklySalesSum += rowAmount;
+            const dayName = weekdays[itemDate.getDay()];
+            dailyRevenueMap[dayName] += rowAmount;
+          }
+
+          if (processedOrders.length < 5) {
+            processedOrders.push({
+              id: order.id ? `ORD-${order.id.slice(0, 4).toUpperCase()}` : `ORD-${order.order_number || "NEW"}`,
+              customer: "Store Customer",
+              amount: `₹${rowAmount.toLocaleString("en-IN")}`,
+              status: order.order_status || "Pending",
+              time: isToday ? "Today" : itemDate.toLocaleDateString()
+            });
+          }
+        });
+      }
+
+      // Calculate final pending status value balance cleanly
+      const pendingSettlementCalc = Math.max(deliveredOrdersTotal - paidSettlementsTotal, 0);
+
+      // Hydrate data properties smoothly
+      setMetrics({
+        activeProducts: activeCount || 0,
+        lowStockCount: lowStockItemsCount,
+        todayOrders: todayOrdersCount,
+        pendingOrders: pendingOrdersCount,
+        pendingSettlement: pendingSettlementCalc,
+        salesWeekly: weeklySalesSum,
+      });
+
+      setStockAlertsList(processedStockAlerts);
+      setRecentOrdersList(processedOrders);
+
+      const mappedAnalytics = weekdays.map(day => ({
+        day,
+        revenue: dailyRevenueMap[day]
+      }));
+      setSalesAnalytics(mappedAnalytics);
+
+      setOrderTrends([
+        { 
+          name: "Live Status Balance", 
+          Completed: todayOrdersCount - pendingOrdersCount > 0 ? todayOrdersCount - pendingOrdersCount : 0, 
+          Pending: pendingOrdersCount 
+        },
+      ]);
+
+    } catch (err) {
+      console.error("Dashboard component data fetching exception:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchLiveDashboardMetrics();
   }, [period]);
+
+  const handleRequestSettlement = async () => {
+    if (!activeVendorId || metrics.pendingSettlement <= 0 || hasPendingRequest || submittingSettlement) return;
+
+    try {
+      setSubmittingSettlement(true);
+      const { error } = await supabase
+        .from("vendor_settlements")
+        .insert({
+          vendor_id: activeVendorId,
+          amount: metrics.pendingSettlement,
+          status: "pending_request",
+          request_date: new Date().toISOString()
+        });
+
+      if (error) throw error;
+      
+      setHasPendingRequest(true);
+      await fetchLiveDashboardMetrics();
+    } catch (err) {
+      console.error("Failed to post settlement pipeline modification sequence:", err);
+    } finally {
+      setSubmittingSettlement(false);
+    }
+  };
 
   if (loading) {
     return <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">Syncing store records...</div>;
@@ -203,29 +271,61 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
 
   return (
     <div className="p-4 lg:p-6 space-y-6">
+      {/* Dynamic Action Trigger Settlement Banner Integration block */}
+      <div className="bg-card border border-border rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xs">
+        <div className="space-y-0.5">
+          <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Settlement Management</h4>
+          <p className="text-xs text-foreground font-medium">
+            Current Unsettled Balance: <span className="font-bold text-[#10B981]">₹{metrics.pendingSettlement.toLocaleString("en-IN")}</span>
+          </p>
+        </div>
+        <div>
+          {hasPendingRequest ? (
+            <span className="text-xs font-semibold px-3 py-1.5 bg-[#FEF3C7] text-[#92400E] rounded-lg border border-[#FDE68A] inline-block animate-pulse">
+              Settlement Request Pending Approval
+            </span>
+          ) : (
+            <button
+              onClick={handleRequestSettlement}
+              disabled={metrics.pendingSettlement <= 0 || submittingSettlement}
+              className="h-9 px-4 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+            >
+              {submittingSettlement ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Send className="w-3.5 h-3.5" />
+              )}
+              <span>Request Settlement</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Stats grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
         <StatCard title="Today's Orders" value={metrics.todayOrders} icon={ShoppingBag} iconColor="text-[#10B981]" iconBg="bg-[#ECFDF5]" />
         <StatCard title="Pending Orders" value={metrics.pendingOrders} subtitle="Requires action" icon={Clock} iconColor="text-[#F59E0B]" iconBg="bg-[#FEF3C7]" />
-        <StatCard title="Revenue Today" value={`₹${metrics.revenueToday.toLocaleString("en-IN")}`} icon={IndianRupee} iconColor="text-[#10B981]" iconBg="bg-[#ECFDF5]" />
-        <StatCard title="Revenue This Week" value={`₹${metrics.revenueWeekly.toLocaleString("en-IN")}`} icon={TrendingUp} iconColor="text-[#3B82F6]" iconBg="bg-[#EFF6FF]" />
+        
+        {/* Updated Cards targeting live real-time settlements context pipelines */}
+        <StatCard title="Pending Settlement" value={`₹${metrics.pendingSettlement.toLocaleString("en-IN")}`} icon={IndianRupee} iconColor="text-[#10B981]" iconBg="bg-[#ECFDF5]" />
+        <StatCard title="Sales This Week" value={`₹${metrics.salesWeekly.toLocaleString("en-IN")}`} icon={TrendingUp} iconColor="text-[#3B82F6]" iconBg="bg-[#EFF6FF]" />
+        
         <StatCard title="Active Products" value={metrics.activeProducts} icon={Package} iconColor="text-[#8B5CF6]" iconBg="bg-[#EDE9FE]" />
         <StatCard title="Low Stock Products" value={metrics.lowStockCount} subtitle="Needs restocking" icon={AlertTriangle} iconColor="text-[#EF4444]" iconBg="bg-[#FEF2F2]" />
-        
-        {/* 🟢 Customer Rating Card - Restored with values cleared out */}
         <StatCard title="Customer Rating" value="—" icon={Star} iconColor="text-[#F59E0B]" iconBg="bg-[#FEF3C7]" />
       </div>
 
       {/* Analytics Rows */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-card rounded-xl border border-border p-4">
-          <h3 className="font-semibold text-foreground mb-4">Sales Analytics (7-Day Running Revenue)</h3>
+          {/* Renamed chart layout header tracker element context matching weekly running metrics */}
+          <h3 className="font-semibold text-foreground mb-4">Sales Analytics (7-Day Running Sales)</h3>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={salesAnalytics}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="day" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(value) => Number(value) === 0 ? [null, null] : [`₹${Number(value).toLocaleString("en-IN")}`, "Revenue"]} />
+              <Tooltip formatter={(value) => Number(value) === 0 ? [null, null] : [`₹${Number(value).toLocaleString("en-IN")}`, "Sales"]} />
               <Area type="monotone" dataKey="revenue" stroke="#10B981" fillOpacity={0.1} />
             </AreaChart>
           </ResponsiveContainer>
@@ -296,5 +396,15 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
         </div>
       </div>
     </div>
+  );
+}
+
+// Simple local micro-helper definition configuration context mapping parameters
+function Loader2({ className }: { className?: string }) {
+  return (
+    <svg className={`animate-spin h-3.5 w-3.5 ${className}`} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
   );
 }

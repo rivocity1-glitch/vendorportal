@@ -16,12 +16,15 @@ const statusStyles: Record<string, string> = {
 
 export function Products({ onNavigate }: { onNavigate: (page: string) => void }) {
   const [view, setView] = useState<"list" | "add">("list");
+  const [editingId, setEditingId] = useState<string | null>(null);
   
   const [search, setSearch] = useState("");
   const [activeCategoryId, setActiveCategoryId] = useState("All"); 
   const [productList, setProductList] = useState<any[]>([]);
   const [openMenu, setOpenMenu] = useState<any | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
@@ -35,10 +38,23 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
   const [gstRate, setGstRate] = useState("5");     
   const [batchNumber, setBatchNumber] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
-  const [weight, setWeight] = useState("");
+  const [weightValue, setWeightValue] = useState("");
+  const [weightUnit, setWeightUnit] = useState("Gm");
   const [description, setDescription] = useState("");
+  const [stock, setStock] = useState("");
 
   const gstOptions = [0, 5, 12, 18, 28];
+  const unitOptions = ["Gm", "Kg", "Ltr", "Ml", "Pcs", "Pack"];
+
+  // Category explicit rule mapping definitions
+  const csvCategoryMap: Record<string, string> = {
+    "beverages": "Grocery",
+    "staples": "Grocery",
+    "packaged foods": "Grocery",
+    "personal care": "Grocery",
+    "household": "Home & Kitchen",
+    "dairy": "Dairy"
+  };
 
   // Profit Margin Computations
   const sellPriceNum = parseFloat(price) || 0;
@@ -52,12 +68,26 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
   const fetchLiveProducts = async () => {
     try {
       setLoading(true);
+      
       const { data: authData } = await supabase.auth.getUser();
-      if (!authData?.user) return;
+      if (!authData?.user) {
+        setLoading(false);
+        return;
+      }
 
-      // ✅ FIXED: Querying general columns safely without breaking on missing is_active flag
+      const { data: vendor, error: vendorErr } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("auth_user_id", authData.user.id)
+        .single();
+
+      if (vendorErr || !vendor) {
+        setLoading(false);
+        return;
+      }
+
       const { data: catsData, error: catErr } = await supabase
-        .from("categories")
+        .from("product_categories")
         .select("id, name");
       
       if (!catErr && catsData) {
@@ -67,7 +97,7 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
       const { data, error } = await supabase
         .from("products")
         .select("*")
-        .eq("vendor_id", authData.user.id)
+        .eq("vendor_id", vendor.id)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -79,12 +109,11 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
 
           if (currentStock === 0) {
             evaluatedStatus = "Out of Stock";
-          } else if (currentStock <= 5) {
+          } else if (currentStock <= (p.low_stock_threshold ?? 5)) {
             evaluatedStatus = "Low Stock";
           }
 
-          // Compute Base Taxable Rate dynamically per row item based on stored GST parameters
-          const itemGst = parseFloat(p.gst_rate) || 0;
+          const itemGst = parseFloat(p.gst_slab) || 0;
           const itemPrice = parseFloat(p.price) || 0;
           const calculatedRate = itemPrice / (1 + itemGst / 100);
 
@@ -94,11 +123,16 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
             category_id: p.category_id || "", 
             mrp: Number(p.mrp || 0),
             price: Number(p.price || 0),
-            rate: calculatedRate, // Storing structural clean un-taxed floats
+            rate: calculatedRate, 
             stock: currentStock,
-            status: evaluatedStatus,
+            status: p.status || evaluatedStatus,
             expiry_date: p.expiry_date || null,
-            img: (p.name || "PR").slice(0, 2).toUpperCase()
+            img: (p.name || "PR").slice(0, 2).toUpperCase(),
+            cost_price: p.cost_price,
+            gst_slab: p.gst_slab,
+            batch_number: p.batch_number,
+            weight: p.weight,
+            description: p.description
           };
         });
 
@@ -136,45 +170,283 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !categoryId || !price || !wholesaleRate || !mrp) {
+    if (!name || !categoryId || !price || !wholesaleRate || !mrp || !stock) {
       alert("Please fill in all required fields.");
       return;
     }
 
+    const selectedCategoryName = categories.find(c => c.id === categoryId)?.name;
+    if (selectedCategoryName === "Medical") {
+      if (!batchNumber.trim() || !expiryDate.trim()) {
+        alert("Batch Number and Expiry Date are strictly required for products under the Medical category.");
+        return;
+      }
+    }
+
     try {
       setIsSubmitting(true);
+      
       const { data: authData } = await supabase.auth.getUser();
       if (!authData?.user) throw new Error("User session not found.");
 
+      const { data: vendor, error: vendorErr } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("auth_user_id", authData.user.id)
+        .single();
+
+      if (vendorErr || !vendor) throw new Error("Vendor profile missing.");
+
+      if (!editingId) {
+        const { data: existingProd, error: checkErr } = await supabase
+          .from("products")
+          .select("id")
+          .eq("vendor_id", vendor.id)
+          .ilike("name", name.trim())
+          .maybeSingle();
+
+        if (checkErr) throw checkErr;
+
+        if (existingProd) {
+          alert("Product already exists. Please edit the existing product.");
+          setIsSubmitting(false);
+          return;
+        }
+      } else {
+        const { data: conflictingProd, error: checkErr } = await supabase
+          .from("products")
+          .select("id")
+          .eq("vendor_id", vendor.id)
+          .ilike("name", name.trim())
+          .neq("id", editingId)
+          .maybeSingle();
+
+        if (checkErr) throw checkErr;
+
+        if (conflictingProd) {
+          alert("Product already exists. Please edit the existing product.");
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      const finalWeightString = weightValue.trim() ? `${weightValue.trim()} ${weightUnit}` : null;
+
       const productPayload = {
-        name,
+        name: name.trim(),
         category_id: categoryId, 
         price: parseFloat(price),
-        wholesale_rate: parseFloat(wholesaleRate),
+        cost_price: parseFloat(wholesaleRate), 
         mrp: parseFloat(mrp),
-        gst_rate: gstPercent,
+        gst_slab: gstPercent, 
         batch_number: batchNumber || null,
         expiry_date: expiryDate || null,
-        weight: weight || null,
+        weight: finalWeightString,
         description: description || null,
-        stock: 0, 
-        vendor_id: authData.user.id
+        stock: parseInt(stock) || 0, 
+        vendor_id: vendor.id
       };
 
-      const { error } = await supabase.from("products").insert([productPayload]);
-      if (error) throw error;
+      if (editingId) {
+        const { error } = await supabase
+          .from("products")
+          .update(productPayload)
+          .eq("id", editingId);
+        
+        if (error) {
+          if (error.code === "23505") {
+            alert("Product already exists. Please edit the existing product.");
+            setIsSubmitting(false);
+            return;
+          }
+          throw error;
+        }
+      } else {
+        const { error } = await supabase.from("products").insert([productPayload]);
+        
+        if (error) {
+          if (error.code === "23505") {
+            alert("Product already exists. Please edit the existing product.");
+            setIsSubmitting(false);
+            return;
+          }
+          throw error;
+        }
+      }
 
       setName(""); setCategoryId(""); setPrice(""); setWholesaleRate(""); setMrp("");
-      setBatchNumber(""); setExpiryDate(""); setWeight(""); setDescription("");
+      setBatchNumber(""); setExpiryDate(""); setWeightValue(""); setWeightUnit("Gm"); setDescription(""); setStock("");
+      setEditingId(null);
       
       setView("list");
       await fetchLiveProducts();
     } catch (err: any) {
-      console.error("Product creation exception:", err);
-      alert(`Onboarding failed: ${err.message || err}`);
+      console.error("Product preservation exception:", err);
+      alert(`Operation failed: ${err.message || err}`);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleImportCSV = async () => {
+    if (!importFile) {
+      alert("Please select a valid CSV file to import.");
+      return;
+    }
+
+    try {
+      setIsImporting(true);
+
+      const { data: authData } = await supabase.auth.getUser();
+      if (!authData?.user) throw new Error("Authentication context invalid.");
+
+      const { data: vendor, error: vendorErr } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("auth_user_id", authData.user.id)
+        .single();
+
+      if (vendorErr || !vendor) throw new Error("Vendor system mismatch.");
+
+      const { data: currentDbProducts, error: dbProdErr } = await supabase
+        .from("products")
+        .select("name")
+        .eq("vendor_id", vendor.id);
+
+      if (dbProdErr) throw dbProdErr;
+
+      const localUniqueProductSet = new Set(
+        (currentDbProducts || []).map(p => p.name.trim().toLowerCase())
+      );
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const text = e.target?.result as string;
+        if (!text) {
+          setIsImporting(false);
+          return;
+        }
+
+        const lines = text.split(/\r?\n/).filter(line => line.trim() !== "");
+        if (lines.length < 2) {
+          alert("The uploaded file does not contain any entries.");
+          setIsImporting(false);
+          return;
+        }
+
+        const headers = lines[0].split(",").map(h => h.trim().toLowerCase().replace(/['"]+/g, ''));
+        const productsToInsert: any[] = [];
+        let duplicateCount = 0;
+        let skippedCategoryCount = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const currentLine = lines[i].split(",").map(cell => cell.trim().replace(/['"]+/g, ''));
+          if (currentLine.length !== headers.length) continue;
+
+          const rowData: Record<string, string> = {};
+          headers.forEach((header, index) => {
+            rowData[header] = currentLine[index];
+          });
+
+          const rawName = rowData["name"] || rowData["product name"];
+          if (!rawName) continue;
+          
+          const cleanedName = rawName.trim();
+          const lowerCasedName = cleanedName.toLowerCase();
+
+          // Deduplicate rows based on database key profile specifications
+          if (localUniqueProductSet.has(lowerCasedName)) {
+            duplicateCount++;
+            continue;
+          }
+
+          // Handle category validation and strict mapping translations
+          let pCatId: string | undefined = rowData["category_id"] || undefined;
+          const rawCsvCatName = (rowData["category"] || rowData["category_name"] || "").trim().toLowerCase();
+
+          if (!pCatId && rawCsvCatName) {
+            // Check mapping table for translation
+            const targetCatName = csvCategoryMap[rawCsvCatName] || rowData["category"] || rowData["category_name"];
+            const matchedCat = categories.find(c => c.name.toLowerCase() === targetCatName.toLowerCase());
+            
+            if (matchedCat) {
+              pCatId = matchedCat.id;
+            }
+          } else if (pCatId) {
+            // Confirm the provided category_id exists inside database context
+            const exists = categories.some(c => c.id === pCatId);
+            if (!exists) pCatId = undefined;
+          }
+
+          // Strict check requirement: Skip row if category doesn't exist (Do not create new ones)
+          if (!pCatId) {
+            skippedCategoryCount++;
+            continue;
+          }
+
+          const pPrice = parseFloat(rowData["price"] || rowData["selling price"]) || 0;
+          const pCost = parseFloat(rowData["cost_price"] || rowData["wholesale rate"] || rowData["cost"]) || 0;
+          const pMrp = parseFloat(rowData["mrp"]) || pPrice;
+          const pStock = parseInt(rowData["stock"] || rowData["stock quantity"]) || 0;
+          const pGst = parseFloat(rowData["gst_slab"] || rowData["gst"]) || 0;
+
+          localUniqueProductSet.add(lowerCasedName);
+
+          productsToInsert.push({
+            name: cleanedName,
+            category_id: pCatId,
+            price: pPrice,
+            cost_price: pCost,
+            mrp: pMrp,
+            stock: pStock,
+            gst_slab: pGst,
+            batch_number: rowData["batch_number"] || rowData["batch number"] || null,
+            expiry_date: rowData["expiry_date"] || rowData["expiry date"] || null,
+            weight: rowData["weight"] || rowData["volume"] || null,
+            description: rowData["description"] || null,
+            vendor_id: vendor.id
+          });
+        }
+
+        if (productsToInsert.length === 0) {
+          alert(`Imported 0 products\nSkipped ${duplicateCount} duplicates\nSkipped ${skippedCategoryCount} missing categories`);
+          setIsImporting(false);
+          setShowImportModal(false);
+          setImportFile(null);
+          return;
+        }
+
+        const { error: insertErr } = await supabase.from("products").insert(productsToInsert);
+        
+        if (insertErr) {
+          if (insertErr.code === "23505") {
+            alert("A uniqueness error occurred while processing bulk ingestion records. Please verify row items are not unique duplicates.");
+            setIsImporting(false);
+            return;
+          }
+          throw insertErr;
+        }
+
+        alert(`Imported ${productsToInsert.length} products\nSkipped ${duplicateCount} duplicates\nSkipped ${skippedCategoryCount} missing categories`);
+        setImportFile(null);
+        setShowImportModal(false);
+        await fetchLiveProducts();
+      };
+
+      reader.readAsText(importFile);
+    } catch (err: any) {
+      console.error("CSV Ingestion Pipeline Dropped:", err);
+      alert(`Import failed: ${err.message || err}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleCancelForm = () => {
+    setName(""); setCategoryId(""); setPrice(""); setWholesaleRate(""); setMrp("");
+    setBatchNumber(""); setExpiryDate(""); setWeightValue(""); setWeightUnit("Gm"); setDescription(""); setStock("");
+    setEditingId(null);
+    setView("list");
   };
 
   const filtered = productList.filter(p => {
@@ -189,13 +461,13 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
         <div className="flex items-center gap-3">
           <button 
             type="button"
-            onClick={() => setView("list")}
+            onClick={handleCancelForm}
             className="w-9 h-9 rounded-lg border border-border flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h2 className="text-xl font-bold text-foreground">Add New Product</h2>
+            <h2 className="text-xl font-bold text-foreground">{editingId ? "Edit Product" : "Add New Product"}</h2>
             <p className="text-xs text-muted-foreground">List a new item with dynamic margin evaluations</p>
           </div>
         </div>
@@ -287,17 +559,21 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
               <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border pb-1">Logistics / Expiry Attributes</h3>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Batch Number</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Batch Number {categories.find(c => c.id === categoryId)?.name === "Medical" && "*"}
+                  </label>
                   <input 
                     type="text"
-                    placeholder="Optional batch code"
+                    placeholder={categories.find(c => c.id === categoryId)?.name === "Medical" ? "Required batch code" : "Optional batch code"}
                     value={batchNumber}
                     onChange={e => setBatchNumber(e.target.value)}
                     className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Expiry Date</label>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">
+                    Expiry Date {categories.find(c => c.id === categoryId)?.name === "Medical" && "*"}
+                  </label>
                   <input 
                     type="date"
                     value={expiryDate}
@@ -307,17 +583,43 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1">Weight / Volume</label>
+                  <div className="flex items-center gap-1">
+                    <input 
+                      type="number"
+                      step="any"
+                      placeholder="e.g. 500"
+                      value={weightValue}
+                      onChange={e => setWeightValue(e.target.value)}
+                      className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
+                    />
+                    <select
+                      value={weightUnit}
+                      onChange={e => setWeightUnit(e.target.value)}
+                      className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
+                    >
+                      {unitOptions.map(unit => (
+                        <option key={unit} value={unit}>{unit}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label>
                   <input 
-                    type="text"
-                    placeholder="e.g. 500g, 1L"
-                    value={weight}
-                    onChange={e => setWeight(e.target.value)}
+                    type="number"
+                    required
+                    placeholder="0"
+                    value={stock}
+                    onChange={e => setStock(e.target.value)}
                     className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background"
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
                   <textarea 
@@ -374,7 +676,7 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
                 className="w-full h-11 bg-[#10B981] hover:bg-[#059669] text-white font-medium rounded-xl text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                {isSubmitting ? "Publishing..." : "Publish Product"}
+                {isSubmitting ? "Publishing..." : editingId ? "Update Product" : "Publish Product"}
               </button>
             </div>
           </div>
@@ -394,7 +696,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
 
   return (
     <div className="p-4 lg:p-6 bg-background text-foreground min-h-screen">
-      {/* Search and Quick Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -424,7 +725,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
         </div>
       </div>
 
-      {/* Category Tab Selector Toggles */}
       <div className="flex gap-1.5 overflow-x-auto pb-2 mb-4 scrollbar-hide">
         <button
           type="button"
@@ -449,7 +749,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
         ))}
       </div>
 
-      {/* Primary Products Inventory Data Grid */}
       <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -468,8 +767,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
             <tbody className="divide-y divide-border">
               {filtered.map(p => {
                 const categoryLabel = categories.find(c => c.id === p.category_id)?.name || "Other";
-                
-                // Formatted string conversions for calendar dates
                 const expiryLabel = p.expiry_date ? new Date(p.expiry_date).toLocaleDateString("en-IN", {
                   day: "2-digit", month: "short", year: "numeric"
                 }) : "—";
@@ -489,13 +786,10 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
                         {categoryLabel}
                       </span>
                     </td>
-                    {/* Added Rate Base pricing representation */}
                     <td className="px-4 py-3 text-sm font-medium text-muted-foreground">₹{p.rate.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-sm text-muted-foreground line-through">₹{p.mrp.toLocaleString("en-IN")}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-foreground">₹{p.price.toLocaleString("en-IN")}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">₹{p.mrp.toLocaleString("en-IN")}</td>
                     <td className="px-4 py-3 text-sm font-medium text-foreground">{p.stock}</td>
                     
-                    {/* Expiry Tracking Column */}
                     <td className="px-4 py-3 text-xs text-muted-foreground font-medium">
                       <span className="flex items-center gap-1">
                         {p.expiry_date && <Calendar className="w-3 h-3 text-red-400" />}
@@ -512,7 +806,42 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => setView("add")}
+                          onClick={() => {
+                            setEditingId(p.id);
+                            setName(p.name);
+                            setCategoryId(p.category_id);
+                            setPrice(p.price.toString());
+                            setWholesaleRate((p.cost_price ?? "").toString());
+                            setMrp(p.mrp.toString());
+                            setGstRate((p.gst_slab ?? "5").toString());
+                            setBatchNumber(p.batch_number || "");
+                            setExpiryDate(p.expiry_date || "");
+                            setDescription(p.description || "");
+                            setStock(p.stock.toString());
+
+                            if (p.weight) {
+                              const weightStr = p.weight.toString().trim();
+                              const numericMatch = weightStr.match(/^[\d.]+/);
+                              if (numericMatch) {
+                                const numVal = numericMatch[0];
+                                setWeightValue(numVal);
+                                const parsedUnit = weightStr.replace(numVal, "").trim();
+                                if (unitOptions.includes(parsedUnit)) {
+                                  setWeightUnit(parsedUnit);
+                                } else {
+                                  setWeightUnit("Gm");
+                                }
+                              } else {
+                                setWeightValue(weightStr);
+                                setWeightUnit("Gm");
+                              }
+                            } else {
+                              setWeightValue("");
+                              setWeightUnit("Gm");
+                            }
+
+                            setView("add");
+                          }}
                           className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-[#10B981] hover:bg-[#ECFDF5]"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
@@ -544,7 +873,7 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground text-sm">
+                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground text-sm">
                     No products found
                   </td>
                 </tr>
@@ -554,10 +883,10 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
         </div>
       </div>
 
-      {/* Import Modal */}
+      {/* Functional Import Modal */}
       {showImportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setShowImportModal(false)} />
+          <div className="absolute inset-0 bg-black/40" onClick={() => { if(!isImporting){ setShowImportModal(false); setImportFile(null); } }} />
           <div className="relative bg-card rounded-2xl border border-border w-full max-w-md p-6 shadow-xl">
             <h2 className="font-semibold text-foreground mb-4">Import Products</h2>
             <div className="space-y-3">
@@ -568,26 +897,38 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
                 <input 
                   id="csv-file-picker"
                   type="file" 
-                  accept=".csv, .xlsx, .xls" 
+                  accept=".csv" 
                   className="hidden" 
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                     const file = e.target.files?.[0];
-                    if (file) alert(`Selected file: ${file.name}`);
+                    if (file) setImportFile(file);
                   }}
                 />
                 <Upload className="w-8 h-8 text-muted-foreground group-hover:text-[#10B981] mx-auto mb-2" />
-                <p className="text-sm font-medium text-foreground">Drop your CSV or Excel file here</p>
+                <p className="text-sm font-medium text-foreground">
+                  {importFile ? importFile.name : "Drop your CSV file here"}
+                </p>
                 <button type="button" className="mt-3 px-4 py-1.5 rounded-lg bg-[#10B981] text-white text-xs font-medium">
                   Choose File
                 </button>
               </div>
             </div>
             <div className="flex gap-2 mt-4">
-              <button type="button" onClick={() => setShowImportModal(false)} className="flex-1 h-9 rounded-lg border border-border text-sm text-muted-foreground">
+              <button 
+                type="button" 
+                disabled={isImporting}
+                onClick={() => { setShowImportModal(false); setImportFile(null); }} 
+                className="flex-1 h-9 rounded-lg border border-border text-sm text-muted-foreground disabled:opacity-50"
+              >
                 Cancel
               </button>
-              <button type="button" className="flex-1 h-9 rounded-lg bg-[#10B981] text-white text-sm font-medium">
-                Import
+              <button 
+                type="button" 
+                disabled={isImporting || !importFile}
+                onClick={handleImportCSV}
+                className="flex-1 h-9 rounded-lg bg-[#10B981] text-white text-sm font-medium flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+              >
+                {isImporting ? "Importing..." : "Import"}
               </button>
             </div>
           </div>

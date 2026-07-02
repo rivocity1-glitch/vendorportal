@@ -1,16 +1,27 @@
 import React, { useState, useEffect } from "react";
-import { Store, Clock, Image, Save, Check, ShieldAlert, Loader2, User, Phone, FileText, Sparkles } from "lucide-react";
+import { Store, Image, Save, Check, ShieldAlert, Loader2, User, Phone, FileText, Sparkles } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
+interface AssignedRider {
+  id: string;
+  rider_name: string;
+  phone: string;
+  availability_status: string;
+}
+
 interface ProfileState {
-  auth_user_id: string;
   vendor_id: string;
   store_status: string;
   status_remarks: string;
-  assigned_rider_id: string | null;
-  rider_name?: string;
-  rider_phone?: string;
+  riders: AssignedRider[];
 }
+
+const riderStatusStyles: Record<string, string> = {
+  available: "bg-[#D1FAE5] text-[#065F46]",
+  out_for_delivery: "bg-[#FEF3C7] text-[#92400E]",
+  break: "bg-[#FEF3C7] text-[#92400E]",
+  offline: "bg-muted text-muted-foreground",
+};
 
 export function StoreManagement() {
   const [profile, setProfile] = useState<ProfileState | null>(null);
@@ -25,16 +36,28 @@ export function StoreManagement() {
       const { data: auth } = await supabase.auth.getUser();
       if (!auth?.user) return;
 
-      // 1. Fetch vendor profile using explicit schema parameters
+      // 1. Fetch corresponding vendor ID mapping from core vendors table
+      const { data: vendorData, error: vendorErr } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("auth_user_id", auth.user.id)
+        .single();
+
+      if (vendorErr || !vendorData) {
+        throw new Error("No active vendor profile matches your authentication credentials.");
+      }
+
+      const verifiedVendorId = vendorData.id;
+
+      // 2. Fetch vendor profile details using structural vendor_id query key parameter criteria
       const { data, error } = await supabase
         .from("vendor_profiles")
         .select(`
-          auth_user_id,
+          vendor_id,
           store_status,
-          status_remarks,
-          assigned_rider_id
+          status_remarks
         `)
-        .eq("auth_user_id", auth.user.id)
+        .eq("vendor_id", verifiedVendorId)
         .maybeSingle();
 
       if (error) throw error;
@@ -42,36 +65,34 @@ export function StoreManagement() {
       console.log("Supabase Profile Data Load Output:", data); // 🔍 Diagnostic Log
 
       let validatedState: ProfileState = {
-        auth_user_id: auth.user.id,
-        vendor_id: data?.auth_user_id || auth.user.id,
+        vendor_id: verifiedVendorId,
         store_status: data?.store_status || "closed",
         status_remarks: data?.status_remarks || "",
-        assigned_rider_id: data?.assigned_rider_id || null,
-        rider_name: "Unassigned",
-        rider_phone: "—"
+        riders: []
       };
 
-      // 2. Fetch rider records only if an assignment ID is present
-      if (data?.assigned_rider_id) {
-        console.log("Attempting to query riders table with ID:", data.assigned_rider_id);
-        
-        const { data: riderData, error: riderError } = await supabase
-          .from("riders")
-          .select("name, phone")
-          .eq("id", data.assigned_rider_id)
-          .maybeSingle();
-        
-        if (riderError) {
-          console.error("Supabase error querying riders table:", riderError);
-        }
+      // 3. Query ALL assigned riders inside rider_vendor_assignments dynamically using the vendor_id
+      const { data: assignments, error: assignmentErr } = await supabase
+        .from("rider_vendor_assignments")
+        .select("rider_id")
+        .eq("vendor_id", verifiedVendorId);
 
-        if (riderData) {
-          console.log("Rider details found successfully:", riderData);
-          validatedState.rider_name = riderData.name;
-          validatedState.rider_phone = riderData.phone;
-        } else {
-          console.warn(`Rider ID ${data.assigned_rider_id} exists on vendor profile, but no matching record was found inside the riders table.`);
-          validatedState.rider_name = "Rider Data Missing in DB";
+      if (!assignmentErr && assignments && assignments.length > 0) {
+        const riderIds = assignments.map(a => a.rider_id);
+
+        // 4. Resolve full profiles from riders table for all assigned rows
+        const { data: ridersList, error: ridersErr } = await supabase
+          .from("riders")
+          .select("id, rider_name, phone, availability_status")
+          .in("id", riderIds);
+
+        if (!ridersErr && ridersList) {
+          validatedState.riders = ridersList.map((r: any) => ({
+            id: r.id,
+            rider_name: r.rider_name || "Unnamed Rider",
+            phone: r.phone || "—",
+            availability_status: r.availability_status || "offline"
+          }));
         }
       }
 
@@ -102,7 +123,7 @@ export function StoreManagement() {
           status_remarks: profile.status_remarks,
           updated_at: new Date().toISOString()
         })
-        .eq("auth_user_id", profile.auth_user_id);
+        .eq("vendor_id", profile.vendor_id);
 
       if (error) throw error;
       setSavedMessage("Store operational updates saved successfully!");
@@ -213,30 +234,53 @@ export function StoreManagement() {
         </div>
       </div>
 
-      {/* 2. Assigned Rider */}
+      {/* 2. Assigned Riders */}
       <div className="bg-card rounded-xl border border-border p-5 space-y-4 shadow-sm">
         <h3 className="font-semibold text-sm text-foreground flex items-center gap-2 border-b border-border/40 pb-2">
           <User className="w-4 h-4 text-[#10B981]" />
-          Assigned Shop Rider
+          Assigned Riders ({profile.riders.length})
         </h3>
         
-        <div className="bg-muted/30 border border-border/50 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm">
-              <User className="w-4 h-4 text-muted-foreground" />
-              <span className="text-muted-foreground">Rider Name:</span>
-              <span className="font-bold text-foreground">{profile.rider_name}</span>
+        <div className="space-y-3">
+          {profile.riders.length === 0 ? (
+            <div className="bg-muted/30 border border-border/50 rounded-xl p-4 flex flex-col justify-between gap-2">
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm">
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Rider Name:</span>
+                  <span className="font-bold text-foreground">Unassigned</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <Phone className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-muted-foreground">Phone:</span>
+                  <span className="font-semibold text-foreground tracking-wide">—</span>
+                </div>
+              </div>
             </div>
-            <div className="flex items-center gap-2 text-sm">
-              <Phone className="w-4 h-4 text-muted-foreground" />
-              <span className="text-muted-foreground">Mobile String:</span>
-              <span className="font-semibold text-foreground tracking-wide">{profile.rider_phone}</span>
-            </div>
-          </div>
-          
-          <div className="p-2.5 bg-background border border-border rounded-lg text-[11px] text-muted-foreground max-w-xs leading-relaxed font-medium">
-            ℹ️ Delivery partners are linked via your administrative console. Reach out to network support lines if your allocated delivery details need updates.
-          </div>
+          ) : (
+            profile.riders.map(rider => (
+              <div key={rider.id} className="bg-muted/30 border border-border/50 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <User className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Rider Name:</span>
+                    <span className="font-bold text-foreground">{rider.rider_name}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Phone className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Phone:</span>
+                    <span className="font-semibold text-foreground tracking-wide">{rider.phone}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">Status:</span>
+                    <span className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded font-bold ${riderStatusStyles[rider.availability_status.toLowerCase()] || "bg-muted text-foreground"}`}>
+                      {rider.availability_status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

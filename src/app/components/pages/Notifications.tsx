@@ -1,34 +1,33 @@
 import React, { useState, useEffect } from "react";
-import { ShoppingBag, Package, Wallet, Tag, Settings, Trash2, CheckCheck, Bell, Filter } from "lucide-react";
+import { MessageSquare, Wallet, Star, CheckCheck, Bell, Filter, Trash2 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 import { notificationSync } from "../../../lib/notificationSync";
 
 interface NotificationItem {
   id: string;
-  category: "Orders" | "Inventory" | "Settlements" | "Marketing" | "System";
+  category: "Support" | "Settlements" | "Reviews";
   title: string;
   message: string;
   is_read: boolean;
   created_at: string;
 }
 
-// Deterministic Visual Asset Configuration Mapping Dictionary
+// Deterministic Visual Asset Configuration Mapping Dictionary (Admin Removed)
 const categoryConfig: Record<string, { icon: any; color: string; bg: string }> = {
-  Orders: { icon: ShoppingBag, color: "text-blue-500", bg: "bg-blue-50 dark:bg-blue-950/40" },
-  Inventory: { icon: Package, color: "text-red-500", bg: "bg-red-50 dark:bg-red-950/40" },
+  Support: { icon: MessageSquare, color: "text-blue-500", bg: "bg-blue-50 dark:bg-blue-950/40" },
   Settlements: { icon: Wallet, color: "text-emerald-500", bg: "bg-emerald-50 dark:bg-emerald-950/40" },
-  Marketing: { icon: Tag, color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-950/40" },
-  System: { icon: Settings, color: "text-slate-500", bg: "bg-slate-50 dark:bg-slate-950/40" }
+  Reviews: { icon: Star, color: "text-purple-500", bg: "bg-purple-50 dark:bg-purple-950/40" }
 };
 
-const categories = ["All", "Orders", "Inventory", "Settlements", "Marketing", "System"];
+const categories = ["All", "Support", "Settlements", "Reviews"];
 
 export function Notifications() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [activeCategory, setActiveCategory] = useState("All");
   const [loading, setLoading] = useState(true);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
 
-  // Core Data Fetch Routine Engine Pipeline
+  // Core Data Fetch Routine Engine Pipeline using auth_user_id
   const fetchNotifications = async () => {
     try {
       const { data: auth } = await supabase.auth.getUser();
@@ -37,11 +36,16 @@ export function Notifications() {
       const { data, error } = await supabase
         .from("notifications")
         .select("*")
-        .eq("vendor_id", auth.user.id)
+        .eq("auth_user_id", auth.user.id)
         .order("created_at", { ascending: false });
 
       if (!error && data) {
-        setNotifications(data);
+        // Fallback initialized to "Support" for unexpected values
+        const mappedData = data.map((n: any) => ({
+          ...n,
+          category: n.category === "Admin" ? "Support" : (n.category || "Support")
+        }));
+        setNotifications(mappedData);
       }
     } catch (err) {
       console.error("Failed to fetch relational notification logs:", err);
@@ -77,31 +81,38 @@ export function Notifications() {
   };
 
   const markRead = async (id: string) => {
-    // Optimistic UI updates
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-    
     await supabase.from("notifications").update({ is_read: true }).eq("id", id);
-    triggerNotificationSync(); // Fire immediate real-time synchronization out to Layout topbars
+    triggerNotificationSync();
   };
 
   const markAllRead = async () => {
-    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-    
-    const { data: auth } = await supabase.auth.getUser();
-    if (!auth?.user) return;
+    try {
+      const { data: auth } = await supabase.auth.getUser();
+      if (!auth?.user) return;
 
-    await supabase
-      .from("notifications")
-      .update({ is_read: true })
-      .eq("vendor_id", auth.user.id)
-      .eq("is_read", false);
-      
-    triggerNotificationSync();
+      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+
+      const { error } = await supabase
+        .from("notifications")
+        .update({ is_read: true })
+        .eq("auth_user_id", auth.user.id)
+        .eq("is_read", false);
+
+      if (error) throw error;
+
+      setSuccessToast("All notifications marked as read.");
+      setTimeout(() => setSuccessToast(null), 3000);
+
+      triggerNotificationSync();
+      await fetchNotifications();
+    } catch (err) {
+      console.error("Batch update notification tracking state failure experienced:", err);
+    }
   };
 
   const deleteNotif = async (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
-    
     await supabase.from("notifications").delete().eq("id", id);
     triggerNotificationSync();
   };
@@ -117,7 +128,15 @@ export function Notifications() {
   return (
     <div className="p-4 lg:p-6 space-y-4">
       
-      {/* 1. Header Action Panel Controls Row */}
+      {/* Toast Alert Feedback Overlay */}
+      {successToast && (
+        <div className="fixed top-4 right-4 z-50 bg-[#10B981] text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-1.5 animate-in fade-in slide-in-from-top-4 duration-200">
+          <CheckCheck className="w-4 h-4" />
+          <span>{successToast}</span>
+        </div>
+      )}
+
+      {/* Header Action Panel Controls Row */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Bell className="w-4 h-4 text-foreground" />
@@ -132,9 +151,9 @@ export function Notifications() {
             <button 
               type="button"
               onClick={markAllRead} 
-              className="h-8 px-3 rounded-lg border border-border bg-card text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors font-medium"
+              className="h-8 px-3 rounded-lg border border-border bg-card text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors font-medium shadow-2xs"
             >
-              <CheckCheck className="w-3.5 h-3.5" /> Mark all read
+              <CheckCheck className="w-3.5 h-3.5 text-[#10B981]" /> Mark all read
             </button>
           )}
           <button type="button" className="h-8 px-3 rounded-lg border border-border bg-card text-xs text-muted-foreground hover:text-foreground flex items-center gap-1.5 transition-colors font-medium">
@@ -143,7 +162,7 @@ export function Notifications() {
         </div>
       </div>
 
-      {/* 2. Interactive Section Category Tab Triggers */}
+      {/* Interactive Section Category Tab Triggers */}
       <div className="flex gap-1.5 overflow-x-auto pb-1 mb-2 scrollbar-none">
         {categories.map(cat => {
           const catCount = cat === "All"
@@ -174,7 +193,7 @@ export function Notifications() {
         })}
       </div>
 
-      {/* 3. Main Data Feed Render Loop Container */}
+      {/* Main Data Feed Render Loop Container */}
       <div className="space-y-2">
         {filtered.length === 0 && (
           <div className="bg-card rounded-xl border border-dashed border-border p-12 text-center">
@@ -184,7 +203,7 @@ export function Notifications() {
         )}
 
         {filtered.map(n => {
-          const cfg = categoryConfig[n.category] || categoryConfig.System;
+          const cfg = categoryConfig[n.category] || categoryConfig.Support;
           const CategoryIcon = cfg.icon;
 
           return (
@@ -207,7 +226,7 @@ export function Notifications() {
                         <p className="text-sm font-semibold text-foreground tracking-tight truncate">{n.title}</p>
                         {!n.is_read && <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] shrink-0" />}
                         <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground bg-muted px-1.5 py-0.5 rounded-md">
-                          {n.category}
+                          {n.category.toUpperCase()}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 font-normal leading-relaxed">{n.message}</p>

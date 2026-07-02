@@ -16,11 +16,11 @@ import { StoreManagement } from "./components/pages/StoreManagement";
 import { Profile } from "./components/pages/Profile";
 import { Settings } from "./components/pages/Settings";
 import { supabase } from "../lib/supabase";
-
+import Subscriptions from "./components/pages/subscriptions";
 type Page =
   | "login" | "register"
   | "dashboard" | "orders" | "products" | "add-product" | "inventory"
-  | "offers" | "analytics" | "settlements" | "reviews" | "notifications"
+  | "offers" | "analytics" | "settlements" | "subscriptions"| "reviews" | "notifications"
   | "store" | "profile" | "settings";
 
 interface VendorMetaState {
@@ -169,6 +169,8 @@ export default function App() {
         return <Analytics />;
       case "settlements":
         return <Settlements />;
+        case "subscriptions":
+  return <Subscriptions />;
       case "reviews":
         return <Reviews />;
       case "notifications":

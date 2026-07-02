@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Eye, EyeOff, Zap, CheckCircle2 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
@@ -17,14 +17,8 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  // Clean Proper Case Categories mapping to new database validation rules
-  const categories = [
-    { id: "Grocery", name: "Grocery" },
-    { id: "Medical", name: "Medical" },
-    { id: "Electronics", name: "Electronics" },
-    { id: "Fashion", name: "Fashion" },
-    { id: "Home & Living", name: "Home & Living" },
-  ];
+  // Dynamic Categories state
+  const [categories, setCategories] = useState<any[]>([]);
 
   // Interface Utility States
   const [showPassword, setShowPassword] = useState(false);
@@ -32,6 +26,23 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  console.log("SUCCESS MESSAGE SET");
+
+  useEffect(() => {
+    loadCategories();
+  }, []);
+
+  const loadCategories = async () => {
+    const { data, error } = await supabase
+      .from("product_categories")
+      .select("id,name")
+      .eq("status", "active")
+      .order("display_order");
+
+    if (!error && data) {
+      setCategories(data);
+    }
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,12 +72,12 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
       // 3. Provision the Core Supabase Auth Account
       console.log("Executing Step 1: Supabase Auth Sign Up for", email);
       const { data: authData, error: authError } = await supabase.auth.signUp({
-  email,
-  password,
-  options: {
-    emailRedirectTo: undefined
-  }
-})
+        email,
+        password,
+        options: {
+          emailRedirectTo: undefined
+        }
+      });
 
       if (authError) {
         console.error("Auth Sign-up Error trace:", authError);
@@ -78,7 +89,7 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
       const uniqueSuffix = Math.floor(1000 + Math.random() * 9000);
       const generatedShopCode = `RIVO-${uniqueSuffix}`;
 
-      // 4. Insert core vendor record
+      // 4. Insert core vendor record with category_id mapping added
       console.log("Executing Step 2: Inserting Vendor Core Record");
       const { data: vendorData, error: vendorError } = await supabase
         .from("vendors")
@@ -89,7 +100,8 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
           email: email.trim(),
           phone,
           shop_code: generatedShopCode,
-          status: "pending"
+          status: "pending",
+          category_id: category
         })
         .select()
         .single();
@@ -117,19 +129,7 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
 
       // 6. Establish Success State Flags / Subscription Setup
       console.log("Executing Step 4: Registering Free Tier Subscription");
-      const { error: subscriptionError } = await supabase
-        .from("subscriptions")
-        .insert({
-          vendor_id: vendorData.id,
-          plan_name: "FREE",
-          commission_percent: 5,
-          status: "active"
-        });
-
-      if (subscriptionError) {
-        console.error("Subscription Assignment Error trace:", subscriptionError);
-        throw new Error(`Default subscription package tie-in failed: ${subscriptionError.message}`);
-      }
+      
 
       setSuccessMessage(`Registration submitted. Your assigned login identifier code is ${generatedShopCode}. Account profile is currently awaiting admin approval.`);
       
