@@ -1,0 +1,20 @@
+{
+  "en": {
+    "translation": {
+      "store_details": "Store Details",
+      "store_name": "Store Name",
+      "tagline": "Tagline",
+      "save_profile": "Save Profile",
+      "account_verified": "Account Verified"
+    }
+  },
+  "mr": {
+    "translation": {
+      "store_details": "दुकान तपशील",
+      "store_name": "दुकानाचे नाव",
+      "tagline": "घोषवाक्य / टॅगलाइन",
+      "save_profile": "प्रोफाइल जतन करा",
+      "account_verified": "खाते सत्यापित झाले"
+    }
+  }
+}
