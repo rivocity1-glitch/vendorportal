@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Search, Plus, Upload, Edit2, Trash2, MoreVertical, Filter, ArrowLeft, Save, Percent, Sparkles, Loader2, Calendar, X, ImagePlus, FileText } from "lucide-react";
+import { 
+  Search, Plus, Upload, Edit2, Trash2, MoreVertical, Filter, ArrowLeft, Save, Percent, Sparkles, Loader2, Calendar, X, ImagePlus, FileText,
+  ShoppingBasket, Pill, Milk, CupSoda, Croissant, Apple, Beef, Fish, Laptop, NotebookPen, Package
+} from "lucide-react";
 import { supabase } from "../../../lib/supabase"; 
 
 interface StoreCategory {
@@ -69,6 +72,48 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
   const taxableSellingPrice = sellPriceNum / (1 + gstPercent / 100);
   const netProfit = costPriceNum > 0 && sellPriceNum > 0 ? taxableSellingPrice - costPriceNum : 0;
   const profitPercentage = costPriceNum > 0 ? (netProfit / costPriceNum) * 100 : 0;
+
+  // Category Icon Helper Function
+  const getCategoryIcon = (categoryName: string) => {
+    switch (categoryName) {
+      case "Grocery":
+        return <ShoppingBasket className="w-4 h-4 text-muted-foreground" />;
+      case "Medical":
+        return <Pill className="w-4 h-4 text-muted-foreground" />;
+      case "Dairy":
+        return <Milk className="w-4 h-4 text-muted-foreground" />;
+      case "Beverages":
+        return <CupSoda className="w-4 h-4 text-muted-foreground" />;
+      case "Bakery":
+        return <Croissant className="w-4 h-4 text-muted-foreground" />;
+      case "Fruits & Vegetables":
+        return <Apple className="w-4 h-4 text-muted-foreground" />;
+      case "Meat":
+        return <Beef className="w-4 h-4 text-muted-foreground" />;
+      case "Seafood":
+        return <Fish className="w-4 h-4 text-muted-foreground" />;
+      case "Personal Care":
+        return <Sparkles className="w-4 h-4 text-muted-foreground" />;
+      case "Home & Kitchen":
+        return <HomeIcon className="w-4 h-4 text-muted-foreground" />; // Home icon falls back if needed, or map directly below
+      case "Electronics":
+        return <Laptop className="w-4 h-4 text-muted-foreground" />;
+      case "Stationery":
+        return <NotebookPen className="w-4 h-4 text-muted-foreground" />;
+      default:
+        return <Package className="w-4 h-4 text-muted-foreground" />;
+    }
+  };
+
+  // Custom localized inline alias for Home to avoid conflicting with original standard elements
+  const HomeIcon = ({ className }: { className?: string }) => {
+    return (
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+    );
+  };
 
   const fetchLiveProducts = async () => {
     try {
@@ -951,10 +996,10 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
                           />
                         ) : null}
                         <div 
-                          className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground shrink-0"
+                          className="w-9 h-9 rounded-lg bg-muted border border-border flex items-center justify-center shrink-0"
                           style={{ display: p.image_url ? "none" : "flex" }}
                         >
-                          {p.img}
+                          {getCategoryIcon(categoryLabel)}
                         </div>
                         <p className="text-sm font-medium text-foreground">{p.name}</p>
                       </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  LayoutDashboard, ShoppingBag, Package, Boxes, Tag, BarChart3,
+  LayoutDashboard, ShoppingBag, FileText, Package, Boxes, Tag, BarChart3,
   Wallet, CreditCard, Star, Bell, Store, User, Settings, Zap, Menu, X,
   ChevronRight, Moon, Sun, LogOut
 } from "lucide-react";
@@ -9,7 +9,7 @@ import { notificationService } from "../../services/notificationService";
 import { notificationSync } from "../../lib/notificationSync";
 
 type Page =
-  | "dashboard" | "orders" | "products" | "add-product" | "inventory"
+  | "dashboard" | "orders" | "invoices" | "products" | "add-product" | "inventory"
   | "offers" | "analytics" | "settlements" | "subscriptions"
   | "reviews" | "notifications"
   | "store" | "profile" | "settings" | "register";
@@ -35,6 +35,7 @@ interface NotificationItem {
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, visible: true },
   { id: "orders", label: "Orders", icon: ShoppingBag, hasBadge: true, badgeKey: "orders", visible: true },
+  { id: "invoices", label: "Invoices", icon: FileText, visible: true },
   { id: "products", label: "Products", icon: Package, visible: true },
   { id: "inventory", label: "Inventory", icon: Boxes, visible: true },
   { id: "offers", label: "Offers & Marketing", icon: Tag, visible: false },
@@ -253,6 +254,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
   const pageLabels: Record<string, string> = {
     dashboard: "Dashboard",
     orders: "Orders",
+    invoices: "Invoices",
     products: "Products",
     "add-product": "Add Product",
     inventory: "Inventory",

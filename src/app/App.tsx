@@ -4,6 +4,7 @@ import { Register } from "./components/pages/Register";
 import { Layout } from "./components/Layout";
 import { Dashboard } from "./components/pages/Dashboard";
 import { Orders } from "./components/pages/Orders";
+import Invoice from "./components/pages/Invoice";
 import { Products } from "./components/pages/Products";
 import { AddEditProduct } from "./components/pages/AddEditProduct";
 import { Inventory } from "./components/pages/Inventory";
@@ -24,6 +25,7 @@ type Page =
   | "register"
   | "dashboard"
   | "orders"
+  | "invoices"
   | "products"
   | "smart-import"
   | "add-product"
@@ -172,6 +174,8 @@ export default function App() {
         return <Dashboard onNavigate={handleNavigate} />;
       case "orders":
         return <Orders />;
+      case "invoices":
+        return <Invoice />;
       case "products":
         return <Products onNavigate={handleNavigate} />;
       case "smart-import":
@@ -193,7 +197,7 @@ export default function App() {
       case "notifications":
         return <Notifications />;
       case "store":
-        return <StoreManagement onNavigate={handleNavigate} />;
+        return <StoreManagement />;
       case "profile":
         return <Profile />;
       case "settings":

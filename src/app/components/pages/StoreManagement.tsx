@@ -1,306 +1,872 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { 
+  Store, 
+  MapPin, 
+  Clock, 
+  FileText, 
+  Building2, 
+  Loader2, 
+  CheckCircle, 
+  AlertCircle,
+  Maximize2,
+  Search,
+  X,
+  Tag
+} from 'lucide-react';
 import { 
   getCurrentVendor, 
   getVendorProfile, 
-  getProductStats, 
-  getRiderStats, 
-  Vendor, 
-  VendorProfile, 
-  ProductStats, 
-  RiderStats 
-} from "../../../services/vendorService";
+  updateVendorProfile,
+  updateStoreOperations,
+  updateBankDetails,
+  updateBusinessDocuments,
+  VendorProfile
+} from '../../../services/vendorService';
+import { supabase } from '../../../lib/supabase';
 
-interface StoreManagementProps {
-  onNavigate: (route: string) => void;
+interface ProductCategory {
+  id: string;
+  name: string;
+  status: string;
 }
 
-export default function StoreManagement({ onNavigate }: StoreManagementProps) {
+export default function StoreManagement() {
+  // --- STATE FOR CORE VENDOR ---
+  const [vendorId, setVendorId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
   
-  const [vendor, setVendor] = useState<Vendor | null>(null);
-  const [profile, setProfile] = useState<VendorProfile | null>(null);
-  const [productStats, setProductStats] = useState<ProductStats | null>(null);
-  const [riderStats, setRiderStats] = useState<RiderStats | null>(null);
+  // --- TOAST NOTIFICATIONS STATE ---
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // --- INDEPENDENT SECTIONS LOAD/SAVE STATES ---
+  const [savingSection, setSavingSection] = useState<string | null>(null);
+
+  // --- SECTION 1: STORE INFO ---
+  const [storeName, setStoreName] = useState('');
+  const [tagline, setTagline] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [bannerUrl, setBannerUrl] = useState('');
+
+  // --- NEW CATEGORIES STATES ---
+  const [availableCategories, setAvailableCategories] = useState<ProductCategory[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState<boolean>(false);
+  const [primaryCategoryId, setPrimaryCategoryId] = useState<string>('');
+  const [additionalCategoryNames, setAdditionalCategoryNames] = useState<string[]>([]);
+  const [categorySearch, setCategorySearch] = useState<string>('');
+
+  // --- SECTION 2: STORE LOCATION ---
+  const [addressLine1, setAddressLine1] = useState('');
+  const [addressLine2, setAddressLine2] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [pinCode, setPinCode] = useState('');
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+
+  // --- SECTION 3: BUSINESS OPERATIONS ---
+  const [storeStatus, setStoreStatus] = useState('closed');
+  const [businessHours, setBusinessHours] = useState<any>({ open: '09:00', close: '22:00' });
+
+  // --- SECTION 4: BUSINESS DOCUMENTS ---
+  const [panNumber, setPanNumber] = useState('');
+  const [gstNumber, setGstNumber] = useState('');
+  const [fssaiLicense, setFssaiLicense] = useState('');
+  const [drugLicense, setDrugLicense] = useState('');
+  const [drugLicenseExpiry, setDrugLicenseExpiry] = useState('');
+
+  // --- SECTION 5: BANK DETAILS ---
+  const [accountHolderName, setAccountHolderName] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
+  const [upiId, setUpiId] = useState('');
+
+  // --- HELPER SHOW TOAST ---
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  // --- COMPUTE ENTIRE LIST OF SELECTED CATEGORY NAMES FOR MEDICAL LOGIC & DISPLAY ---
+  const allSelectedCategoryNames = useMemo(() => {
+    const list: string[] = [];
+    const primaryObj = availableCategories.find(c => c.id === primaryCategoryId);
+    if (primaryObj) {
+      list.push(primaryObj.name.trim());
+    }
+    additionalCategoryNames.forEach(name => {
+      const trimmed = name.trim();
+      if (trimmed && !list.includes(trimmed)) {
+        list.push(trimmed);
+      }
+    });
+    return list.sort((a, b) => a.localeCompare(b));
+  }, [primaryCategoryId, additionalCategoryNames, availableCategories]);
+
+  // --- CONDITIONAL MEDICAL CATEGORY DETECT ---
+  const displaysDrugLicense = useMemo(() => {
+    return allSelectedCategoryNames.some(name => name.toLowerCase().includes('medical') || name.toLowerCase().includes('pharmacy'));
+  }, [allSelectedCategoryNames]);
+
+  // --- FILTERED ADDITIONAL CATEGORIES FOR SEARCH ---
+  const filteredAvailableCategories = useMemo(() => {
+    return availableCategories.filter(cat => {
+      const matchesSearch = cat.name.toLowerCase().includes(categorySearch.toLowerCase());
+      const isPrimary = cat.id === primaryCategoryId;
+      return matchesSearch && !isPrimary;
+    });
+  }, [availableCategories, categorySearch, primaryCategoryId]);
+
+  // --- LOAD DYNAMIC CATEGORIES ---
+  const loadProductCategories = async () => {
+    try {
+      setCategoriesLoading(true);
+      const { data, error } = await supabase
+        .from('product_categories')
+        .select('id, name, status')
+        .eq('status', 'active');
+      
+      if (error) throw error;
+      if (data) {
+        const sorted = (data as ProductCategory[]).sort((a, b) => a.name.localeCompare(b.name));
+        setAvailableCategories(sorted);
+      }
+    } catch (err: any) {
+      console.error('Error loading product categories:', err);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  };
+
+  // --- INITIAL DATA FETCH ---
   useEffect(() => {
-    async function loadDashboardData() {
+    async function loadData() {
       try {
         setLoading(true);
-        setError(null);
+        await loadProductCategories();
 
-        // Fetch current vendor first to secure the vendorId
         const vendorRes = await getCurrentVendor();
         if (!vendorRes.success || !vendorRes.data) {
-          throw new Error(vendorRes.error || 'Failed to resolve current vendor context.');
+          throw new Error(vendorRes.error || 'Failed to locate vendor token metadata.');
         }
-        setVendor(vendorRes.data);
-        const vendorId = vendorRes.data.id;
 
-        // Execute subsequent state fetches concurrently using the resolved vendorId
-        const [profileRes, productRes, riderRes] = await Promise.all([
-          getVendorProfile(vendorId),
-          getProductStats(vendorId),
-          getRiderStats(vendorId),
-        ]);
+        const currentId = vendorRes.data.id;
+        setVendorId(currentId);
+        if (vendorRes.data.category_id) {
+          setPrimaryCategoryId(vendorRes.data.category_id);
+        }
 
-        if (!profileRes.success) throw new Error(profileRes.error || 'Failed to load vendor profile.');
-        if (!productRes.success) throw new Error(productRes.error || 'Failed to load inventory metrics.');
-        if (!riderRes.success) throw new Error(riderRes.error || 'Failed to load logistics metrics.');
+        const profileRes = await getVendorProfile(currentId);
+        if (!profileRes.success || !profileRes.data) {
+          throw new Error(profileRes.error || 'Failed to sync structural profile values.');
+        }
 
-        setProfile(profileRes.data || null);
-        setProductStats(productRes.data || null);
-        setRiderStats(riderRes.data || null);
+        const profile: VendorProfile = profileRes.data;
+        
+        // Populate Component State Trees
+        setStoreName(profile.store_name || vendorRes.data.shop_name || '');
+        setTagline(profile.tagline || '');
+        setAvatarUrl(profile.avatar_url || '');
+        setBannerUrl(profile.banner_url || '');
+        
+        // Initialize additional category names safely filter out any UUID leaks if they exist
+        if (profile.categories && Array.isArray(profile.categories)) {
+          setAdditionalCategoryNames(profile.categories);
+        }
+        
+        setAddressLine1(profile.address_line1 || '');
+        setAddressLine2(profile.address_line2 || '');
+        setCity(profile.city || '');
+        setState(profile.state || '');
+        setPinCode(profile.pin_code || '');
+        setLatitude(profile.latitude ? String(profile.latitude) : '');
+        setLongitude(profile.longitude ? String(profile.longitude) : '');
+
+        setStoreStatus(profile.store_status || 'closed');
+        if (profile.business_hours) setBusinessHours(profile.business_hours);
+
+        setPanNumber(profile.pan_number || '');
+        setGstNumber(profile.gst_number || '');
+        setFssaiLicense(profile.fssai_license || '');
+        setDrugLicense(profile.drug_license || '');
+        setDrugLicenseExpiry(profile.drug_license_expiry || '');
+
+        setAccountHolderName(profile.account_holder_name || '');
+        setBankName(profile.bank_name || '');
+        setAccountNumber(profile.account_number || '');
+        setIfscCode(profile.ifsc_code || '');
+        setUpiId(profile.upi_id || '');
+
       } catch (err: any) {
-        setError(err.message || 'An unexpected error occurred while compiling store data.');
+        showToast(err.message || 'Error processing sync sequence.', 'error');
       } finally {
         setLoading(false);
       }
     }
-
-    loadDashboardData();
+    loadData();
   }, []);
 
-  const renderValue = (value: any) => {
-    if (value === null || value === undefined || String(value).trim() === '') {
-      return <span className="text-muted-foreground italic font-normal text-sm">Not Configured</span>;
+  // --- HANDLERS FOR NEW CATEGORY UI ---
+  const handlePrimaryCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const nextPrimaryId = e.target.value;
+    setPrimaryCategoryId(nextPrimaryId);
+  };
+
+  const handleToggleAdditionalCategory = (name: string) => {
+    const trimmed = name.trim();
+    if (additionalCategoryNames.includes(trimmed)) {
+      setAdditionalCategoryNames(additionalCategoryNames.filter(n => n !== trimmed));
+    } else {
+      setAdditionalCategoryNames([...additionalCategoryNames, trimmed]);
     }
-    return String(value);
+  };
+
+  const handleRemoveCategoryPill = (name: string) => {
+    const trimmed = name.trim();
+    const primaryObj = availableCategories.find(c => c.id === primaryCategoryId);
+    if (primaryObj && primaryObj.name.trim() === trimmed) {
+      showToast("Please choose another Primary Category.", "error");
+      return;
+    }
+    setAdditionalCategoryNames(additionalCategoryNames.filter(n => n.trim() !== trimmed));
+  };
+
+  // --- DETECT CURRENT LOCATION GPS ---
+  const handleDetectLocation = () => {
+    if (!navigator.geolocation) {
+      showToast('Geolocation is not supported by your browser framework.', 'error');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLatitude(String(position.coords.latitude));
+        setLongitude(String(position.coords.longitude));
+        showToast('Coordinates synchronized accurately.', 'success');
+      },
+      () => {
+        showToast('Unable to securely isolate current terminal location parameters.', 'error');
+      }
+    );
+  };
+
+  // --- SAVE ACTIONS BY SECTION ---
+
+  const saveStoreInfo = async () => {
+    if (!vendorId) return;
+    if (!storeName.trim()) {
+      showToast('Store Name tracking constraint requires valid strings.', 'error');
+      return;
+    }
+    if (!primaryCategoryId) {
+      showToast('One primary category selection is mandatory.', 'error');
+      return;
+    }
+
+    setSavingSection('info');
+    try {
+      // Core validation check to ensure primary is auto-populated inside profiles listing array safely
+      const primaryObj = availableCategories.find(c => c.id === primaryCategoryId);
+      if (!primaryObj) {
+        throw new Error('Selected primary category configuration parameters are out of sync.');
+      }
+
+      const primaryName = primaryObj.name.trim();
+      let updatedList = [...additionalCategoryNames.map(n => n.trim())];
+      if (!updatedList.includes(primaryName)) {
+        updatedList.push(primaryName);
+      }
+      
+      // Filter out duplicate or whitespace elements and sort alphabetically
+      updatedList = Array.from(new Set(updatedList))
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b));
+
+      // 1. Update Core vendors table category_id field mapping
+      const { error: vendorError } = await supabase
+        .from('vendors')
+        .update({ category_id: primaryCategoryId })
+        .eq('id', vendorId);
+
+      if (vendorError) throw vendorError;
+
+      // 2. Update profiles table list mapping containing strings only
+      const res = await updateVendorProfile(vendorId, {
+        store_name: storeName.trim(),
+        tagline: tagline.trim(),
+        avatar_url: avatarUrl,
+        banner_url: bannerUrl,
+        categories: updatedList
+      });
+
+      if (!res.success) throw new Error(res.error || 'Extended vendor profiles updating routine failure.');
+      
+      // Update local state cleanly with sorted strings
+      setAdditionalCategoryNames(updatedList.filter(n => n !== primaryName));
+      showToast('Store Information saved successfully.', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Save execution fault.', 'error');
+    } finally {
+      setSavingSection(null);
+    }
+  };
+
+  const saveLocation = async () => {
+    if (!vendorId) return;
+    if (pinCode && !/^\d{6}$/.test(pinCode.trim())) {
+      showToast('PIN format sequence must follow standard 6-digit constraints.', 'error');
+      return;
+    }
+    if ((latitude && isNaN(Number(latitude))) || (longitude && isNaN(Number(longitude)))) {
+      showToast('Coordinates require accurate integer patterns.', 'error');
+      return;
+    }
+    setSavingSection('location');
+    const res = await updateVendorProfile(vendorId, {
+      address_line1: addressLine1,
+      address_line2: addressLine2,
+      city: city,
+      state: state,
+      pin_code: pinCode,
+      latitude: latitude ? Number(latitude) : null,
+      longitude: longitude ? Number(longitude) : null
+    });
+    setSavingSection(null);
+    if (res.success) showToast('Location routing parameters saved.', 'success');
+    else showToast(res.error || 'Save failed.', 'error');
+  };
+
+  const saveOperations = async () => {
+    if (!vendorId) return;
+    setSavingSection('operations');
+    const res = await updateStoreOperations(vendorId, {
+      store_status: storeStatus,
+      business_hours: businessHours,
+      delivery_radius_km: null,
+      minimum_order: null,
+      preparation_time_minutes: null
+    });
+    setSavingSection(null);
+    if (res.success) showToast('Operational parameters updated.', 'success');
+    else showToast(res.error || 'Save failed.', 'error');
+  };
+
+  const saveDocuments = async () => {
+    if (!vendorId) return;
+    setSavingSection('documents');
+    const res = await updateBusinessDocuments(vendorId, {
+      pan_number: panNumber,
+      gst_number: gstNumber,
+      fssai_license: fssaiLicense,
+      drug_license: displaysDrugLicense ? drugLicense : null,
+      drug_license_expiry: displaysDrugLicense ? drugLicenseExpiry : null
+    });
+    setSavingSection(null);
+    if (res.success) showToast('Verification vectors saved.', 'success');
+    else showToast(res.error || 'Save failed.', 'error');
+  };
+
+  const saveBankDetails = async () => {
+    if (!vendorId) return;
+    setSavingSection('bank');
+    const res = await updateBankDetails(vendorId, {
+      account_holder_name: accountHolderName,
+      bank_name: bankName,
+      account_number: accountNumber,
+      ifsc_code: ifscCode,
+      upi_id: upiId
+    });
+    setSavingSection(null);
+    if (res.success) showToast('Bank details saved.', 'success');
+    else showToast(res.error || 'Save failed.', 'error');
   };
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-6">
-        <div className="flex items-center space-x-3">
-          <svg className="animate-spin h-5 w-5 text-foreground" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-          </svg>
-          <span className="text-sm font-medium tracking-wide">Syncing store records...</span>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background text-foreground p-6">
-        <div className="max-w-md w-full bg-card border border-border rounded-lg p-6 shadow-sm text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-100 dark:bg-red-950/30 text-red-600 dark:text-red-400 mb-4">
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-          <h2 className="text-lg font-semibold mb-2">Data Synchronization Failed</h2>
-          <p className="text-sm text-muted-foreground mb-6">{error}</p>
-          <button 
-            onClick={() => window.location.reload()}
-            className="w-full inline-flex justify-center items-center px-4 py-2 border border-border text-sm font-medium rounded-md bg-background hover:bg-card transition-colors duration-200"
-          >
-            Retry Verification
-          </button>
-        </div>
+      <div className="flex h-96 w-full items-center justify-center bg-slate-50 dark:bg-slate-900">
+        <Loader2 className="h-10 w-10 animate-spin text-emerald-500" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground antialiased transition-colors duration-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        
-        {/* Header */}
-        <header className="mb-8 pb-5 border-b border-border flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">{vendor?.shop_name || 'Store Management'}</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Terminal configuration and operational analytics for Shop Code: <span className="font-mono font-medium text-foreground">{vendor?.shop_code || 'N/A'}</span>
-            </p>
-          </div>
-          
-          <div className="flex items-center space-x-3">
-            <span className="text-xs font-semibold tracking-wider uppercase text-muted-foreground">Operational State:</span>
-            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium tracking-wide border ${
-              vendor?.status === 'active' 
-                ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-950/20 dark:text-green-400 dark:border-green-900/50' 
-                : 'bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-950/20 dark:text-yellow-400 dark:border-yellow-900/50'
-            }`}>
-              {vendor?.status ? vendor.status.toUpperCase() : 'UNKNOWN'}
-            </span>
-          </div>
-        </header>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          
-          {/* Main Configuration Metrics Column */}
-          <div className="lg:col-span-2 space-y-8">
-            
-            {/* Store Overview Card */}
-            <section className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-              <div className="border-b border-border px-6 py-4 bg-muted/20">
-                <h2 className="text-base font-semibold tracking-tight">Core Identity Context</h2>
-              </div>
-              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Shop Name</label>
-                  <div className="text-sm font-medium">{renderValue(vendor?.shop_name)}</div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Shop Code</label>
-                  <div className="text-sm font-mono font-medium">{renderValue(vendor?.shop_code)}</div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Owner Name</label>
-                  <div className="text-sm font-medium">{renderValue(vendor?.owner_name)}</div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Phone Reference</label>
-                  <div className="text-sm font-medium">{renderValue(vendor?.phone)}</div>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Email Interface</label>
-                  <div className="text-sm font-medium">{renderValue(vendor?.email)}</div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Store Status</label>
-                  <div className="text-sm font-medium">{renderValue(profile?.store_status)}</div>
-                </div>
-              </div>
-            </section>
-
-            {/* Business Information Card */}
-            <section className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-              <div className="border-b border-border px-6 py-4 bg-muted/20">
-                <h2 className="text-base font-semibold tracking-tight">Regulatory & Compliance Credentials</h2>
-              </div>
-              <div className="p-6 grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Address Line 1</label>
-                  <div className="text-sm font-medium">{renderValue(profile?.address_line1)}</div>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">Address Line 2</label>
-                  <div className="text-sm font-medium">{renderValue(profile?.address_line2)}</div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">City</label>
-                  <div className="text-sm font-medium">{renderValue(profile?.city)}</div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">State</label>
-                  <div className="text-sm font-medium">{renderValue(profile?.state)}</div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">PIN Code</label>
-                  <div className="text-sm font-mono font-medium">{renderValue(profile?.pin_code)}</div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">GST Number</label>
-                  <div className="text-sm font-mono font-medium tracking-wide">{renderValue(profile?.gst_number)}</div>
-                </div>
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium uppercase tracking-wider text-muted-foreground mb-1">FSSAI License</label>
-                  <div className="text-sm font-mono font-medium tracking-wide">{renderValue(profile?.fssai_license)}</div>
-                </div>
-              </div>
-            </section>
-
-          </div>
-
-          {/* Side Performance Data & Actions Column */}
-          <div className="space-y-8">
-            
-            {/* Quick Actions Panel */}
-            <section className="bg-card border border-border rounded-xl shadow-sm p-6">
-              <h2 className="text-base font-semibold tracking-tight mb-4">Control System</h2>
-              <div className="grid grid-cols-1 gap-3">
-                <button
-                  onClick={() => onNavigate('products')}
-                  className="w-full inline-flex items-center justify-between px-4 py-3 border border-border text-sm font-medium rounded-lg bg-background hover:bg-muted/30 transition-all duration-150"
-                >
-                  <span>Products</span>
-                  <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => onNavigate('smart-import')}
-                  className="w-full inline-flex items-center justify-between px-4 py-3 border border-border text-sm font-medium rounded-lg bg-background hover:bg-muted/30 transition-all duration-150"
-                >
-                  <span>Smart Import</span>
-                  <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => onNavigate('settings')}
-                  className="w-full inline-flex items-center justify-between px-4 py-3 border border-border text-sm font-medium rounded-lg bg-background hover:bg-muted/30 transition-all duration-150"
-                >
-                  <span>Settings</span>
-                  <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => onNavigate('profile')}
-                  className="w-full inline-flex items-center justify-between px-4 py-3 border border-border text-sm font-medium rounded-lg bg-background hover:bg-muted/30 transition-all duration-150"
-                >
-                  <span>Profile</span>
-                  <svg className="w-4 h-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              </div>
-            </section>
-
-            {/* Inventory Statistics */}
-            <section className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-              <div className="border-b border-border px-6 py-4 bg-muted/20">
-                <h2 className="text-base font-semibold tracking-tight">Inventory Statistics</h2>
-              </div>
-              <div className="divide-y divide-border">
-                <div className="px-6 py-4 flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Total Products</span>
-                  <span className="text-lg font-bold tracking-tight">{productStats?.totalProducts ?? 0}</span>
-                </div>
-                <div className="px-6 py-4 flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Active Products</span>
-                  <span className="text-lg font-bold text-green-600 dark:text-green-400 tracking-tight">{productStats?.activeProducts ?? 0}</span>
-                </div>
-                <div className="px-6 py-4 flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Out of Stock</span>
-                  <span className="text-lg font-bold text-red-600 dark:text-red-400 tracking-tight">{productStats?.outOfStockProducts ?? 0}</span>
-                </div>
-                <div className="px-6 py-4 flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Inactive Products</span>
-                  <span className="text-lg font-bold text-yellow-600 dark:text-yellow-400 tracking-tight">{productStats?.inactiveProducts ?? 0}</span>
-                </div>
-              </div>
-            </section>
-
-            {/* Rider Statistics */}
-            <section className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
-              <div className="border-b border-border px-6 py-4 bg-muted/20">
-                <h2 className="text-base font-semibold tracking-tight">Rider Statistics</h2>
-              </div>
-              <div className="divide-y divide-border">
-                <div className="px-6 py-4 flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Assigned Riders</span>
-                  <span className="text-lg font-bold tracking-tight">{riderStats?.assignedRiders ?? 0}</span>
-                </div>
-                <div className="px-6 py-4 flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Available Riders</span>
-                  <span className="text-lg font-bold text-green-600 dark:text-green-400 tracking-tight">{riderStats?.availableRiders ?? 0}</span>
-                </div>
-                <div className="px-6 py-4 flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">Busy Riders</span>
-                  <span className="text-lg font-bold text-amber-600 dark:text-amber-400 tracking-tight">{riderStats?.busyRiders ?? 0}</span>
-                </div>
-              </div>
-            </section>
-
-          </div>
-
+    <div className="space-y-8 p-6 max-w-(--size-breakpoint-md) mx-auto min-h-screen transition-colors duration-200">
+      
+      {/* TOAST PANEL */}
+      {toast && (
+        <div className={`fixed top-6 right-6 z-50 flex items-center gap-2 px-4 py-3 rounded-xl shadow-lg text-white font-medium transition-all duration-300 ${
+          toast.type === 'success' ? 'bg-slate-900 border border-emerald-500/30' : 'bg-rose-600'
+        }`}>
+          {toast.type === 'success' ? <CheckCircle size={16} className="text-emerald-500" /> : <AlertCircle size={16} />}
+          <span className="text-sm">{toast.message}</span>
         </div>
+      )}
+
+      {/* HEADER SECTION */}
+      <div className="pb-4 border-b border-slate-200 dark:border-slate-800">
+        <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Store Management</h1>
+        <p className="text-slate-500 text-sm mt-1">Configure business operating metadata controls and verification references</p>
+      </div>
+
+      {/* SINGLE CENTERED COLUMN LAYOUT */}
+      <div className="space-y-8">
+        
+        {/* SECTION 1: STORE INFORMATION */}
+        <section className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
+            <Store className="text-emerald-500" size={18} />
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Store Information</h2>
+          </div>
+
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Store Name *</label>
+                <input 
+                  type="text" 
+                  value={storeName} 
+                  onChange={e => setStoreName(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Tagline</label>
+                <input 
+                  type="text" 
+                  value={tagline} 
+                  onChange={e => setTagline(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            {/* DYNAMIC RE-ENGINEERED PREMIUM CATEGORIES SECTOR */}
+            <div className="border border-slate-100 dark:border-slate-900 bg-slate-50/50 dark:bg-slate-900/30 rounded-2xl p-5 space-y-5">
+              
+              {/* PRIMARY SELECTION SECTION */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">Primary Category</label>
+                {categoriesLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-400 py-1.5">
+                    <Loader2 size={12} className="animate-spin text-emerald-500" /> Syncing tracking array...
+                  </div>
+                ) : (
+                  <select
+                    value={primaryCategoryId}
+                    onChange={handlePrimaryCategoryChange}
+                    className="w-full h-10 px-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                  >
+                    <option value="" disabled>Select Category ▼</option>
+                    {availableCategories.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* ADDITIONAL MULTI-CHIP SELECT ROUTINE PANEL */}
+              <div className="space-y-2.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">Additional Categories</label>
+                
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    value={categorySearch}
+                    onChange={e => setCategorySearch(e.target.value)}
+                    placeholder="Search Categories"
+                    className="w-full h-10 pl-9 pr-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="max-h-40 overflow-y-auto border border-slate-100 dark:border-slate-900 bg-white dark:bg-slate-950 rounded-xl p-3 grid grid-cols-2 gap-2 scrollbar-thin">
+                  {filteredAvailableCategories.length > 0 ? (
+                    filteredAvailableCategories.map(cat => {
+                      const isChecked = additionalCategoryNames.includes(cat.name.trim());
+                      return (
+                        <label key={cat.id} className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-900 rounded-lg cursor-pointer transition text-sm select-none text-slate-700 dark:text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleAdditionalCategory(cat.name)}
+                            className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/20 w-4 h-4 transition-colors"
+                          />
+                          <span>{cat.name}</span>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <span className="text-xs text-slate-400 italic p-1">No matching categories found</span>
+                  )}
+                </div>
+              </div>
+
+              {/* VISUAL pill PIECES MATRIX PRESENTATION */}
+              <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-slate-800/60">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">Selected Categories</label>
+                {allSelectedCategoryNames.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 animate-in fade-in duration-200">
+                    {allSelectedCategoryNames.map((name, i) => {
+                      const primaryObj = availableCategories.find(c => c.id === primaryCategoryId);
+                      const isPrimary = primaryObj && primaryObj.name.trim() === name;
+                      return (
+                        <span 
+                          key={i} 
+                          className={`text-xs font-medium px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition-all select-none ${
+                            isPrimary 
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 font-bold'
+                              : 'bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                          }`}
+                        >
+                          <Tag size={12} className={isPrimary ? 'text-emerald-500' : 'text-slate-400'} />
+                          <span>{name} {isPrimary && <span className="text-[10px] opacity-70 uppercase tracking-wide ml-0.5">(Primary)</span>}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCategoryPill(name)}
+                            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-0.5 transition-colors"
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <span className="text-xs text-slate-400 italic">No categories selected. Required baseline mapping missing.</span>
+                )}
+              </div>
+
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button 
+              type="button" 
+              onClick={saveStoreInfo}
+              disabled={savingSection !== null}
+              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-xs shadow-emerald-500/10 flex items-center gap-1.5"
+            >
+              {savingSection === 'info' && <Loader2 size={12} className="animate-spin" />}
+              Save Changes
+            </button>
+          </div>
+        </section>
+
+        {/* SECTION 2: STORE LOCATION */}
+        <section className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
+            <MapPin className="text-emerald-500" size={18} />
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Store Location</h2>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Address Line 1</label>
+                <input 
+                  type="text" 
+                  value={addressLine1} 
+                  onChange={e => setAddressLine1(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Address Line 2</label>
+                <input 
+                  type="text" 
+                  value={addressLine2} 
+                  onChange={e => setAddressLine2(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">City</label>
+                <input 
+                  type="text" 
+                  value={city} 
+                  onChange={e => setCity(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">State</label>
+                <input 
+                  type="text" 
+                  value={state} 
+                  onChange={e => setState(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">PIN Code</label>
+                <input 
+                  type="text" 
+                  value={pinCode} 
+                  onChange={e => setPinCode(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Latitude</label>
+                <input 
+                  type="text" 
+                  value={latitude} 
+                  onChange={e => setLatitude(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Longitude</label>
+                <input 
+                  type="text" 
+                  value={longitude} 
+                  onChange={e => setLongitude(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-4 items-stretch pt-2">
+              <button
+                type="button"
+                onClick={handleDetectLocation}
+                className="h-10 px-4 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 transition rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+              >
+                <MapPin size={14} /> Detect Current Location
+              </button>
+              
+              {latitude && longitude && (
+                <div className="flex-1 min-h-[60px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs text-slate-400">
+                  <span className="font-mono truncate">Map Matrix Active: Lat:{Number(latitude).toFixed(4)} Lon:{Number(longitude).toFixed(4)}</span>
+                  <Maximize2 size={14} className="opacity-40 shrink-0" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button 
+              type="button" 
+              onClick={saveLocation}
+              disabled={savingSection !== null}
+              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+            >
+              {savingSection === 'location' && <Loader2 size={12} className="animate-spin" />}
+              Save Changes
+            </button>
+          </div>
+        </section>
+
+        {/* SECTION 3: BUSINESS OPERATIONS */}
+        <section className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
+            <Clock className="text-emerald-500" size={18} />
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Business Operations</h2>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Store Status</label>
+                <select 
+                  value={storeStatus}
+                  onChange={e => setStoreStatus(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                >
+                  <option value="open">Open</option>
+                  <option value="busy">Busy</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Opening Time</label>
+                  <input 
+                    type="time" 
+                    value={businessHours.open || '09:00'}
+                    onChange={e => setBusinessHours({ ...businessHours, open: e.target.value })}
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Closing Time</label>
+                  <input 
+                    type="time" 
+                    value={businessHours.close || '22:00'}
+                    onChange={e => setBusinessHours({ ...businessHours, close: e.target.value })}
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button 
+              type="button" 
+              onClick={saveOperations}
+              disabled={savingSection !== null}
+              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+            >
+              {savingSection === 'operations' && <Loader2 size={12} className="animate-spin" />}
+              Save Changes
+            </button>
+          </div>
+        </section>
+
+        {/* SECTION 4: BUSINESS DOCUMENTS */}
+        <section className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
+            <FileText className="text-emerald-500" size={18} />
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Business Documents</h2>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">PAN Number</label>
+                <input 
+                  type="text" 
+                  value={panNumber} 
+                  onChange={e => setPanNumber(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono uppercase"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">GST Number</label>
+                <input 
+                  type="text" 
+                  value={gstNumber} 
+                  onChange={e => setGstNumber(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono uppercase"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">FSSAI License</label>
+                <input 
+                  type="text" 
+                  value={fssaiLicense} 
+                  onChange={e => setFssaiLicense(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono"
+                />
+              </div>
+            </div>
+
+            {displaysDrugLicense && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-dashed border-slate-100 dark:border-slate-900">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Drug Licence Number</label>
+                  <input 
+                    type="text" 
+                    value={drugLicense} 
+                    onChange={e => setDrugLicense(e.target.value)}
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Drug Licence Expiry</label>
+                  <input 
+                    type="date" 
+                    value={drugLicenseExpiry} 
+                    onChange={e => setDrugLicenseExpiry(e.target.value)}
+                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end">
+            <button 
+              type="button" 
+              onClick={saveDocuments}
+              disabled={savingSection !== null}
+              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+            >
+              {savingSection === 'documents' && <Loader2 size={12} className="animate-spin" />}
+              Save Changes
+            </button>
+          </div>
+        </section>
+
+        {/* SECTION 5: BANK DETAILS */}
+        <section className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
+            <Building2 className="text-emerald-500" size={18} />
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Bank Details</h2>
+          </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Account Holder Name</label>
+                <input 
+                  type="text" 
+                  value={accountHolderName} 
+                  onChange={e => setAccountHolderName(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Bank Name</label>
+                <input 
+                  type="text" 
+                  value={bankName} 
+                  onChange={e => setBankName(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Account Number</label>
+                <input 
+                  type="text" 
+                  value={accountNumber} 
+                  onChange={e => setAccountNumber(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">IFSC Code</label>
+                <input 
+                  type="text" 
+                  value={ifscCode} 
+                  onChange={e => setIfscCode(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono uppercase"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">UPI ID</label>
+                <input 
+                  type="text" 
+                  value={upiId} 
+                  onChange={e => setUpiId(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button 
+              type="button" 
+              onClick={saveBankDetails}
+              disabled={savingSection !== null}
+              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
+            >
+              {savingSection === 'bank' && <Loader2 size={12} className="animate-spin" />}
+              Save Changes
+            </button>
+          </div>
+        </section>
 
       </div>
     </div>

@@ -24,18 +24,45 @@ export interface Vendor {
 
 export interface VendorProfile {
   vendor_id: string;
-  address_line1: string;
-  address_line2: string;
-  city: string;
-  state: string;
-  pin_code: string;
-  gst_number: string;
-  fssai_license: string;
-  store_status: string;
-  banner_url: string;
-  latitude: number;
-  longitude: number;
-  qr_code_url: string;
+  store_name: string | null;
+  tagline: string | null;
+  categories: string[] | null;
+  avatar_url: string | null;
+  banner_url: string | null;
+  address_line1: string | null;
+  address_line2: string | null;
+  city: string | null;
+  state: string | null;
+  pin_code: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  store_status: string | null;
+  status_remarks: string | null;
+  business_hours: any | null;
+  delivery_radius_km: number | null;
+  minimum_order: number | null;
+  preparation_time_minutes: number | null;
+  pan_number: string | null;
+  gst_number: string | null;
+  fssai_license: string | null;
+  drug_license: string | null;
+  drug_license_expiry: string | null;
+  account_holder_name: string | null;
+  bank_name: string | null;
+  account_number: string | null;
+  ifsc_code: string | null;
+  upi_id: string | null;
+  qr_code_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StoreImage {
+  id: string;
+  vendor_id: string;
+  image_url: string;
+  display_order: number;
+  created_at: string;
 }
 
 export interface ProductStats {
@@ -97,7 +124,7 @@ export async function getVendorProfile(vendorId: string): Promise<ServiceRespons
 
     const { data, error } = await supabase
       .from('vendor_profiles')
-      .select('vendor_id, address_line1, address_line2, city, state, pin_code, gst_number, fssai_license, store_status, banner_url, latitude, longitude, qr_code_url')
+      .select('*')
       .eq('vendor_id', vendorId)
       .single();
 
@@ -191,6 +218,250 @@ export async function getRiderStats(vendorId: string): Promise<ServiceResponse<R
     return {
       success: false,
       error: err.message || 'An unexpected error occurred while computing rider statistics.',
+    };
+  }
+}
+
+/**
+ * Updates comprehensive vendor profile data records.
+ */
+export async function updateVendorProfile(
+  vendorId: string,
+  profileData: Partial<Omit<VendorProfile, 'vendor_id' | 'created_at' | 'updated_at'>>
+): Promise<ServiceResponse<VendorProfile>> {
+  try {
+    if (!vendorId) {
+      return { success: false, error: 'Vendor ID is required.' };
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_profiles')
+      .update(profileData)
+      .eq('vendor_id', vendorId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data: data as VendorProfile };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'An unexpected error occurred while updating the vendor profile.',
+    };
+  }
+}
+
+/**
+ * Updates localized operational configurations and parameters for store mapping.
+ */
+export async function updateStoreOperations(
+  vendorId: string,
+  operations: {
+    store_status: string | null;
+    business_hours: any | null;
+    delivery_radius_km: number | null;
+    minimum_order: number | null;
+    preparation_time_minutes: number | null;
+  }
+): Promise<ServiceResponse<VendorProfile>> {
+  try {
+    if (!vendorId) {
+      return { success: false, error: 'Vendor ID is required.' };
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_profiles')
+      .update(operations)
+      .eq('vendor_id', vendorId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data: data as VendorProfile };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'An unexpected error occurred while updating store operations.',
+    };
+  }
+}
+
+/**
+ * Updates disbursement variables and clearing routing settings for the vendor.
+ */
+export async function updateBankDetails(
+  vendorId: string,
+  bankDetails: {
+    account_holder_name: string | null;
+    bank_name: string | null;
+    account_number: string | null;
+    ifsc_code: string | null;
+    upi_id: string | null;
+  }
+): Promise<ServiceResponse<VendorProfile>> {
+  try {
+    if (!vendorId) {
+      return { success: false, error: 'Vendor ID is required.' };
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_profiles')
+      .update(bankDetails)
+      .eq('vendor_id', vendorId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data: data as VendorProfile };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'An unexpected error occurred while updating bank details.',
+    };
+  }
+}
+
+/**
+ * Updates required compliance verification context strings safely.
+ */
+export async function updateBusinessDocuments(
+  vendorId: string,
+  documents: {
+    pan_number: string | null;
+    gst_number: string | null;
+    fssai_license: string | null;
+    drug_license: string | null;
+    drug_license_expiry: string | null;
+  }
+): Promise<ServiceResponse<VendorProfile>> {
+  try {
+    if (!vendorId) {
+      return { success: false, error: 'Vendor ID is required.' };
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_profiles')
+      .update(documents)
+      .eq('vendor_id', vendorId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data: data as VendorProfile };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'An unexpected error occurred while updating business documents.',
+    };
+  }
+}
+
+/**
+ * Returns complete layout storage arrays of store images sorted sequentially.
+ */
+export async function getStoreImages(vendorId: string): Promise<ServiceResponse<StoreImage[]>> {
+  try {
+    if (!vendorId) {
+      return { success: false, error: 'Vendor ID is required.' };
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_store_images')
+      .select('*')
+      .eq('vendor_id', vendorId)
+      .order('display_order', { ascending: true });
+
+    if (error) throw error;
+    return { success: true, data: data as StoreImage[] };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'An unexpected error occurred while fetching store images.',
+    };
+  }
+}
+
+/**
+ * Appends new store visuals safely into structural reference tables.
+ */
+export async function createStoreImage(
+  vendorId: string,
+  imageUrl: string,
+  displayOrder: number
+): Promise<ServiceResponse<StoreImage>> {
+  try {
+    if (!vendorId || !imageUrl) {
+      return { success: false, error: 'Vendor ID and Image URL are required.' };
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_store_images')
+      .insert([
+        {
+          vendor_id: vendorId,
+          image_url: imageUrl,
+          display_order: displayOrder,
+        },
+      ])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return { success: true, data: data as StoreImage };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'An unexpected error occurred while creating the store image.',
+    };
+  }
+}
+
+/**
+ * Removes individual asset context row parameters using record index keys.
+ */
+export async function deleteStoreImage(imageId: string): Promise<ServiceResponse<null>> {
+  try {
+    if (!imageId) {
+      return { success: false, error: 'Image ID is required.' };
+    }
+
+    const { error } = await supabase
+      .from('vendor_store_images')
+      .delete()
+      .eq('id', imageId);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'An unexpected error occurred while deleting the store image.',
+    };
+  }
+}
+
+/**
+ * Re-orders array sequential variables matching specified identification pointers.
+ */
+export async function updateStoreImageOrder(
+  imagesOrder: { id: string; display_order: number }[]
+): Promise<ServiceResponse<null>> {
+  try {
+    if (!imagesOrder || imagesOrder.length === 0) {
+      return { success: false, error: 'Images order payload is required.' };
+    }
+
+    // Upsert payload array containing target primary keys and their updated indexes
+    const { error } = await supabase
+      .from('vendor_store_images')
+      .upsert(imagesOrder);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'An unexpected error occurred while reordering store images.',
     };
   }
 }
