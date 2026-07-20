@@ -7,7 +7,6 @@ import {
   Check, 
   X, 
   AlertCircle, 
-  Info, 
   Loader2,
   CheckCircle2
 } from 'lucide-react';
@@ -29,6 +28,8 @@ interface Subscription {
   is_trial: boolean;
   subscription_type: 'trial' | 'free' | 'paid';
   trial_decision: 'pending' | 'free' | 'basic';
+  monthly_settlement_request_limit: number | null;
+  max_profile_banners: number | null;
 }
 
 interface PaymentRequest {
@@ -59,6 +60,16 @@ interface CardConfig {
   isComingSoon?: boolean;
 }
 
+interface DbPlanConfig {
+  plan_name: string;
+  display_name: string | null;
+  monthly_price: number | null;
+  commission_percent: number | null;
+  monthly_settlement_request_limit: number | null;
+  max_profile_banners: number | null;
+  is_active: boolean | null;
+}
+
 export default function Subscriptions() {
   // Core Sync States
   const [loading, setLoading] = useState<boolean>(true);
@@ -69,6 +80,9 @@ export default function Subscriptions() {
   const [totalSales, setTotalSales] = useState<number>(0);
   const [actionLoading, setActionLoading] = useState<boolean>(false);
   
+  // Master Configuration memory space store
+  const [masterPlans, setMasterPlans] = useState<DbPlanConfig[]>([]);
+
   // Modal & Form States
   const [payModal, setPayModal] = useState<{ open: boolean; planName: string; price: number }>({ open: false, planName: '', price: 0 });
   const [showReminder, setShowReminder] = useState<boolean>(false);
@@ -105,8 +119,17 @@ export default function Subscriptions() {
         subscription_qr_url: settings?.subscription_qr_url || ''
       };
 
+      // Query master layout parameters setup from subscription_plans instead of user mapping histories table
+      const { data: plansData } = await supabase
+        .from('subscription_plans')
+        .select('*')
+        .eq('is_active', true);
+
+      const activePlans = (plansData || []) as DbPlanConfig[];
+      setMasterPlans(activePlans);
+
       const [subResponse, historyResponse, salesResponse] = await Promise.all([
-        supabase.from('subscriptions').select('*').eq('vendor_id', targetVendorId).eq('status', 'active').maybeSingle(),
+        supabase.from('subscriptions').select('id, vendor_id, plan_name, commission_percent, start_date, end_date, status, created_at, updated_at, plan_code, is_trial, subscription_type, trial_decision, monthly_settlement_request_limit, max_profile_banners').eq('vendor_id', targetVendorId).eq('status', 'active').maybeSingle(),
         supabase.from('subscription_payment_requests').select('*').eq('vendor_id', targetVendorId).order('created_at', { ascending: false }),
         supabase.from('orders').select('total_amount').eq('vendor_id', targetVendorId).eq('order_status', 'delivered')
       ]);
@@ -126,19 +149,23 @@ export default function Subscriptions() {
         
         if (remaining <= 0) {
           if (subData.trial_decision === 'free' || subData.trial_decision === 'pending') {
+            const masterFree = activePlans.find(p => String(p.plan_name).toLowerCase() === 'free');
+
             await supabase
               .from('subscriptions')
               .update({
                 plan_name: 'free',
                 subscription_type: 'free',
                 is_trial: false,
-                commission_percent: 5,
+                commission_percent: masterFree?.commission_percent ?? 5,
+                monthly_settlement_request_limit: masterFree?.monthly_settlement_request_limit ?? 3,
+                max_profile_banners: masterFree?.max_profile_banners ?? 2,
                 end_date: null,
                 updated_at: new Date().toISOString()
               })
               .eq('id', subData.id);
 
-            const { data: updatedSub } = await supabase.from('subscriptions').select('*').eq('vendor_id', targetVendorId).eq('status', 'active').maybeSingle();
+            const { data: updatedSub } = await supabase.from('subscriptions').select('id, vendor_id, plan_name, commission_percent, start_date, end_date, status, created_at, updated_at, plan_code, is_trial, subscription_type, trial_decision, monthly_settlement_request_limit, max_profile_banners').eq('vendor_id', targetVendorId).eq('status', 'active').maybeSingle();
             setSubscription(updatedSub as Subscription | null);
           }
         }
@@ -180,7 +207,6 @@ export default function Subscriptions() {
 
     console.log("[Realtime Channel] Initializing engine channel listener pipeline for vendor:", vendorId);
 
-    // Broad table capture pipeline to catch column modifications safely, filtered internally
     const channel = supabase
       .channel(`realtime_vendor_sub_channel_${vendorId}`)
       .on(
@@ -283,6 +309,15 @@ export default function Subscriptions() {
     setActionLoading(true);
     setPaymentError('');
     try {
+      const targetPlanLower = payModal.planName.toLowerCase();
+      
+      // Load specific plan profile constraints configuration cleanly from subscription_plans master definitions
+      const planMasterSpec = masterPlans.find(p => String(p.plan_name).toLowerCase() === targetPlanLower);
+
+      if (!planMasterSpec) {
+        throw new Error(`Master configuration profile for plan '${payModal.planName}' was not established inside the database mappings data.`);
+      }
+
       const { error: reqError } = await supabase
         .from('subscription_payment_requests')
         .insert([{
@@ -301,6 +336,18 @@ export default function Subscriptions() {
           .from('subscriptions')
           .update({ trial_decision: payModal.planName as 'free' | 'basic', updated_at: new Date().toISOString() })
           .eq('id', subscription.id);
+      } else {
+        // Cascade changes safely parsing structural properties definitions directly from subscription_plans row metadata mappings
+        await supabase
+          .from('subscriptions')
+          .update({
+            plan_name: targetPlanLower,
+            commission_percent: planMasterSpec.commission_percent ?? 0,
+            monthly_settlement_request_limit: planMasterSpec.monthly_settlement_request_limit,
+            max_profile_banners: planMasterSpec.max_profile_banners,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', subscription.id);
       }
 
       setPayModal({ open: false, planName: '', price: 0 });
@@ -314,54 +361,72 @@ export default function Subscriptions() {
     }
   };
 
-  const catalog: CardConfig[] = [
-    {
-      name: 'free',
-      priceLabel: '₹0',
-      description: 'Start selling locally with no monthly subscription costs.',
-      pros: [
-        'Unlimited products',
-        'Unlimited orders',
-        'Weekly settlements',
-        'Maximum 3 settlement requests per settlement cycle',
-        'Standard support'
-      ],
-      cons: [
-        '5% commission on each completed order'
-      ],
-      tagline: 'Ideal for businesses getting started.'
-    },
-    {
-      name: 'basic',
-      priceLabel: '₹499',
-      description: 'Remove order commissions in exchange for a simple monthly flat rate.',
-      pros: [
-        '0% commission on completed orders',
-        'Unlimited products',
-        'Unlimited orders',
-        'Weekly settlements',
-        'Maximum 5 settlement requests per settlement cycle',
-        'Priority support'
-      ],
-      tagline: 'Best for businesses that want zero commission.'
-    },
-    {
-      name: 'growth',
-      priceLabel: '₹999',
-      description: 'Unlock advanced multi-outlet sales routing and metrics dashboard tools.',
-      pros: ['Everything in Basic', 'Advanced Analytics metrics dashboards', '24/7 Phone support lines'],
-      tagline: 'Scale up operational capabilities.',
-      isComingSoon: true
-    },
-    {
-      name: 'pro',
-      priceLabel: '₹1999',
-      description: 'Complete multi-vendor workspace system configurations for networks.',
-      pros: ['Everything in Growth', 'Custom dedicated system APIs', 'Dedicated account strategist'],
-      tagline: 'Unrestricted storefront scaling frameworks.',
-      isComingSoon: true
-    }
-  ];
+  const catalog: CardConfig[] = useMemo(() => {
+    const freePlanSpec = masterPlans.find(p => String(p.plan_name).toLowerCase() === 'free');
+    const basicPlanSpec = masterPlans.find(p => String(p.plan_name).toLowerCase() === 'basic');
+    const growthPlanSpec = masterPlans.find(p => String(p.plan_name).toLowerCase() === 'growth');
+    const proPlanSpec = masterPlans.find(p => String(p.plan_name).toLowerCase() === 'pro');
+
+    const freeRequests = freePlanSpec?.monthly_settlement_request_limit ?? 0;
+    const freeCommission = freePlanSpec?.commission_percent ?? 5;
+    const freePrice = freePlanSpec?.monthly_price ?? 0;
+
+    const basicRequests = basicPlanSpec?.monthly_settlement_request_limit ?? 0;
+    const basicCommission = basicPlanSpec?.commission_percent ?? 0;
+    const basicPrice = basicPlanSpec?.monthly_price ?? 499;
+
+    const growthPrice = growthPlanSpec?.monthly_price ?? 999;
+    const proPrice = proPlanSpec?.monthly_price ?? 1999;
+
+    return [
+      {
+        name: 'free',
+        priceLabel: `₹${freePrice}`,
+        description: 'Start selling locally with no monthly subscription costs.',
+        pros: [
+          'Unlimited Products',
+          'Unlimited Orders',
+          'Weekly Settlements',
+          `Up to ${freeRequests} Settlement Requests per Month`,
+          'Standard Support'
+        ],
+        cons: [
+          `${freeCommission}% commission on every completed order`
+        ],
+        tagline: 'Ideal for businesses getting started.'
+      },
+      {
+        name: 'basic',
+        priceLabel: `₹${basicPrice}`,
+        description: 'Remove order commissions in exchange for a simple monthly flat rate.',
+        pros: [
+          `${basicCommission}% Commission on completed orders`,
+          'Unlimited Products',
+          'Unlimited Orders',
+          'Weekly Settlements',
+          `Up to ${basicRequests} Settlement Requests per Month`,
+          'Priority Support'
+        ],
+        tagline: 'Best for businesses that want zero commission.'
+      },
+      {
+        name: 'growth',
+        priceLabel: `₹${growthPrice}`,
+        description: 'Unlock advanced multi-outlet sales routing and metrics dashboard tools.',
+        pros: ['Everything in Basic', 'Advanced Analytics metrics dashboards', '24/7 Phone support lines'],
+        tagline: 'Scale up operational capabilities.',
+        isComingSoon: true
+      },
+      {
+        name: 'pro',
+        priceLabel: `₹${proPrice}`,
+        description: 'Complete multi-vendor workspace system configurations for networks.',
+        pros: ['Everything in Growth', 'Custom dedicated system APIs', 'Dedicated account strategist'],
+        tagline: 'Unrestricted storefront scaling frameworks.',
+        isComingSoon: true
+      }
+    ];
+  }, [masterPlans]);
 
   const heroData = useMemo(() => {
     if (!subscription) return { name: 'No Active Strategy', details: '—', comm: '—', exp: '—' };
@@ -375,20 +440,29 @@ export default function Subscriptions() {
       };
     }
     if (subscription.plan_name === 'free') {
+      const freePlanSpec = masterPlans.find(p => String(p.plan_name).toLowerCase() === 'free');
+      const freeCommission = freePlanSpec?.commission_percent ?? 5;
+      const freePrice = freePlanSpec?.monthly_price ?? 0;
       return {
         name: 'Free Plan',
-        details: '₹0 / Month',
-        comm: '5% Commission',
+        details: `₹${freePrice} / Month`,
+        comm: `${freeCommission}% Commission`,
         exp: 'Lifetime Validity'
       };
     }
+    
+    const currentPlanSpec = masterPlans.find(p => String(p.plan_name).toLowerCase() === String(subscription.plan_name).toLowerCase());
+    const currentCommission = currentPlanSpec?.commission_percent ?? 0;
+    const currentPrice = currentPlanSpec?.monthly_price ?? 499;
+    const currentDisplayName = currentPlanSpec?.display_name || 'Basic Premium';
+
     return {
-      name: 'Basic Premium',
-      details: '₹499 / Month',
-      comm: '0% Commission',
+      name: currentDisplayName,
+      details: `₹${currentPrice} / Month`,
+      comm: `${currentCommission}% Commission`,
       exp: subscription.end_date ? `Next Renewal: ${new Date(subscription.end_date).toLocaleDateString('en-IN', { dateStyle: 'medium' })}` : 'Active'
     };
-  }, [subscription, daysRemaining]);
+  }, [subscription, daysRemaining, masterPlans]);
 
   if (loading) {
     return (
@@ -538,6 +612,9 @@ export default function Subscriptions() {
               buttonText = subscription?.trial_decision === 'basic' ? 'Basic Processing' : 'Continue with Basic';
             }
 
+            const masterSpec = masterPlans.find(p => String(p.plan_name).toLowerCase() === plan.name);
+            const priceVal = masterSpec?.monthly_price ?? (plan.name === 'basic' ? 499 : 0);
+
             return (
               <div key={plan.name} className={`bg-white border border-gray-200 rounded-2xl p-6 flex flex-col justify-between hover:border-gray-300 transition-all shadow-3xs ${isActivePlan ? 'ring-2 ring-emerald-600/5 border-emerald-600' : ''}`}>
                 <div>
@@ -576,7 +653,7 @@ export default function Subscriptions() {
                   <button
                     type="button"
                     disabled={disabled}
-                    onClick={() => handleSelectPlan(plan.name, plan.name === 'basic' ? 499 : 0)}
+                    onClick={() => handleSelectPlan(plan.name, priceVal)}
                     className={`w-full py-2 text-xs font-bold uppercase tracking-wider rounded-lg border transition-all cursor-pointer ${
                       isActivePlan 
                         ? 'bg-gray-50 text-slate-400 border-gray-200 cursor-not-allowed'
@@ -711,7 +788,7 @@ export default function Subscriptions() {
                   )}
 
                   <div className="space-y-1">
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Transaction UTR / Reference Key</label>
+                    <label className="text-[9px] font-bold text-slate-455 uppercase tracking-wider block">Transaction UTR / Reference Key</label>
                     <input
                       type="text"
                       required

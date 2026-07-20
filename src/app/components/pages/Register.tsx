@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Eye, EyeOff, Zap, CheckCircle2, ShieldAlert, Store, User, Mail, Phone, MapPin, Lock, Globe, Building2, ShieldCheck, ArrowRight } from "lucide-react";
+import { Eye, EyeOff, Zap, CheckCircle2, ShieldAlert, Store, User, Lock, MapPin, Phone, ArrowRight, Building2, Globe, ShieldCheck } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
+import { VendorTerms } from "../legal/VendorTerms";
 
 interface RegisterProps {
   onNavigateToLogin: () => void;
@@ -32,6 +33,10 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [showPremiumCard, setShowPremiumCard] = useState(false);
+
+  // Mandatory legal process state variables
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [legalCompleted, setLegalCompleted] = useState(false);
 
   const shopNameRef = useRef<HTMLInputElement>(null);
   const ownerNameRef = useRef<HTMLInputElement>(null);
@@ -87,6 +92,11 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
     setError("");
     setSuccessMessage("");
     setShowPremiumCard(false);
+
+    if (!legalCompleted) {
+      setError("Legal acknowledgement verification sequence required.");
+      return;
+    }
 
     const triggerValidationError = (message: string, inputRef: React.RefObject<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null>) => {
       setError(message);
@@ -213,10 +223,8 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
       
       {/* ================= LEFT SIDEBOARD: PREMIUM OVERVIEW ================= */}
       <div className="lg:col-span-4 relative bg-[#0F172A] p-8 md:p-12 hidden lg:flex flex-col justify-between text-white overflow-hidden">
-        {/* Subtle grid pattern background overlay */}
         <div className="absolute inset-0 bg-[radial-gradient(#1E293B_1px,transparent_1px)] [background-size:24px_24px] opacity-40 pointer-events-none" />
         
-        {/* Top Header Identity */}
         <div className="relative flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#2ECC71] flex items-center justify-center shadow-lg shadow-[#2ECC71]/20 border border-[#2ECC71]/10">
             <Zap className="w-5 h-5 text-white" />
@@ -227,7 +235,6 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
           </div>
         </div>
 
-        {/* Core Value Propostions Showcase */}
         <div className="relative space-y-8 my-auto max-w-sm">
           <div className="space-y-3">
             <h2 className="text-3xl font-black tracking-tight leading-tight">Scale your store's reach within your city.</h2>
@@ -250,29 +257,26 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
           </div>
         </div>
 
-        {/* Footer info line */}
         <p className="relative text-[11px] text-neutral-500 font-light">
-          Everything Nearby. Delivered Fast. &middot; Rivo &copy; 2026
+          Everything Nearby. Delivered Fast. &middot; Rivo.City &copy; 2026
         </p>
       </div>
 
       {/* ================= RIGHT SIDEBOARD: COMPREHENSIVE FULL-PAGE FORM ================= */}
       <div className="lg:col-span-8 flex flex-col justify-between min-h-screen bg-white">
         
-        {/* Mobile Header Element */}
         <div className="p-6 border-b border-neutral-100 flex items-center justify-between lg:hidden bg-neutral-50/50">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#2ECC71] flex items-center justify-center text-white shadow-sm">
               <Zap className="w-4 h-4" />
             </div>
-            <span className="text-lg font-black tracking-tight text-[#0F172A]">Rivo</span>
+            <span className="text-lg font-black tracking-tight text-[#0F172A]">Rivo.City</span>
           </div>
           <button onClick={onNavigateToLogin} className="text-xs font-bold uppercase tracking-wider text-[#2ECC71] hover:underline cursor-pointer">
             Sign In
           </button>
         </div>
 
-        {/* Dynamic Center Action Interface Container */}
         <div className="flex-1 w-full max-w-2xl mx-auto px-6 md:px-12 py-12 flex flex-col justify-center">
           
           {successMessage ? (
@@ -316,11 +320,10 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
             </div>
           ) : (
             <>
-              {/* Form Descriptive Headers */}
               <div className="mb-10 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div>
-                  <h1 className="text-3xl font-black text-[#0F172A] tracking-tight">Create Vendors Account</h1>
-                  <p className="text-sm text-neutral-500 font-light mt-1">Register your retail location onto the Rivo platform network</p>
+                  <h1 className="text-3xl font-black text-[#0F172A] tracking-tight">Create Vendor Account</h1>
+                  <p className="text-sm text-neutral-500 font-light mt-1">Register your retail location onto the Rivo.City platform network</p>
                 </div>
                 <button 
                   type="button" 
@@ -331,7 +334,6 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                 </button>
               </div>
 
-              {/* Main Full Scale Multi-Grid Form System */}
               <form onSubmit={handleRegister} className="space-y-8">
                 
                 {/* STAGE 1: CORE BRAND IDENTIFIERS */}
@@ -482,7 +484,7 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                   </div>
                 </div>
 
-                {/* STAGE 6: GATEWAY SECURITY */}
+                {/* STAGE 6: ACCESS SYSTEM SECURITY */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-neutral-400 border-b border-neutral-100 pb-2">
                     <Lock className="w-4 h-4 text-neutral-400" /> <span>Access Credentials</span>
@@ -531,7 +533,6 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                   </div>
                 </div>
 
-                {/* Errors Display Alert Box */}
                 {error && (
                   <div className="text-xs text-red-600 bg-red-50/50 border border-red-200 rounded-xl p-4 flex items-start gap-3 animate-fade-in">
                     <ShieldAlert className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
@@ -539,19 +540,52 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                   </div>
                 )}
 
-                {/* Submit Application Trigger */}
+                {/* Enforced Mandatory Legal Flow Interface Module */}
+                <div className={`p-4 rounded-xl border transition-all duration-300 ${legalCompleted ? 'bg-emerald-50/40 border-emerald-200' : 'bg-neutral-50 border-neutral-200/70'}`}>
+                  <span className="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-2.5">Legal Status</span>
+                  
+                  {!legalCompleted ? (
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="flex items-center gap-2 text-neutral-500 text-xs font-medium">
+                        <span className="w-2 h-2 rounded-full bg-neutral-400" />
+                        Legal acknowledgement required
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowTermsModal(true)}
+                        className="px-3.5 h-8 bg-[#0F172A] hover:bg-[#1E293B] text-white font-bold text-[11px] uppercase tracking-wider rounded-lg transition-all focus:outline-none cursor-pointer shrink-0"
+                      >
+                        Read Vendor Terms
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 animate-fade-in">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-[#2ECC71]">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>✓ Vendor Terms reviewed</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-semibold text-[#2ECC71]">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>✓ Privacy Policy reviewed</span>
+                      </div>
+                      <p className="text-[11px] text-[#2ECC71] font-bold pt-2 border-t border-emerald-200/50 mt-1">
+                        ✓ Legal requirements completed.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 <div className="pt-2">
                   <button
                     type="submit"
-                    disabled={loading}
-                    className="w-full h-12 rounded-xl bg-[#2ECC71] hover:bg-[#27AE60] text-white font-semibold text-sm transition-all shadow-xl shadow-[#2ECC71]/15 active:scale-[0.995] disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                    disabled={loading || !legalCompleted}
+                    className="w-full h-12 mt-2 rounded-xl bg-[#2ECC71] hover:bg-[#27AE60] text-white font-semibold text-sm shadow-xl shadow-[#2ECC71]/15 active:scale-[0.995] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
                   >
                     {loading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : null}
                     Submit Vendor Application
                   </button>
                 </div>
 
-                {/* Bottom Redirection Panel for Mobile */}
                 <div className="text-center pt-2 lg:hidden">
                   <button
                     type="button"
@@ -568,10 +602,16 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
 
         {/* Dynamic Mobile/Tablets Footer line */}
         <p className="text-center text-[10px] text-neutral-400 font-light p-6 border-t border-neutral-100 lg:hidden bg-neutral-50/30">
-          Rivo Network Dashboard Systems &middot; 2026
+          Rivo.City Network Dashboard Systems &middot; 2026
         </p>
       </div>
 
+      {showTermsModal && (
+        <VendorTerms 
+          onClose={() => setShowTermsModal(false)}
+          onAcknowledgeComplete={() => setLegalCompleted(true)}
+        />
+      )}
     </div>
   );
 }

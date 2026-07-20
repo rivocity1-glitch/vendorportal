@@ -4,19 +4,15 @@ import {
   Check, 
   Camera, 
   ShieldAlert, 
-  RefreshCw, 
   Loader2, 
-  Save, 
   Mail, 
   Phone, 
   Trash2,
   Globe,
-  Bell,
   Lock,
   LifeBuoy,
   FileText,
   ExternalLink,
-  Shield,
   Smartphone
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
@@ -27,7 +23,7 @@ interface ProfileState {
   tagline: string;
   store_code: string;       
   avatar_url: string;       
-  banner_url: string;
+  banner_urls: string[]; 
   owner_name: string;
   email_address: string;
   primary_phone: string;
@@ -41,6 +37,14 @@ interface ProfileState {
 interface StoreCategory {
   id: string;
   name: string;
+}
+
+interface ProfileBannerRow {
+  id: string;
+  vendor_id: string;
+  banner_url: string;
+  banner_order: number;
+  is_active: boolean;
 }
 
 const approvalBadgeConfig: Record<string, { bg: string; text: string; label: string }> = {
@@ -79,7 +83,8 @@ export function Profile() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
-  const [uploadingBanner, setUploadingBanner] = useState(false);
+  const [uploadingBannerSlot, setUploadingBannerSlot] = useState<number | null>(null);
+  const maxProfileBanners = 3;
   const [savedMessage, setSavedMessage] = useState("");
   const [validationError, setValidationError] = useState("");
   const [availableCategories, setAvailableCategories] = useState<StoreCategory[]>([]);
@@ -94,6 +99,7 @@ export function Profile() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bannerFileInputRef = useRef<HTMLInputElement>(null);
+  const activeSlotRef = useRef<number | null>(null);
 
   const fetchProfileData = async () => {
     try {
@@ -112,7 +118,7 @@ export function Profile() {
 
       const { data: vendorCore } = await supabase
         .from("vendors")
-        .select("*, subscriptions(plan_name)")
+        .select("*, subscriptions(plan_name, max_profile_banners)")
         .eq("auth_user_id", auth.user.id)
         .maybeSingle();
 
@@ -131,11 +137,25 @@ export function Profile() {
         ? (Array.isArray(profileExtended.categories) ? profileExtended.categories : [profileExtended.categories])
         : (vendorCore.categories ? (Array.isArray(vendorCore.categories) ? vendorCore.categories : [vendorCore.categories]) : []);
 
-      // Derive readable active subscription plan text representation
       let matchedPlan = "Free";
       if (vendorCore.subscriptions) {
         const subObj = Array.isArray(vendorCore.subscriptions) ? vendorCore.subscriptions[0] : vendorCore.subscriptions;
         if (subObj?.plan_name) matchedPlan = String(subObj.plan_name).toUpperCase();
+      }
+
+      const { data: bannersData } = await supabase
+        .from("vendor_profile_banners")
+        .select("*")
+        .eq("vendor_id", vendorCore.id)
+        .order("banner_order", { ascending: true });
+
+      const constructedBannerUrls: string[] = Array(maxProfileBanners).fill("");
+      if (bannersData && bannersData.length > 0) {
+        bannersData.forEach((row: ProfileBannerRow) => {
+          if (row.banner_order >= 0 && row.banner_order < maxProfileBanners) {
+            constructedBannerUrls[row.banner_order] = row.banner_url || "";
+          }
+        });
       }
 
       const validatedState: ProfileState = {
@@ -147,7 +167,7 @@ export function Profile() {
         tagline: profileExtended?.tagline || "",
         store_code: vendorCore.shop_code || "NEW-SHOP",
         avatar_url: profileExtended?.avatar_url || "",
-        banner_url: profileExtended?.banner_url || "",
+        banner_urls: constructedBannerUrls,
         alternate_phone: "", 
         status: vendorCore.status?.toLowerCase() || "pending",
         store_categories: parsedCategories,
@@ -209,7 +229,6 @@ export function Profile() {
 
       setProfile(prev => prev ? { ...prev, avatar_url: publicUrl } : null);
       
-      // Upsert direct onto extended vendor tables to store reference immediately
       await supabase
         .from("vendor_profiles")
         .update({ avatar_url: publicUrl })
@@ -243,7 +262,15 @@ export function Profile() {
     }
   };
 
+  const handleTriggerBannerUpload = (slotIndex: number) => {
+    activeSlotRef.current = slotIndex;
+    bannerFileInputRef.current?.click();
+  };
+
   const handleBannerUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const slotIndex = activeSlotRef.current;
+    if (slotIndex === null || slotIndex === undefined) return;
+
     try {
       setValidationError("");
       const file = event.target.files?.[0];
@@ -261,8 +288,8 @@ export function Profile() {
         return;
       }
 
-      setUploadingBanner(true);
-      const filePath = `${profile.vendor_id}/banner.${fileExt}`;
+      setUploadingBannerSlot(slotIndex);
+      const filePath = `${profile.vendor_id}/banner-slot-${slotIndex}-${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from("vendor-store-images")
@@ -274,36 +301,75 @@ export function Profile() {
         .from("vendor-store-images")
         .getPublicUrl(filePath);
 
-      await supabase
-        .from("vendor_profiles")
-        .update({ banner_url: publicUrl, updated_at: new Date().toISOString() })
-        .eq("vendor_id", profile.vendor_id);
+      const { data: existingSlotCheck } = await supabase
+        .from("vendor_profile_banners")
+        .select("id")
+        .eq("vendor_id", profile.vendor_id)
+        .eq("banner_order", slotIndex)
+        .maybeSingle();
 
-      setProfile(prev => prev ? { ...prev, banner_url: publicUrl } : null);
-      setSavedMessage("Premium business banner updated successfully.");
+      if (existingSlotCheck?.id) {
+        const { error: updateError } = await supabase
+          .from("vendor_profile_banners")
+          .update({
+            banner_url: publicUrl,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", existingSlotCheck.id);
+
+        if (updateError) throw updateError;
+      } else {
+        const { error: insertError } = await supabase
+          .from("vendor_profile_banners")
+          .insert([{
+            vendor_id: profile.vendor_id,
+            banner_url: publicUrl,
+            banner_order: slotIndex,
+            is_active: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }]);
+
+        if (insertError) throw insertError;
+      }
+
+      const nextBanners = [...profile.banner_urls];
+      nextBanners[slotIndex] = publicUrl;
+
+      setProfile(prev => prev ? { ...prev, banner_urls: nextBanners } : null);
+      setSavedMessage(`Storefront slot #${slotIndex + 1} workspace banner uploaded successfully.`);
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
       setValidationError(err.message || "Failed to upload banner image.");
     } finally {
-      setUploadingBanner(false);
+      setUploadingBannerSlot(null);
+      activeSlotRef.current = null;
+      if (event.target) event.target.value = "";
     }
   };
 
-  const handleRemoveBanner = async () => {
+  const handleRemoveBannerSlot = async (slotIndex: number) => {
     try {
-      setUploadingBanner(true);
-      await supabase
-        .from("vendor_profiles")
-        .update({ banner_url: null, updated_at: new Date().toISOString() })
-        .eq("vendor_id", profile.vendor_id);
+      setUploadingBannerSlot(slotIndex);
 
-      setProfile(prev => prev ? { ...prev, banner_url: "" } : null);
-      setSavedMessage("Business banner removed successfully.");
+      const { error: deleteError } = await supabase
+        .from("vendor_profile_banners")
+        .delete()
+        .eq("vendor_id", profile.vendor_id)
+        .eq("banner_order", slotIndex);
+
+      if (deleteError) throw deleteError;
+
+      const nextBanners = [...profile.banner_urls];
+      nextBanners[slotIndex] = "";
+
+      setProfile(prev => prev ? { ...prev, banner_urls: nextBanners } : null);
+      setSavedMessage(`Storefront slot #${slotIndex + 1} workspace banner removed.`);
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
-      setValidationError("Failed to clear business banner.");
+      setValidationError("Failed to clear layout banner entry.");
     } finally {
-      setUploadingBanner(false);
+      setUploadingBannerSlot(null);
     }
   };
 
@@ -406,73 +472,101 @@ export function Profile() {
         className="hidden"
       />
 
-      {/* PREMIUM BUSINESS BANNER SECTION */}
-      <div className="relative h-[240px] w-full rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-900 group">
-        {uploadingBanner ? (
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-20">
-            <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
-          </div>
-        ) : null}
-
-        {profile.banner_url ? (
-          <img 
-            src={profile.banner_url} 
-            alt="Business Banner" 
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
-          />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-tr from-slate-950 via-emerald-950 to-emerald-900 dark:from-slate-950 dark:via-slate-900 dark:to-emerald-950 flex items-center justify-center" />
-        )}
-
-        {/* Gradient Overlay for Typography Contrast */}
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/30 to-transparent z-10" />
-
-        {/* Top Right Floating Controls */}
-        <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
-          <button
-            type="button"
-            disabled={uploadingBanner}
-            onClick={() => bannerFileInputRef.current?.click()}
-            className="h-9 px-4 rounded-xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-md text-slate-800 dark:text-white text-xs font-bold shadow-sm hover:bg-white dark:hover:bg-slate-800 transition flex items-center gap-2 disabled:opacity-50"
-          >
-            <Camera className="w-3.5 h-3.5 text-emerald-500" />
-            {profile.banner_url ? "Change Banner" : "Upload Banner"}
-          </button>
-          {profile.banner_url && (
-            <button
-              type="button"
-              disabled={uploadingBanner}
-              onClick={handleRemoveBanner}
-              className="h-9 w-9 rounded-xl bg-rose-500/10 backdrop-blur-md text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 transition flex items-center justify-center shadow-sm"
-              title="Remove Banner"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-1">
+          <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+            <Camera className="w-3.5 h-3.5 text-[#10B981]" /> Shop Profile Banner Gallery 
+            <span className="text-[10px] bg-slate-100 dark:bg-slate-955 font-mono font-bold text-slate-600 dark:text-slate-400 border px-1.5 py-0.5 rounded-md">
+              Allocation Cap: {maxProfileBanners} Slots
+            </span>
+          </label>
         </div>
 
-        {/* Bottom Left Meta Content */}
-        <div className="absolute bottom-5 left-6 z-20 flex items-center gap-4 text-white max-w-[80%]">
-          <div className="w-16 h-16 rounded-full border-2 border-white/20 dark:border-slate-800/60 bg-slate-900/80 backdrop-blur-md flex items-center justify-center font-black overflow-hidden shadow-md shrink-0">
-            {profile.avatar_url ? (
-              <img src={profile.avatar_url} alt={profile.store_name} className="w-full h-full object-cover" />
-            ) : (
-              <User size={24} className="text-slate-300" />
-            )}
-          </div>
-          <div className="space-y-0.5 min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-black tracking-tight truncate drop-shadow-xs">{profile.store_name || "New Premium Store"}</h2>
-              <div className={`font-bold text-[9px] px-2 py-0.5 rounded-md uppercase tracking-wider backdrop-blur-md shadow-3xs ${badge.bg} ${badge.text}`}>
-                {profile.status === "approved" ? "✓ Verified" : profile.status}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array.from({ length: maxProfileBanners }).map((_, index) => {
+            const currentUrl = profile.banner_urls[index];
+            const isSlotUploading = uploadingBannerSlot === index;
+
+            return (
+              <div 
+                key={index} 
+                className="relative h-[160px] w-full rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-900 group bg-slate-50 dark:bg-slate-955"
+              >
+                {isSlotUploading ? (
+                  <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-20">
+                    <Loader2 className="w-6 h-6 animate-spin text-emerald-500" />
+                  </div>
+                ) : null}
+
+                {currentUrl ? (
+                  <>
+                    <img 
+                      src={currentUrl} 
+                      alt={`Banner Node #${index + 1}`} 
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-955 via-transparent to-transparent z-10" />
+                  </>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 dark:text-slate-800 bg-linear-to-tr from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-955 p-4 border-2 border-dashed border-slate-200 dark:border-slate-900 rounded-2xl">
+                    <Camera size={24} className="opacity-40 mb-1.5 text-slate-400" />
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Empty Slot Position #{index + 1}</span>
+                  </div>
+                )}
+
+                <div className="absolute bottom-3 left-4 z-20">
+                  <span className="text-[9px] font-mono font-black tracking-wider uppercase text-white/90 bg-slate-955/80 px-2 py-0.5 border border-white/10 rounded-md backdrop-blur-md shadow-sm">
+                    Slot {index + 1}
+                  </span>
+                </div>
+
+                <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    disabled={uploadingBannerSlot !== null}
+                    onClick={() => handleTriggerBannerUpload(index)}
+                    className="h-7 px-3 rounded-lg bg-white/90 dark:bg-slate-900/90 backdrop-blur-md text-slate-800 dark:text-white text-[10px] font-bold border border-slate-200 dark:border-slate-800 shadow-3xs hover:bg-white dark:hover:bg-slate-800 transition flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    <Camera className="w-3 h-3 text-emerald-500" />
+                    {currentUrl ? "Change Banner" : "Upload Banner"}
+                  </button>
+                  {currentUrl && (
+                    <button
+                      type="button"
+                      disabled={uploadingBannerSlot !== null}
+                      onClick={() => handleRemoveBannerSlot(index)}
+                      className="h-7 w-7 rounded-lg bg-rose-500/10 backdrop-blur-md text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:bg-rose-500/20 transition flex items-center justify-center shadow-3xs"
+                      title="Remove Banner"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-            <p className="text-xs text-slate-300 line-clamp-1 opacity-90 drop-shadow-3xs font-medium">{profile.tagline || "No slogan established yet"}</p>
-          </div>
+            );
+          })}
         </div>
       </div>
 
-      {/* HEADER PANELS BAR */}
+      <div className="bg-white dark:bg-slate-955 p-5 rounded-2xl border border-slate-200 dark:border-slate-900 shadow-2xs flex flex-col sm:flex-row items-center gap-4">
+        <div className="w-14 h-14 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex items-center justify-center font-black overflow-hidden shadow-xs shrink-0">
+          {profile.avatar_url ? (
+            <img src={profile.avatar_url} alt={profile.store_name} className="w-full h-full object-cover" />
+          ) : (
+            <User size={20} className="text-slate-400" />
+          )}
+        </div>
+        <div className="space-y-0.5 text-center sm:text-left min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+            <h2 className="text-base font-black text-slate-900 dark:text-white tracking-tight truncate">{profile.store_name || "New Premium Store"}</h2>
+            <div className={`font-bold text-[9px] px-2 py-0.5 rounded-md uppercase tracking-wider shadow-3xs border ${badge.bg} ${badge.text}`}>
+              {profile.status === "approved" ? "✓ Verified" : profile.status}
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 dark:text-slate-500 line-clamp-1 font-medium">{profile.tagline || "No slogan established yet"}</p>
+        </div>
+      </div>
+
       <div className="pb-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Account Settings</h1>
@@ -480,7 +574,6 @@ export function Profile() {
         </div>
       </div>
 
-      {/* NOTIFICATION FEEDBACK TOASTS */}
       {validationError && (
         <div className="bg-rose-50 dark:bg-rose-950/10 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-400 rounded-xl p-4 flex items-start gap-2 text-xs font-semibold shadow-xs">
           <ShieldAlert className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
@@ -495,10 +588,8 @@ export function Profile() {
         </div>
       )}
 
-      {/* IDENTITY SECTION */}
       <div className="space-y-6">
-        {/* SECTION 1: PROFILE PHOTO FOCUS CARD */}
-        <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row items-center gap-6">
+        <div className="bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row items-center gap-6">
           <div className="relative shrink-0">
             <div className="w-24 h-24 rounded-full bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-2xl font-black text-slate-600 dark:text-slate-300 uppercase overflow-hidden shadow-inner">
               {uploadingImage ? (
@@ -543,7 +634,6 @@ export function Profile() {
           </div>
         </div>
 
-        {/* SECTION 2: IDENTITY DATA INPUT FIELDS */}
         <Section title="Identity Management" icon={User}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Store Name" value={profile.store_name} onChange={v => setProfile(p => p ? ({ ...p, store_name: v }) : null)} />
@@ -570,7 +660,6 @@ export function Profile() {
         </Section>
       </div>
 
-      {/* PLATFORM INFORMATION (SECTION 3) */}
       <Section title="Platform Metadata" icon={FileText}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           
@@ -627,7 +716,6 @@ export function Profile() {
         </div>
       </Section>
 
-      {/* PREFERENCES (SECTION 4) */}
       <Section title="Preferences" icon={Globe}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-2">
@@ -677,7 +765,6 @@ export function Profile() {
         </div>
       </Section>
 
-      {/* SECURITY (SECTION 5) */}
       <Section title="Security & Authentication" icon={Lock}>
         <form onSubmit={handleChangePassword} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -706,7 +793,6 @@ export function Profile() {
         </form>
       </Section>
 
-      {/* SUPPORT (SECTION 6) */}
       <Section title="Platform Support & Legal Compliance" icon={LifeBuoy}>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1 text-sm">
           <div className="space-y-1.5">

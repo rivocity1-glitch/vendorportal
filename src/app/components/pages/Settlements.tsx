@@ -215,6 +215,45 @@ export function Settlements() {
 
     setActionLoading(true);
     try {
+      // 1. Fetch active subscription data
+      const { data: subscription, error: subError } = await supabase
+        .from('subscriptions')
+        .select('plan_name, monthly_settlement_request_limit')
+        .eq('vendor_id', currentVendorId)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      if (subError) throw subError;
+
+      const planName = subscription?.plan_name || 'Free';
+      const limit = subscription?.monthly_settlement_request_limit ?? 3;
+
+      // 2. Count current calendar month usage requests
+      const now = new Date();
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+
+      const { count: requestsThisMonth, error: countError } = await supabase
+        .from('vendor_settlements')
+        .select('*', { count: 'exact', head: true })
+        .eq('vendor_id', currentVendorId)
+        .in('status', ['pending_request', 'processing', 'paid'])
+        .gte('created_at', firstDayOfMonth)
+        .lte('created_at', lastDayOfMonth);
+
+      if (countError) throw countError;
+
+      const currentCount = requestsThisMonth || 0;
+
+      // 3. Validation limit threshold check
+      if (currentCount >= limit) {
+        showToast(
+          `Settlement request limit reached. You have already used ${currentCount} of ${limit} settlement requests available in your ${planName} plan this month. Your remaining earnings will automatically be included in the next weekly settlement.`,
+          'error'
+        );
+        return;
+      }
+
       // 1. FIND ELIGIBLE ORDERS & 5. DUPLICATE PROTECTION
       const { data: activeSettlements, error: settlementError } = await supabase
         .from('vendor_settlements')
@@ -549,19 +588,19 @@ export function Settlements() {
             <ul className="text-xs text-muted-foreground space-y-2.5 list-none font-medium">
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Vendor payments will be processed **weekly every Monday** only.</span>
+                <span>Vendor payments will be processed **weekly every Monday** only.[cite: 3]</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Dispatches operate exclusively within the standard working hours of banks.</span>
+                <span>Dispatches operate exclusively within the standard working hours of banks.[cite: 3]</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span className="text-amber-600 dark:text-amber-400 font-semibold">Minimum settlement request threshold is ₹500.00. Always check and double-verify your bank details when submitting.</span>
+                <span className="text-amber-600 dark:text-amber-400 font-semibold">Minimum settlement request threshold is ₹500.00. Always check and double-verify your bank details when submitting.[cite: 3]</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Balances computed completely from final metric workspace configurations. Thank you.</span>
+                <span>Balances computed completely from final metric workspace configurations. Thank you.[cite: 3]</span>
               </li>
             </ul>
           </div>

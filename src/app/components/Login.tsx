@@ -1,6 +1,7 @@
-import React, { useState } from "react";
-import { Eye, EyeOff, Zap, ArrowLeft, ShieldAlert, KeyRound, Building2, Globe, ShieldCheck, ArrowRight } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Eye, EyeOff, Zap, ArrowLeft, ShieldAlert, Building2, Globe, ShieldCheck, ArrowRight, CheckCircle2 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
+import { VendorTerms } from "./legal/VendorTerms";
 
 interface LoginProps {
   onLogin: () => void;
@@ -11,13 +12,39 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [shopCode, setShopCode] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [forgotMode, setForgotMode] = useState(false);
   const [error, setError] = useState("");
+  
+  // Mandatory legal process tracking state (stored persistently)
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [legalCompleted, setLegalCompleted] = useState<boolean>(() => {
+    return localStorage.getItem("rivo_vendor_terms_accepted") === "true";
+  });
+
+  // Load saved shop code on component mount if Remember Me was checked previously
+  useEffect(() => {
+    const savedShopCode = localStorage.getItem("rivo_remembered_shop_code");
+    if (savedShopCode) {
+      setShopCode(savedShopCode);
+      setRememberMe(true);
+    }
+  }, []);
+
+  const handleLegalComplete = () => {
+    localStorage.setItem("rivo_vendor_terms_accepted", "true");
+    setLegalCompleted(true);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (!legalCompleted) {
+      setError("Legal acknowledgement verification sequence required.");
+      return;
+    }
 
     if (!shopCode || !password) {
       setError("Please fill in all fields.");
@@ -83,10 +110,18 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
         return;
       }
 
+      // Handle Remember Me persistence logic
+      if (rememberMe) {
+        localStorage.setItem("rivo_remembered_shop_code", shopCode.trim());
+      } else {
+        localStorage.removeItem("rivo_remembered_shop_code");
+      }
+
+      // Permanent persistent tracking configuration omitting manual timestamp timeouts
       localStorage.setItem("rivo_vendor_session", JSON.stringify({ 
         uid: authData.user.id, 
         email: authData.user.email,
-        timestamp: Date.now() 
+        persistent: true
       }));
       
       onLogin();
@@ -123,10 +158,8 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
       
       {/* ================= LEFT SIDEBOARD: PREMIUM OVERVIEW ================= */}
       <div className="lg:col-span-4 relative bg-[#0F172A] p-8 md:p-12 hidden lg:flex flex-col justify-between text-white overflow-hidden">
-        {/* Subtle grid pattern background overlay */}
         <div className="absolute inset-0 bg-[radial-gradient(#1E293B_1px,transparent_1px)] [background-size:24px_24px] opacity-40 pointer-events-none" />
         
-        {/* Top Header Identity */}
         <div className="relative flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#2ECC71] flex items-center justify-center shadow-lg shadow-[#2ECC71]/20 border border-[#2ECC71]/10">
             <Zap className="w-5 h-5 text-white" />
@@ -137,7 +170,6 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
           </div>
         </div>
 
-        {/* Core Value Propostions Showcase */}
         <div className="relative space-y-8 my-auto max-w-sm">
           <div className="space-y-3">
             <h2 className="text-3xl font-black tracking-tight leading-tight">Access your business dashboard terminal.</h2>
@@ -160,29 +192,26 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
           </div>
         </div>
 
-        {/* Footer info line */}
         <p className="relative text-[11px] text-neutral-500 font-light">
-          Everything Nearby. Delivered Fast. &middot; Rivo &copy; 2026
+          Everything Nearby. Delivered Fast. &middot; Rivo.City &copy; 2026
         </p>
       </div>
 
-      {/* ================= RIGHT SIDEBOARD: COMPREHENSIVE ACTION SYSTEM ================= */}
+      {/* ================= RIGHT SIDEBOARD: ACTION SYSTEM ================= */}
       <div className="lg:col-span-8 flex flex-col justify-between min-h-screen bg-white">
         
-        {/* Mobile Header Element */}
         <div className="p-6 border-b border-neutral-100 flex items-center justify-between lg:hidden bg-neutral-50/50">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#2ECC71] flex items-center justify-center text-white shadow-sm">
               <Zap className="w-4 h-4" />
             </div>
-            <span className="text-lg font-black tracking-tight text-[#0F172A]">Rivo</span>
+            <span className="text-lg font-black tracking-tight text-[#0F172A]">Rivo.City</span>
           </div>
           <button onClick={onNavigateToRegister} className="text-xs font-bold uppercase tracking-wider text-[#2ECC71] hover:underline cursor-pointer">
             Register
           </button>
         </div>
 
-        {/* Form Central Core Canvas */}
         <div className="flex-1 w-full max-w-[460px] mx-auto px-6 py-12 flex flex-col justify-center">
           
           {forgotMode ? (
@@ -200,23 +229,22 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
                     type="email"
                     required
                     placeholder="owner@store.com"
-                    className="w-full h-11 px-3.5 rounded-xl border border-neutral-200 bg-neutral-50/30 text-[#0F172A] placeholder-neutral-400 text-sm focus:outline-none focus:bg-white focus:border-[#2ECC71] focus:ring-4 focus:ring-[#2ECC71]/10 transition-all duration-150"
+                    className="w-full h-11 px-3.5 rounded-xl border border-neutral-200 bg-neutral-50/30 text-[#0F172A] text-sm focus:outline-none focus:bg-white focus:border-[#2ECC71]"
                   />
                 </div>
                 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full h-11 rounded-xl bg-[#2ECC71] hover:bg-[#27AE60] text-white font-semibold text-sm transition-all shadow-lg shadow-[#2ECC71]/15 active:scale-[0.99] disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full h-11 rounded-xl bg-[#2ECC71] text-white font-semibold text-sm shadow-lg disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  {loading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : null}
                   Send Reset Link
                 </button>
 
                 <button 
                   type="button" 
                   onClick={() => setForgotMode(false)} 
-                  className="w-full flex items-center justify-center gap-2 text-xs font-bold tracking-wide text-neutral-400 hover:text-[#2ECC71] uppercase transition-colors pt-2 cursor-pointer"
+                  className="w-full flex items-center justify-center gap-2 text-xs font-bold tracking-wide text-neutral-400 hover:text-[#2ECC71] uppercase pt-2 cursor-pointer"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" /> Back to Login
                 </button>
@@ -224,7 +252,6 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
             </>
           ) : (
             <>
-              {/* Login Context Header */}
               <div className="mb-8 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div>
                   <h1 className="text-3xl font-black text-[#0F172A] tracking-tight">Welcome back</h1>
@@ -239,7 +266,6 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
                 </button>
               </div>
 
-              {/* Login Execution Form */}
               <form onSubmit={handleLogin} className="space-y-5">
                 
                 <div className="space-y-4">
@@ -250,7 +276,7 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
                       value={shopCode}
                       onChange={e => setShopCode(e.target.value)}
                       placeholder="SHOP-001 or owner@store.com"
-                      className="w-full h-11 px-3.5 rounded-xl border border-neutral-200 bg-neutral-50/30 text-[#0F172A] placeholder-neutral-400 text-sm focus:outline-none focus:bg-white focus:border-[#2ECC71] focus:ring-4 focus:ring-[#2ECC71]/10 transition-all duration-150"
+                      className="w-full h-11 px-3.5 rounded-xl border border-neutral-200 bg-neutral-50/30 text-[#0F172A] text-sm focus:outline-none focus:bg-white focus:border-[#2ECC71]"
                     />
                   </div>
                   
@@ -262,7 +288,7 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                         placeholder="Enter your password"
-                        className="w-full h-11 px-3.5 pr-11 rounded-xl border border-neutral-200 bg-neutral-50/30 text-[#0F172A] placeholder-neutral-400 text-sm focus:outline-none focus:bg-white focus:border-[#2ECC71] focus:ring-4 focus:ring-[#2ECC71]/10 transition-all duration-150"
+                        className="w-full h-11 px-3.5 pr-11 rounded-xl border border-neutral-200 bg-neutral-50/30 text-[#0F172A] text-sm focus:outline-none focus:bg-white focus:border-[#2ECC71]"
                       />
                       <button
                         type="button"
@@ -284,7 +310,12 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
 
                 <div className="flex items-center justify-between pt-1">
                   <label className="flex items-center gap-2.5 cursor-pointer group">
-                    <input type="checkbox" className="w-4 h-4 rounded border-neutral-300 bg-neutral-50 accent-[#2ECC71] cursor-pointer" />
+                    <input 
+                      type="checkbox" 
+                      checked={rememberMe}
+                      onChange={e => setRememberMe(e.target.checked)}
+                      className="w-4 h-4 rounded border-neutral-300 bg-neutral-50 accent-[#2ECC71] cursor-pointer" 
+                    />
                     <span className="text-xs font-medium text-neutral-500 group-hover:text-neutral-700 transition-colors">Remember me</span>
                   </label>
                   <button type="button" onClick={() => setForgotMode(true)} className="text-xs font-bold text-[#2ECC71] hover:text-[#27AE60] transition-colors cursor-pointer">
@@ -292,17 +323,63 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
                   </button>
                 </div>
 
+                {/* Legal Flow Interface Module */}
+                <div className={`p-4 rounded-xl border transition-all duration-300 ${legalCompleted ? 'bg-emerald-50/40 border-emerald-200' : 'bg-neutral-50 border-neutral-200/70'}`}>
+                  <span className="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-2.5">Legal Status</span>
+                  
+                  {!legalCompleted ? (
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="flex items-center gap-2 text-neutral-500 text-xs font-medium">
+                        <span className="w-2 h-2 rounded-full bg-neutral-400" />
+                        Legal acknowledgement required
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowTermsModal(true)}
+                        className="px-3.5 h-8 bg-[#0F172A] hover:bg-[#1E293B] text-white font-bold text-[11px] uppercase tracking-wider rounded-lg transition-all focus:outline-none cursor-pointer shrink-0"
+                      >
+                        Read Vendor Terms
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 animate-fade-in">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-[#2ECC71]">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>✓ Vendor Terms reviewed</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-semibold text-[#2ECC71]">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>✓ Privacy Policy reviewed</span>
+                      </div>
+                      <p className="text-[11px] text-[#2ECC71] font-bold pt-2 border-t border-emerald-200/50 mt-1">
+                        ✓ Legal requirements completed.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 <button
                   type="submit"
-                  disabled={loading}
-                  className="w-full h-12 mt-2 rounded-xl bg-[#2ECC71] hover:bg-[#27AE60] text-white font-semibold text-sm transition-all shadow-xl shadow-[#2ECC71]/15 active:scale-[0.995] disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                  disabled={loading || !legalCompleted}
+                  className="w-full h-12 mt-2 rounded-xl bg-[#2ECC71] hover:bg-[#27AE60] text-white font-semibold text-sm transition-all shadow-xl shadow-[#2ECC71]/15 active:scale-[0.995] disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {loading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : null}
                   Sign In
                 </button>
+
+                {/* Secondary Center Inline Links */}
+                <div className="mt-4 text-center">
+                  <a
+                    href="https://rivo-website.pages.dev/legal/terms"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[11px] font-bold text-neutral-400 hover:text-[#2ECC71] transition-colors inline-block focus:outline-none"
+                  >
+                    Learn More
+                  </a>
+                </div>
               </form>
 
-              {/* Bottom Redirection Panel for Mobile */}
               <div className="border-t border-neutral-100 pt-5 mt-6 text-center lg:hidden">
                 <button
                   type="button"
@@ -316,12 +393,17 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
           )}
         </div>
 
-        {/* Dynamic Mobile/Tablets Footer line */}
         <p className="text-center text-[10px] text-neutral-400 font-light p-6 border-t border-neutral-100 lg:hidden bg-neutral-50/30">
-          Rivo Network Dashboard Systems &middot; 2026
+          Rivo.City Network Dashboard Systems &middot; 2026
         </p>
       </div>
 
+      {showTermsModal && (
+        <VendorTerms 
+          onClose={() => setShowTermsModal(false)}
+          onAcknowledgeComplete={handleLegalComplete}
+        />
+      )}
     </div>
   );
 }
