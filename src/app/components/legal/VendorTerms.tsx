@@ -1,250 +1,303 @@
-import React, { useState, useRef, UIEvent } from "react";
-import { X, ShieldCheck, FileText, ExternalLink, AlertTriangle } from "lucide-react";
-import { vendorTermsContent } from "./VendorTermsContent.tsx";
-import { vendorPrivacyPolicyContent } from "./VendorPrivacyPolicyContent";
+import React from 'react';
+import {
+  ArrowLeft,
+  FileText,
+  ShieldCheck,
+  UserCheck,
+  PackageCheck,
+  DollarSign,
+  Truck,
+  Ban,
+  Copyright,
+  AlertTriangle,
+  Scale,
+  RefreshCw,
+  Mail,
+  HelpCircle,
+} from 'lucide-react';
 
-interface VendorTermsProps {
-  onClose: () => void;
-  onAcknowledgeComplete: () => void;
-  initialTermsRead?: boolean;
-  initialPrivacyRead?: boolean;
+export interface VendorTermsProps {
+  onBack?: () => void;
+  onContactSupport?: () => void;
+  className?: string;
 }
 
-export function VendorTerms({ 
-  onClose, 
-  onAcknowledgeComplete, 
-  initialTermsRead = false, 
-  initialPrivacyRead = false 
-}: VendorTermsProps) {
-  const [activeTab, setActiveTab] = useState<"terms" | "privacy">("terms");
-  const [termsRead, setTermsRead] = useState(initialTermsRead);
-  const [privacyRead, setPrivacyRead] = useState(initialPrivacyRead);
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+export const VendorTerms: React.FC<VendorTermsProps> = ({
+  onBack,
+  onContactSupport,
+  className = '',
+}) => {
+  const lastUpdated = 'July 22, 2026';
 
-  // Track scroll reach parameters per distinct pane window
-  const handleScrollDetection = (e: UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget;
-    // 8px tolerance configuration to safely trigger across variable rendering view heights
-    const isAtBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 8;
-
-    if (isAtBottom) {
-      if (activeTab === "terms" && !termsRead) {
-        setTermsRead(true);
-      } else if (activeTab === "privacy" && !privacyRead) {
-        setPrivacyRead(true);
-      }
-    }
-  };
-
-  const handleTabToggle = (tab: "terms" | "privacy") => {
-    setActiveTab(tab);
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = 0;
-    }
-  };
-
-  // Compute progress steps matrix
-  const completedCount = (termsRead ? 1 : 0) + (privacyRead ? 1 : 0);
-  const totalPercent = completedCount * 50;
-  const isAllRead = termsRead && privacyRead;
+  const sections = [
+    {
+      id: 'acceptance',
+      icon: ShieldCheck,
+      title: '1. Acceptance of Terms',
+      content: (
+        <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+          By registering as a vendor, creating a merchant profile, or listing products and services on our platform, you agree to be bound by these Vendor Terms & Conditions. If you do not agree to all of the terms set forth herein, you must not access or use the platform as a vendor. These terms constitute a legally binding agreement between you (the "Vendor") and our company.
+        </p>
+      ),
+    },
+    {
+      id: 'eligibility',
+      icon: UserCheck,
+      title: '2. Vendor Eligibility',
+      content: (
+        <div className="space-y-3 text-gray-600 dark:text-gray-300 leading-relaxed">
+          <p>
+            To qualify for and maintain an active vendor account, you must satisfy the following criteria:
+          </p>
+          <ul className="list-disc pl-5 space-y-2 text-gray-600 dark:text-gray-300">
+            <li>Be at least 18 years of age or the legal age of majority in your jurisdiction.</li>
+            <li>Possess a valid business registration, tax identification number, and required operating licenses where applicable.</li>
+            <li>Maintain an accurate, complete, and up-to-date business profile, including corporate structure and beneficial ownership information.</li>
+            <li>Pass all mandatory Know Your Customer (KYC) and Anti-Money Laundering (AML) verification checks.</li>
+          </ul>
+        </div>
+      ),
+    },
+    {
+      id: 'responsibilities',
+      icon: FileText,
+      title: '3. Vendor Responsibilities',
+      content: (
+        <div className="space-y-3 text-gray-600 dark:text-gray-300 leading-relaxed">
+          <p>
+            As an authorized Vendor on our platform, you agree to uphold high standards of business conduct, including:
+          </p>
+          <ul className="list-disc pl-5 space-y-2 text-gray-600 dark:text-gray-300">
+            <li>Providing truthful, transparent, and accurate information regarding your business and offered goods.</li>
+            <li>Complying with all applicable local, national, and international laws, regulations, and industry standards.</li>
+            <li>Maintaining reasonable customer service response times (within 24–48 hours) for customer inquiries and complaints.</li>
+            <li>Fulfilling customer orders promptly and adhering strictly to promised delivery timelines.</li>
+          </ul>
+        </div>
+      ),
+    },
+    {
+      id: 'product-listings',
+      icon: PackageCheck,
+      title: '4. Product Listings',
+      content: (
+        <div className="space-y-3 text-gray-600 dark:text-gray-300 leading-relaxed">
+          <p>
+            All product listings submitted to the marketplace must adhere to the following guidelines:
+          </p>
+          <ul className="list-disc pl-5 space-y-2 text-gray-600 dark:text-gray-300">
+            <li>Descriptions, specifications, and images must accurately depict the physical item being sold.</li>
+            <li>Listings must not contain misleading, deceptive, or fraudulent statements regarding item condition or origin.</li>
+            <li>Stock levels must be updated in real time to prevent stockout cancellations and unfulfilled orders.</li>
+            <li>All items must meet relevant safety standards, quality certifications, and regulatory compliance rules.</li>
+          </ul>
+        </div>
+      ),
+    },
+    {
+      id: 'pricing-payments',
+      icon: DollarSign,
+      title: '5. Pricing & Payments',
+      content: (
+        <div className="space-y-3 text-gray-600 dark:text-gray-300 leading-relaxed">
+          <p>
+            Vendors retain full discretion over setting product prices, subject to applicable fair pricing policies and commission structures:
+          </p>
+          <ul className="list-disc pl-5 space-y-2 text-gray-600 dark:text-gray-300">
+            <li>All prices must include relevant mandatory fees or clearly outline applicable sales taxes and duties at checkout.</li>
+            <li>Platform transaction fees, commissions, and payment processing charges will be deducted automatically from payout settlements according to your subscription tier.</li>
+            <li>Payouts are processed on a scheduled cycle (e.g., weekly or bi-weekly) following successful delivery confirmation and escrow clearance.</li>
+          </ul>
+        </div>
+      ),
+    },
+    {
+      id: 'orders-fulfillment',
+      icon: Truck,
+      title: '6. Orders & Fulfillment',
+      content: (
+        <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+          Vendors are responsible for packaging, shipping, and ensuring the safe delivery of sold goods to buyers. Valid tracking information must be uploaded to the platform dashboard upon dispatch. Failure to meet shipping deadlines, high rates of order cancellation, or recurring damaged goods claims may result in penalties, escrow delays, or account restrictions.
+        </p>
+      ),
+    },
+    {
+      id: 'prohibited-activities',
+      icon: Ban,
+      title: '7. Prohibited Activities',
+      content: (
+        <div className="space-y-3 text-gray-600 dark:text-gray-300 leading-relaxed">
+          <p>
+            Vendors are strictly prohibited from engaging in any of the following activities:
+          </p>
+          <ul className="list-disc pl-5 space-y-2 text-gray-600 dark:text-gray-300">
+            <li>Selling counterfeit, illegal, stolen, or restricted items.</li>
+            <li>Attempting to divert customers away from the platform to complete off-platform transactions.</li>
+            <li>Manipulating customer reviews, ratings, or feedback through incentivized or artificial means.</li>
+            <li>Engaging in fraudulent refund claims, wash trading, or unauthorized access attempts.</li>
+          </ul>
+        </div>
+      ),
+    },
+    {
+      id: 'intellectual-property',
+      icon: Copyright,
+      title: '8. Intellectual Property',
+      content: (
+        <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+          Vendors represent and warrant that they possess all necessary rights, licenses, and permissions for any content, logos, trademarks, and imagery uploaded to the platform. By listing items, Vendors grant the platform a non-exclusive, worldwide, royalty-free license to display, promote, and market the listed content for promotional and operational purposes.
+        </p>
+      ),
+    },
+    {
+      id: 'suspension-termination',
+      icon: AlertTriangle,
+      title: '9. Account Suspension & Termination',
+      content: (
+        <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+          We reserve the right to suspend or terminate any Vendor account, with or without prior notice, in the event of material breach of these terms, excessive buyer disputes, fraudulent activity, or legal compulsion. Upon termination, active listings will be delisted, and remaining clear funds will be settled after deducting pending chargebacks and liabilities.
+        </p>
+      ),
+    },
+    {
+      id: 'governing-law',
+      icon: Scale,
+      title: '10. Governing Law',
+      content: (
+        <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+          These Vendor Terms & Conditions shall be governed by and construed in accordance with the applicable laws of the jurisdiction in which our corporate headquarters operates, without giving effect to any principles of conflicts of law. Any disputes arising hereunder shall be submitted to binding arbitration or competent courts within said jurisdiction.
+        </p>
+      ),
+    },
+    {
+      id: 'changes-to-terms',
+      icon: RefreshCw,
+      title: '11. Changes to Terms',
+      content: (
+        <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+          We reserve the right to amend or update these Vendor Terms at any time. Notice of substantial revisions will be provided via email or through prominent notifications within the Vendor Portal. Continued access to or use of the marketplace following such updates constitutes express acceptance of the revised terms.
+        </p>
+      ),
+    },
+    {
+      id: 'contact-info',
+      icon: Mail,
+      title: '12. Contact Information',
+      content: (
+        <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+          If you have questions, feedback, or legal inquiries regarding these Vendor Terms & Conditions, please contact our Legal & Compliance department at{' '}
+          <a
+            href="mailto:legal@vendorplatform.com"
+            className="text-indigo-600 dark:text-indigo-400 font-medium hover:underline"
+          >
+            legal@vendorplatform.com
+          </a>.
+        </p>
+      ),
+    },
+  ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0F172A]/70 backdrop-blur-sm p-4 md:p-6 selection:bg-[#2ECC71]/20 selection:text-[#0F172A]">
-      
-      {/* Dynamic Overlay Canvas Shell */}
-      <div className="bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl border border-neutral-100 flex flex-col md:flex-row overflow-hidden animate-fade-in relative">
-        
-        {/* Left Status & Progress Dashboard Terminal Column */}
-        <div className="w-full md:w-80 bg-neutral-50 border-b md:border-b-0 md:border-r border-neutral-100 p-6 flex flex-col justify-between shrink-0">
-          <div className="space-y-6">
-            <div>
-              <div className="w-10 h-10 rounded-xl bg-[#2ECC71]/10 flex items-center justify-center text-[#2ECC71] mb-3">
-                <ShieldCheck className="w-6 h-6" />
-              </div>
-              <h2 className="text-xl font-black text-[#0F172A] tracking-tight">Vendor Legal Centre</h2>
-              <p className="text-xs text-neutral-400 mt-1 leading-relaxed">Please review all legal documents before continuing.</p>
-            </div>
-
-            <hr className="border-neutral-200/60" />
-
-            {/* Micro Metrics Section Tracker */}
-            <div className="space-y-4">
-              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Document Milestones</span>
-              
-              <div onClick={() => handleTabToggle("terms")} className={`p-3 rounded-xl border transition-all cursor-pointer ${activeTab === "terms" ? "bg-white border-[#2ECC71] shadow-sm" : "bg-transparent border-transparent"}`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-neutral-700">Vendor Terms</span>
-                  {termsRead ? (
-                    <span className="text-[10px] font-bold text-[#2ECC71] bg-[#2ECC71]/10 px-2 py-0.5 rounded-full flex items-center gap-1">✓ Completed</span>
-                  ) : (
-                    <span className="text-[10px] font-medium text-neutral-400">Pending Scroll</span>
-                  )}
-                </div>
-              </div>
-
-              <div onClick={() => handleTabToggle("privacy")} className={`p-3 rounded-xl border transition-all cursor-pointer ${activeTab === "privacy" ? "bg-white border-[#2ECC71] shadow-sm" : "bg-transparent border-transparent"}`}>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-neutral-700">Privacy Policy</span>
-                  {privacyRead ? (
-                    <span className="text-[10px] font-bold text-[#2ECC71] bg-[#2ECC71]/10 px-2 py-0.5 rounded-full flex items-center gap-1">✓ Completed</span>
-                  ) : (
-                    <span className="text-[10px] font-medium text-neutral-400">Pending Scroll</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Dynamic Progress Visualization Meter Component Layout */}
-          <div className="pt-6 border-t border-neutral-200/60 mt-6 md:mt-0 space-y-2.5">
-            <div className="flex justify-between items-end">
-              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Overall Progress</span>
-              <span className="text-sm font-black text-[#0F172A]">{totalPercent}%</span>
-            </div>
-            <div className="w-full h-2 bg-neutral-200 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-[#2ECC71] transition-all duration-500 ease-out"
-                style={{ width: `${totalPercent}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Right Active Viewport Documentation Component Layout Area */}
-        <div className="flex-1 flex flex-col min-w-0 bg-white">
-          
-          {/* Top Bar Tabs Configuration Selection Layout Grid Matrix */}
-          <div className="flex border-b border-neutral-100 bg-white px-4 shrink-0 justify-between items-center">
-            <div className="flex">
+    <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200 ${className}`}>
+      {/* Sticky Top Header Navigation */}
+      <header className="sticky top-0 z-30 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-700">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            {onBack && (
               <button
-                type="button"
-                onClick={() => handleTabToggle("terms")}
-                className={`flex items-center gap-2 py-4 px-3 border-b-2 font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
-                  activeTab === "terms" ? "border-[#2ECC71] text-[#2ECC71]" : "border-transparent text-neutral-400 hover:text-neutral-600"
-                }`}
+                onClick={onBack}
+                className="inline-flex items-center justify-center p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-white dark:hover:bg-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                aria-label="Go back to Settings"
               >
-                <FileText className="w-4 h-4" />
-                Vendor Terms & Conditions
+                <ArrowLeft className="w-5 h-5 mr-1" />
+                <span className="text-sm font-medium">Back</span>
               </button>
-              <button
-                type="button"
-                onClick={() => handleTabToggle("privacy")}
-                className={`flex items-center gap-2 py-4 px-3 border-b-2 font-bold text-xs uppercase tracking-wider transition-all ml-4 cursor-pointer ${
-                  activeTab === "privacy" ? "border-[#2ECC71] text-[#2ECC71]" : "border-transparent text-neutral-400 hover:text-neutral-600"
-                }`}
-              >
-                <ShieldCheck className="w-4 h-4" />
-                Vendor Privacy Policy
-              </button>
-            </div>
-            <button
-              onClick={onClose}
-              className="w-8 h-8 rounded-lg flex items-center justify-center text-neutral-400 hover:text-neutral-600 hover:bg-neutral-50 transition-all cursor-pointer mr-2"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Scroll Inspected Layout Shell Area Container */}
-          <div 
-            ref={scrollContainerRef}
-            onScroll={handleScrollDetection}
-            className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 scroll-smooth"
-          >
-            {activeTab === "terms" ? (
-              <div className="space-y-6 max-w-3xl">
-                {vendorTermsContent.map((section, idx) => (
-                  <div key={idx} className="space-y-2.5">
-                    <h3 className="text-sm font-black text-[#0F172A] uppercase tracking-wide">{section.title}</h3>
-                    {section.content.map((para, pIdx) => (
-                      <p key={pIdx} className="text-neutral-500 font-light text-sm leading-relaxed">{para}</p>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-6 max-w-3xl">
-                {vendorPrivacyPolicyContent.map((section, idx) => (
-                  <div key={idx} className="space-y-2.5">
-                    <h3 className="text-sm font-black text-[#0F172A] uppercase tracking-wide">{section.title}</h3>
-                    {section.content.map((para, pIdx) => (
-                      <p key={pIdx} className="text-neutral-500 font-light text-sm leading-relaxed">{para}</p>
-                    ))}
-                  </div>
-                ))}
-              </div>
             )}
+            <div className="h-5 w-px bg-gray-200 dark:bg-gray-700 hidden sm:block" />
+            <h1 className="text-lg font-bold text-gray-900 dark:text-white truncate">
+              Vendor Terms & Conditions
+            </h1>
           </div>
 
-          {/* Core Panel Actions Matrix Footer Layout Control Configuration */}
-          <div className="p-5 border-t border-neutral-100 bg-neutral-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 shrink-0">
-            <div className="flex items-center gap-2">
-              <a
-                href="https://rivo-website.pages.dev/legal/terms"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-neutral-400 hover:text-[#2ECC71] transition-colors"
-              >
-                Learn More <ExternalLink className="w-3.5 h-3.5" />
-              </a>
-            </div>
+          <div className="flex items-center space-x-3">
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+              Last Updated: {lastUpdated}
+            </span>
+          </div>
+        </div>
+      </header>
 
-            <button
-              type="button"
-              disabled={!isAllRead}
-              onClick={() => setShowConfirmDialog(true)}
-              className="px-6 h-11 rounded-xl bg-[#2ECC71] hover:bg-[#27AE60] disabled:bg-neutral-200 disabled:text-neutral-400 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2 disabled:cursor-not-allowed cursor-pointer shadow-lg shadow-[#2ECC71]/10 disabled:shadow-none"
-            >
-              I Understand & Agree
-            </button>
+      {/* Main Content Area */}
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-8">
+        {/* Hero Banner Section */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-700 to-purple-800 text-white p-8 sm:p-12 shadow-xl">
+          <div className="absolute top-0 right-0 -mt-12 -mr-12 w-64 h-64 rounded-full bg-white/10 blur-2xl pointer-events-none" />
+          <div className="relative z-10 max-w-3xl space-y-4">
+            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-indigo-100 text-xs font-semibold tracking-wide uppercase">
+              <FileText className="w-4 h-4" />
+              <span>Merchant Agreement</span>
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">
+              Terms & Conditions for Marketplace Vendors
+            </h2>
+            <p className="text-indigo-100 text-base sm:text-lg leading-relaxed">
+              Please review these terms carefully before listing products or offering services on our platform. They outline vendor standards, operational requirements, and key policies.
+            </p>
           </div>
         </div>
 
-        {/* Modal-nested Layer Sub-confirmation Modal Configuration Box Block */}
-        {showConfirmDialog && (
-          <div className="absolute inset-0 z-50 bg-[#0F172A]/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white max-w-md w-full rounded-2xl border border-neutral-100 p-6 space-y-5 shadow-2xl animate-scale-up">
-              <div className="flex items-center gap-3 text-amber-500">
-                <AlertTriangle className="w-6 h-6 shrink-0" />
-                <h3 className="text-lg font-black text-[#0F172A] tracking-tight">Legal Confirmation</h3>
-              </div>
-              
-              <div className="text-xs text-neutral-500 space-y-2 leading-relaxed">
-                <p className="font-medium text-neutral-700">You confirm that:</p>
-                <ul className="list-disc pl-4 space-y-1.5">
-                  <li>You have reviewed the Vendor Terms & Conditions.</li>
-                  <li>You have reviewed the Vendor Privacy Policy.</li>
-                  <li>You understand your responsibilities as a Rivo.City Vendor.</li>
-                  <li>You agree to comply with all applicable policies while using the platform.</li>
-                </ul>
-              </div>
+        {/* Legal Cards Container */}
+        <div className="grid grid-cols-1 gap-6">
+          {sections.map((section) => {
+            const IconComponent = section.icon;
+            return (
+              <section
+                key={section.id}
+                id={section.id}
+                className="bg-white dark:bg-gray-800 rounded-xl p-6 sm:p-8 border border-gray-200 dark:border-gray-700 shadow-sm hover:shadow-md transition-shadow"
+              >
+                <div className="flex items-start space-x-4">
+                  <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 shrink-0">
+                    <IconComponent className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1 space-y-3">
+                    <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                      {section.title}
+                    </h3>
+                    <div className="text-sm sm:text-base">
+                      {section.content}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            );
+          })}
+        </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmDialog(false)}
-                  className="px-4 h-9 rounded-lg border border-neutral-200 text-neutral-500 hover:bg-neutral-50 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onAcknowledgeComplete();
-                    onClose();
-                  }}
-                  className="px-4 h-9 rounded-lg bg-[#2ECC71] hover:bg-[#27AE60] text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
-                >
-                  I Understand & Agree
-                </button>
-              </div>
-            </div>
+        {/* Bottom Contact / Support Callout */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 border border-gray-200 dark:border-gray-700 shadow-sm text-center space-y-4">
+          <div className="inline-flex items-center justify-center p-3 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
+            <HelpCircle className="w-8 h-8" />
           </div>
-        )}
-
-      </div>
+          <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+            Have Questions About Our Terms?
+          </h3>
+          <p className="text-gray-600 dark:text-gray-300 max-w-2xl mx-auto text-sm sm:text-base">
+            Our specialized legal and compliance team is here to assist you with any questions regarding vendor agreements, policies, or compliance guidelines.
+          </p>
+          <div className="pt-2">
+            <button
+              onClick={onContactSupport}
+              className="inline-flex items-center justify-center px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-md hover:shadow-lg transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800"
+            >
+              <Mail className="w-5 h-5 mr-2" />
+              Contact Legal Team
+            </button>
+          </div>
+        </div>
+      </main>
     </div>
   );
-}
+};
+
+export default VendorTerms;

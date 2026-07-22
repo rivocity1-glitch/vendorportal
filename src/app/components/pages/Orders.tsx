@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Search, Filter, Download, X, MapPin, Phone, Package, CreditCard, User, Bike, ChevronRight, Loader2, RefreshCw, Smartphone, Star, CheckCircle, Clock, Trash2, Calendar, Eye } from "lucide-react";
+import { Search, Filter, Download, X, MapPin, Phone, Package, CreditCard, User, Bike, ChevronRight, Loader2, RefreshCw, Smartphone, Star, CheckCircle, Clock, Trash2, Calendar, Eye, AlertTriangle } from "lucide-react";
 import { supabase } from "../../../lib/supabase"; 
 
 const statusColors: Record<string, { bg: string; text: string; dot: string }> = {
@@ -93,6 +93,22 @@ export function Orders() {
     return remainingMins <= 5 ? "Returned" : `Returning in ${remainingMins} mins`;
   };
 
+  const formatDate = (dateStr: string | null) => {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr);
+    const dateFormatted = d.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+    const timeFormatted = d.toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+    return `${dateFormatted} • ${timeFormatted}`;
+  };
+
   // Helper to dynamically resolve verifier user names from UUIDs without manual component breakdown
   const resolveVerifierName = async (userId: string) => {
     if (!userId || verifierNames[userId]) return;
@@ -152,7 +168,7 @@ export function Orders() {
       if (vendorErr || !vendorProfile) throw new Error("Could not resolve vendor context profile configuration.");
       const currentVendorId = vendorProfile.id;
 
-      // Single comprehensive query fetching all associations to prevent N+1 overhead
+      // Single comprehensive query fetching all associations including new cancellation fields
       const { data: itemsData, error } = await supabase
         .from("order_items")
         .select(`
@@ -181,6 +197,9 @@ export function Orders() {
             rivo_delivery_margin,
             payment_status,
             order_status,
+            cancelled_by,
+            cancel_reason,
+            cancelled_at,
             cash_received,
             change_returned,
             collected_by_rider,
@@ -192,7 +211,7 @@ export function Orders() {
               phone,
               email
             ),
-            riders (
+            assigned_rider:riders!orders_rider_fk (
               id,
               rider_name,
               phone,
@@ -242,7 +261,7 @@ export function Orders() {
           const oId = item.order_id || "UNKNOWN";
           const parentOrder = item.orders;
           const customerProfile = parentOrder.customers || {};
-          const riderProfile = parentOrder.riders || null;
+          const riderProfile = parentOrder.assigned_rider || null;
           const addressProfile = parentOrder.customer_addresses || null;
           const paymentInfo = parentOrder.payments?.[0] || parentOrder.payments || null;
           const historyTracking = parentOrder.order_tracking || [];
@@ -283,6 +302,9 @@ export function Orders() {
               rivoMargin: Number(parentOrder.rivo_delivery_margin || 0),
               paymentStatus: parentOrder.payment_status || "Pending", 
               orderStatus: currentStatus,
+              cancelledBy: parentOrder.cancelled_by || null,
+              cancelReason: parentOrder.cancel_reason || null,
+              cancelledAt: parentOrder.cancelled_at || null,
               updatedAt: parentOrder.updated_at,
               vendorId: parentOrder.vendor_id,
               riderId: parentOrder.rider_id,
@@ -1163,8 +1185,9 @@ export function Orders() {
             <tbody className="divide-y divide-border">
               {filtered.map(order => {
                 const status = order.orderStatus;
+                const isCancelled = status === "Cancelled";
                 const s = statusColors[status] || statusColors.Pending;
-                const actions = actionButtons[status] || [];
+                const actions = isCancelled ? [] : (actionButtons[status] || []);
                 return (
                   <tr key={order.id} className="hover:bg-muted/30 transition-colors">
                     <td className="px-4 py-3">
@@ -1424,6 +1447,36 @@ export function Orders() {
                 <span className="text-xs text-muted-foreground">{selectedOrder.date}</span>
               </div>
 
+              {/* Cancelled Order Highlight Card in Drawer Panel */}
+              {selectedOrder.orderStatus === "Cancelled" && (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-2">
+                  <div className="flex items-center gap-1.5 text-red-800 font-bold text-sm">
+                    <AlertTriangle className="w-4 h-4 text-red-600" />
+                    <span>Cancellation Details</span>
+                  </div>
+                  <div className="text-xs space-y-1.5 pt-1">
+                    <div className="flex justify-between">
+                      <span className="text-red-700 font-medium">Cancelled By</span>
+                      <span className="text-red-900 font-bold capitalize">
+                        {selectedOrder.cancelledBy || "Customer"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-red-700 font-medium">Reason</span>
+                      <span className="text-red-900 font-bold">
+                        {selectedOrder.cancelReason || "Changed my mind"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-red-700 font-medium">Cancelled At</span>
+                      <span className="text-red-900 font-bold">
+                        {formatDate(selectedOrder.cancelledAt)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Enhanced Progress Timeline with Historical Milestones */}
               <div className="bg-muted/20 border border-border/60 rounded-xl p-4">
                 <p className="text-xs font-bold text-muted-foreground uppercase tracking-wide mb-3">Order Progress Timeline</p>
@@ -1604,7 +1657,8 @@ export function Orders() {
                 {/* Conditional Manual Verification Workflow Controls */}
                 {selectedOrder.paymentDetails && 
                  (selectedOrder.paymentDetails.method || "").trim().toLowerCase() === "upi" && 
-                 (selectedOrder.paymentDetails.status || "").trim().toLowerCase() === "pending" && (
+                 (selectedOrder.paymentDetails.status || "").trim().toLowerCase() === "pending" && 
+                 selectedOrder.orderStatus !== "Cancelled" && (
                   <div className="flex gap-2 pt-1 border-t border-dashed border-border/60">
                     <button
                       onClick={() => setPaymentVerificationData({ orderId: selectedOrder.id, action: "Approve", remarks: "", visible: true })}
@@ -1705,7 +1759,8 @@ export function Orders() {
               <div className="space-y-2 pt-2">
                 {(() => {
                   const status = selectedOrder.orderStatus;
-                  const actions = actionButtons[status] || [];
+                  const isCancelled = status === "Cancelled";
+                  const actions = isCancelled ? [] : (actionButtons[status] || []);
                   return actions.length > 0 ? (
                     <div className="flex gap-2">
                       {actions.map(a => {

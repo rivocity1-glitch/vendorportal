@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { 
-  MessageSquare, Wallet, Star, CheckCheck, Bell, Trash2, 
+  Wallet, Star, CheckCheck, Bell, Trash2, 
   ShoppingBag, CreditCard, Layers, Settings, Eye, RefreshCw, 
-  Inbox
+  Inbox, AlertCircle
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 import { notificationSync } from "../../../lib/notificationSync";
@@ -41,6 +41,12 @@ export function Notifications() {
   const [vendorId, setVendorId] = useState<string | null>(null);
   const [animateBadge, setAnimateBadge] = useState<boolean>(false);
   const [newNotificationId, setNewNotificationId] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const triggerErrorToast = (msg?: string) => {
+    setErrorMessage(msg || "Failed to update notification. Please try again.");
+    setTimeout(() => setErrorMessage(null), 4000);
+  };
 
   const loadNotifications = async (isRefresh = false) => {
     try {
@@ -150,19 +156,43 @@ export function Notifications() {
   }, [notifications, activeFilter]);
 
   const updateItemToRead = async (targetId: string) => {
+    const previousState = [...notifications];
+    // Optimistic UI update
     setNotifications(prev => prev.map(item => item.id === targetId ? { ...item, is_read: true } : item));
-    await notificationService.markNotificationRead(targetId);
+
+    const result = await notificationService.markNotificationRead(targetId);
+    if (!result.success) {
+      console.error("Failed to mark notification read:", result.error);
+      setNotifications(previousState); // Revert on failure
+      triggerErrorToast();
+    }
   };
 
   const flushAllToRead = async () => {
     if (!vendorId) return;
+    const previousState = [...notifications];
+    // Optimistic UI update
     setNotifications(prev => prev.map(item => ({ ...item, is_read: true })));
-    await notificationService.markAllNotificationsRead(vendorId, "vendor");
+
+    const result = await notificationService.markAllNotificationsRead(vendorId, "vendor");
+    if (!result.success) {
+      console.error("Failed to mark all notifications read:", result.error);
+      setNotifications(previousState); // Revert on failure
+      triggerErrorToast();
+    }
   };
 
   const removeNotificationEntry = async (targetId: string) => {
+    const previousState = [...notifications];
+    // Optimistic UI update
     setNotifications(prev => prev.filter(item => item.id !== targetId));
-    await notificationService.deleteNotification(targetId);
+
+    const result = await notificationService.deleteNotification(targetId);
+    if (!result.success) {
+      console.error("Failed to delete notification:", result.error);
+      setNotifications(previousState); // Revert on failure
+      triggerErrorToast();
+    }
   };
 
   const filterTabs = ["All", "Unread", "Orders", "Reviews", "Settlements", "System"];
@@ -170,6 +200,14 @@ export function Notifications() {
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-8 antialiased text-foreground bg-background min-h-screen">
       
+      {/* ERROR TOAST */}
+      {errorMessage && (
+        <div className="fixed top-4 right-4 z-50 bg-red-600 text-white text-xs font-bold px-4 py-3 rounded-xl shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4 duration-300">
+          <AlertCircle className="w-4 h-4" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
       {/* HEADER SECTION */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-border">
         <div className="space-y-1">
@@ -190,7 +228,7 @@ export function Notifications() {
             type="button"
             disabled={refreshing || loading}
             onClick={() => loadNotifications(true)}
-            className="inline-flex items-center justify-center gap-2 h-9 px-4 text-xs font-medium rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 h-9 px-4 text-xs font-medium rounded-lg border border-border bg-card hover:bg-muted/40 transition-colors disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
@@ -199,7 +237,7 @@ export function Notifications() {
             <button 
               type="button"
               onClick={flushAllToRead}
-              className="inline-flex items-center justify-center gap-2 h-9 px-4 text-xs font-medium rounded-lg bg-foreground text-background hover:opacity-90 transition-opacity shadow-sm"
+              className="inline-flex items-center justify-center gap-2 h-9 px-4 text-xs font-medium rounded-lg bg-foreground text-background hover:opacity-90 transition-opacity shadow-sm cursor-pointer"
             >
               <CheckCheck className="w-3.5 h-3.5" />
               <span>Mark All Read</span>
@@ -241,7 +279,7 @@ export function Notifications() {
             key={filter}
             type="button"
             onClick={() => setActiveFilter(filter)}
-            className={`shrink-0 px-4 py-2 text-xs font-medium rounded-full border transition-all duration-155 ${
+            className={`shrink-0 px-4 py-2 text-xs font-medium rounded-full border transition-all duration-155 cursor-pointer ${
               activeFilter === filter
                 ? "bg-foreground text-background border-foreground shadow-sm"
                 : "bg-card border-border text-muted-foreground hover:border-neutral-300 dark:hover:border-neutral-700 hover:text-foreground"
@@ -284,7 +322,7 @@ export function Notifications() {
           <button
             type="button"
             onClick={() => loadNotifications(true)}
-            className="mt-5 inline-flex items-center justify-center h-8 px-4 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"
+            className="mt-5 inline-flex items-center justify-center h-8 px-4 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors cursor-pointer"
           >
             Refresh
           </button>
@@ -339,7 +377,7 @@ export function Notifications() {
                     <div className="flex items-center gap-1.5 mt-4 pt-3 border-t border-border/50 justify-end transition-opacity">
                       <button
                         type="button"
-                        className="h-7 px-2.5 rounded-lg text-xs font-medium text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1.5"
+                        className="h-7 px-2.5 rounded-lg text-xs font-medium text-muted-foreground hover:bg-muted transition-colors flex items-center gap-1.5 cursor-pointer"
                       >
                         <Eye className="w-3.5 h-3.5" />
                         <span>View</span>
@@ -349,7 +387,7 @@ export function Notifications() {
                         <button 
                           type="button"
                           onClick={() => updateItemToRead(item.id)} 
-                          className="h-7 px-2.5 rounded-lg text-xs font-medium text-green-600 dark:text-green-400 hover:bg-green-500/10 transition-colors flex items-center gap-1.5"
+                          className="h-7 px-2.5 rounded-lg text-xs font-medium text-green-600 dark:text-green-400 hover:bg-green-500/10 transition-colors flex items-center gap-1.5 cursor-pointer"
                         >
                           <CheckCheck className="w-3.5 h-3.5" />
                           <span>Mark Read</span>
@@ -359,7 +397,7 @@ export function Notifications() {
                       <button 
                         type="button"
                         onClick={() => removeNotificationEntry(item.id)} 
-                        className="h-7 px-2.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1.5"
+                        className="h-7 px-2.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1.5 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                         <span>Delete</span>

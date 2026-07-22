@@ -5,15 +5,8 @@ import {
   Camera, 
   ShieldAlert, 
   Loader2, 
-  Mail, 
-  Phone, 
   Trash2,
-  Globe,
-  Lock,
-  LifeBuoy,
-  FileText,
-  ExternalLink,
-  Smartphone
+  FileText
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
@@ -87,15 +80,7 @@ export function Profile() {
   const maxProfileBanners = 3;
   const [savedMessage, setSavedMessage] = useState("");
   const [validationError, setValidationError] = useState("");
-  const [availableCategories, setAvailableCategories] = useState<StoreCategory[]>([]);
-
-  // Preferences & Security UI States
-  const [language, setLang] = useState<"en" | "mr">("en");
-  const [emailNotifications, setEmailNotifications] = useState(true);
-  const [whatsappNotifications, setWhatsappNotifications] = useState(false);
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [changingPassword, setChangingPassword] = useState(false);
+  const [, setAvailableCategories] = useState<StoreCategory[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bannerFileInputRef = useRef<HTMLInputElement>(null);
@@ -417,40 +402,6 @@ export function Profile() {
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setValidationError("");
-    setSavedMessage("");
-
-    if (!newPassword || !confirmPassword) {
-      setValidationError("Please map entries into both password input boxes.");
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setValidationError("Cryptographic password mismatch strings identified.");
-      return;
-    }
-    if (newPassword.length < 6) {
-      setValidationError("Password string length must meet minimum 6-character constraints.");
-      return;
-    }
-
-    try {
-      setChangingPassword(true);
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw error;
-      
-      setSavedMessage("Security credentials updated successfully.");
-      setNewPassword("");
-      setConfirmPassword("");
-      setTimeout(() => setSavedMessage(""), 3000);
-    } catch (err: any) {
-      setValidationError(err.message || "Failed to update security parameters.");
-    } finally {
-      setChangingPassword(false);
-    }
-  };
-
   const badge = approvalBadgeConfig[profile.status] || approvalBadgeConfig.pending;
 
   return (
@@ -569,8 +520,8 @@ export function Profile() {
 
       <div className="pb-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Account Settings</h1>
-          <p className="text-slate-500 text-sm mt-1">Manage individual identification descriptors, choices, and security metrics</p>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Account Profile</h1>
+          <p className="text-slate-500 text-sm mt-1">Manage individual identification descriptors and storefront banners</p>
         </div>
       </div>
 
@@ -612,7 +563,7 @@ export function Profile() {
 
           <div className="space-y-2 text-center sm:text-left flex-1 min-w-0">
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">Profile Picture</h2>
-            <p className="text-xs text-slate-400 leading-relaxed max-w-sm">JPG or PNG formats acceptable. Maximum hosting file allocation sizes cap around 2MB entries.</p>
+            <p className="text-xs text-slate-400 leading-relaxed max-w-sm">JPG or PNG formats acceptable. Maximum file allocation size caps around 2MB.</p>
             <div className="flex flex-wrap items-center justify-center sm:justify-flex-start gap-2 pt-1">
               <button
                 type="button"
@@ -651,7 +602,7 @@ export function Profile() {
               type="button" 
               onClick={handleSaveIdentity}
               disabled={saving}
-              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs"
+              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
             >
               {saving && <Loader2 size={12} className="animate-spin" />}
               Save Profile
@@ -698,7 +649,7 @@ export function Profile() {
             {profile.store_categories.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {profile.store_categories.map(c => (
-                  <span key={c} className="bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 text-[11px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 shadow-3xs uppercase">
+                  <span key={c} className="bg-white dark:bg-slate-955 text-slate-700 dark:text-slate-300 text-[11px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-800 shadow-3xs uppercase">
                     🏷 {c}
                   </span>
                 ))}
@@ -713,114 +664,6 @@ export function Profile() {
             <span className="font-semibold text-slate-600 dark:text-slate-400 font-mono">{profile.created_at}</span>
           </div>
 
-        </div>
-      </Section>
-
-      <Section title="Preferences" icon={Globe}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Interface Language</label>
-            <div className="flex gap-2">
-              <button 
-                type="button"
-                onClick={() => setLang("en")} 
-                className={`flex-1 h-10 rounded-xl font-bold text-xs border transition-all ${language === "en" ? "bg-emerald-500 text-white border-transparent shadow-xs" : "bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-100"}`}
-              >
-                English
-              </button>
-              <button 
-                type="button"
-                onClick={() => setLang("mr")} 
-                className={`flex-1 h-10 rounded-xl font-bold text-xs border transition-all ${language === "mr" ? "bg-emerald-500 text-white border-transparent shadow-xs" : "bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:bg-slate-100"}`}
-              >
-                मराठी (Marathi)
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            <label className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block">Notification Vectors</label>
-            <div className="space-y-2.5">
-              <label className="flex items-center gap-3 select-none text-xs text-slate-700 dark:text-slate-300 font-medium cursor-pointer">
-                <input 
-                  type="checkbox" 
-                  checked={emailNotifications} 
-                  onChange={e => setEmailNotifications(e.target.checked)}
-                  className="rounded border-slate-300 text-emerald-500 focus:ring-emerald-500/10 w-4 h-4"
-                />
-                <span className="flex items-center gap-1.5"><Mail size={14} className="text-slate-400" /> Email Notifications</span>
-              </label>
-              
-              <label className="flex items-center gap-3 select-none text-xs text-slate-400 dark:text-slate-500 font-medium cursor-not-allowed">
-                <input 
-                  type="checkbox" 
-                  checked={whatsappNotifications} 
-                  disabled
-                  className="rounded border-slate-200 text-slate-300 w-4 h-4 opacity-50"
-                />
-                <span className="flex items-center gap-1.5"><Smartphone size={14} className="text-slate-400" /> WhatsApp Integration <span className="text-[9px] bg-slate-100 dark:bg-slate-900 text-slate-400 border px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider ml-1">Beta</span></span>
-              </label>
-            </div>
-          </div>
-        </div>
-      </Section>
-
-      <Section title="Security & Authentication" icon={Lock}>
-        <form onSubmit={handleChangePassword} className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="New Password" value={newPassword} onChange={setNewPassword} type="password" placeholder="••••••••" />
-            <Field label="Confirm Password" value={confirmPassword} onChange={setConfirmPassword} type="password" placeholder="••••••••" />
-          </div>
-          
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-slate-100 dark:border-slate-900/60 pt-4">
-            <button
-              type="button"
-              disabled
-              className="h-9 px-4 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 text-xs font-bold transition-all cursor-not-allowed text-left sm:text-center"
-            >
-              Logout Other Active Session Tokens
-            </button>
-
-            <button 
-              type="submit"
-              disabled={changingPassword}
-              className="h-9 px-4 bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 shadow-2xs"
-            >
-              {changingPassword && <Loader2 size={12} className="animate-spin" />}
-              Update Credentials
-            </button>
-          </div>
-        </form>
-      </Section>
-
-      <Section title="Platform Support & Legal Compliance" icon={LifeBuoy}>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-1 text-sm">
-          <div className="space-y-1.5">
-            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
-              Encountered individual account limitations, compliance issues, or authentication layout bugs? Reach out to our engineers.
-            </p>
-            <div className="pt-2 flex flex-col gap-2">
-              <a href="tel:+919021404487" className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1.5">
-                📞 Direct Vendor Escalation Hotline
-              </a>
-              <a href="mailto:rivo.cityhelp1@gmail.com" className="text-xs font-bold text-slate-600 dark:text-slate-400 hover:underline flex items-center gap-1.5">
-                ✉️ Account Operations Email Gateway
-              </a>
-            </div>
-          </div>
-
-          <div className="border-t md:border-t-0 md:border-l border-slate-100 dark:border-slate-900/60 pt-4 md:pt-0 md:pl-6 flex flex-col justify-between space-y-4">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs font-bold text-slate-600 dark:text-slate-400">
-              <a href="#" className="hover:text-emerald-500 transition-colors flex items-center gap-1">Help Center <ExternalLink size={10} /></a>
-              <a href="#" className="hover:text-emerald-500 transition-colors flex items-center gap-1">Terms of Service <ExternalLink size={10} /></a>
-              <a href="#" className="hover:text-emerald-500 transition-colors flex items-center gap-1">Privacy Policy <ExternalLink size={10} /></a>
-              <a href="#" className="hover:text-emerald-500 transition-colors flex items-center gap-1">Compliance Status <ExternalLink size={10} /></a>
-            </div>
-            
-            <div className="text-[10px] font-mono font-bold text-slate-400 dark:text-slate-500 text-right uppercase tracking-wider">
-              Rivo Core Client App Version: <span className="text-slate-600 dark:text-slate-400">v4.12.0-stable</span>
-            </div>
-          </div>
         </div>
       </Section>
 

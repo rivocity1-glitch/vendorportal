@@ -20,6 +20,15 @@ import { supabase } from "../lib/supabase";
 import Subscriptions from "./components/pages/subscriptions";
 import SmartImport from "./components/pages/SmartImport";
 
+// Legal & Info Page Imports
+import { VendorTerms } from "./components/legal/VendorTerms";
+import VendorPrivacyPolicy from "./components/legal/VendorPrivacyPolicy";
+import { VendorRefundPolicy } from "./components/legal/VendorRefundPolicy";
+import { VendorDisclaimer } from "./components/legal/VendorDisclaimer";
+import { VendorLiability } from "./components/legal/VendorLiability";
+import { VendorContact } from "./components/legal/VendorContact";
+import { VendorAbout } from "./components/legal/VendorAbout";
+
 type Page =
   | "login"
   | "register"
@@ -38,7 +47,14 @@ type Page =
   | "notifications"
   | "store"
   | "profile"
-  | "settings";
+  | "settings"
+  | "terms"
+  | "privacy"
+  | "refund-policy"
+  | "disclaimer"
+  | "liability"
+  | "contact"
+  | "about";
 
 interface VendorMetaState {
   store_name: string;
@@ -201,7 +217,21 @@ export default function App() {
       case "profile":
         return <Profile />;
       case "settings":
-        return <Settings isDark={isDark} onToggleTheme={() => setIsDark(!isDark)} />;
+        return <Settings isDark={isDark} onToggleTheme={() => setIsDark(!isDark)} onNavigate={handleNavigate} />;
+      case "terms":
+        return <VendorTerms onBack={() => handleNavigate("settings")} onContactSupport={() => handleNavigate("contact")} />;
+      case "privacy":
+        return <VendorPrivacyPolicy onBack={() => handleNavigate("settings")} onContactSupport={() => handleNavigate("contact")} />;
+      case "refund-policy":
+        return <VendorRefundPolicy onBack={() => handleNavigate("settings")} onContactSupport={() => handleNavigate("contact")} />;
+      case "disclaimer":
+        return <VendorDisclaimer onBack={() => handleNavigate("settings")} onContactSupport={() => handleNavigate("contact")} />;
+      case "liability":
+        return <VendorLiability onBack={() => handleNavigate("settings")} onContactSupport={() => handleNavigate("contact")} />;
+      case "contact":
+        return <VendorContact onBack={() => handleNavigate("settings")} />;
+      case "about":
+        return <VendorAbout onBack={() => handleNavigate("settings")} />;
       default:
         return <Dashboard onNavigate={handleNavigate} />;
     }
