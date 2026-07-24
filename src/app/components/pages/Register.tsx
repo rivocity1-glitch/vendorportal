@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Eye, EyeOff, Zap, CheckCircle2, ShieldAlert, Store, User, Lock, MapPin, Phone, ArrowRight, Building2, Globe, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, Zap, CheckCircle2, ShieldAlert, Store, User, Lock, MapPin, ArrowRight, Building2, Globe, ShieldCheck, Clock, FileText } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 import { VendorTerms } from "../legal/VendorTerms";
+
+interface ProductCategory {
+  id: string | number;
+  name: string;
+  requires_drug_license?: boolean;
+}
 
 interface RegisterProps {
   onNavigateToLogin: () => void;
@@ -24,7 +30,7 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
   const [drugLicenseNumber5, setDrugLicenseNumber5] = useState("");
   const [drugLicenseExpiry, setDrugLicenseExpiry] = useState("");
 
-  const [categories, setCategories] = useState<any[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
@@ -211,8 +217,9 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
       setDrugLicenseNumber4("");
       setDrugLicenseNumber5("");
       setDrugLicenseExpiry("");
-    } catch (err: any) {
-      setError(err.message || "An unexpected system registration variance occurred.");
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "An unexpected system registration variance occurred.";
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -237,7 +244,7 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
 
         <div className="relative space-y-8 my-auto max-w-sm">
           <div className="space-y-3">
-            <h2 className="text-3xl font-black tracking-tight leading-tight">Scale your store's reach within your city.</h2>
+            <h2 className="text-3xl font-black tracking-tight leading-tight">Scale your store&apos;s reach within your city.</h2>
             <p className="text-neutral-400 font-light text-sm leading-relaxed">Join a highly responsive, high-growth merchant community serving customers across retail, grocery, and medicine sectors.</p>
           </div>
 
@@ -370,7 +377,7 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                 {/* STAGE 2: CONTACT METRICS */}
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-neutral-400 border-b border-neutral-100 pb-2">
-                    <User className="w-4 h-4 text-neutral-400" /> <span>Communications & Routing</span>
+                    <User className="w-4 h-4 text-neutral-400" /> <span>Communications &amp; Routing</span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -541,32 +548,49 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                 )}
 
                 {/* Enforced Mandatory Legal Flow Interface Module */}
-                <div className={`p-4 rounded-xl border transition-all duration-300 ${legalCompleted ? 'bg-emerald-50/40 border-emerald-200' : 'bg-neutral-50 border-neutral-200/70'}`}>
-                  <span className="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-2.5">Legal Status</span>
-                  
+                <div className={`p-5 rounded-2xl border transition-all duration-300 ${legalCompleted ? 'bg-emerald-50/40 border-emerald-200' : 'bg-neutral-50 border-neutral-200/70'}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider">Legal Verification</span>
+                    <div className="flex items-center gap-1.5">
+                      {legalCompleted ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-[#2ECC71]">
+                          <CheckCircle2 className="w-3 h-3" /> Accepted
+                        </span>
+                      ) : showTermsModal ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700">
+                          <Clock className="w-3 h-3 animate-spin" /> Reading...
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-neutral-200 text-neutral-600">
+                          Pending
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
                   {!legalCompleted ? (
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div className="flex items-center gap-2 text-neutral-500 text-xs font-medium">
-                        <span className="w-2 h-2 rounded-full bg-neutral-400" />
-                        Legal acknowledgement required
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
+                      <div className="flex items-center gap-2 text-neutral-600 text-xs font-medium">
+                        <FileText className="w-4 h-4 text-neutral-400" />
+                        Legal acknowledgement required to proceed
                       </div>
                       <button
                         type="button"
                         onClick={() => setShowTermsModal(true)}
-                        className="px-3.5 h-8 bg-[#0F172A] hover:bg-[#1E293B] text-white font-bold text-[11px] uppercase tracking-wider rounded-lg transition-all focus:outline-none cursor-pointer shrink-0"
+                        className="px-4 h-9 bg-[#0F172A] hover:bg-[#1E293B] text-white font-bold text-[11px] uppercase tracking-wider rounded-xl transition-all focus:outline-none cursor-pointer shrink-0"
                       >
-                        Read Vendor Terms
+                        Read Terms &amp; Conditions
                       </button>
                     </div>
                   ) : (
-                    <div className="space-y-2 animate-fade-in">
+                    <div className="space-y-2 pt-1 animate-fade-in">
                       <div className="flex items-center gap-2 text-xs font-semibold text-[#2ECC71]">
-                        <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span>✓ Vendor Terms reviewed</span>
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-[#2ECC71]" />
+                        <span>✓ Terms &amp; Conditions accepted</span>
                       </div>
                       <div className="flex items-center gap-2 text-xs font-semibold text-[#2ECC71]">
-                        <CheckCircle2 className="w-4 h-4 shrink-0" />
-                        <span>✓ Privacy Policy reviewed</span>
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-[#2ECC71]" />
+                        <span>✓ Privacy Policy accepted</span>
                       </div>
                       <p className="text-[11px] text-[#2ECC71] font-bold pt-2 border-t border-emerald-200/50 mt-1">
                         ✓ Legal requirements completed.
@@ -609,7 +633,11 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
       {showTermsModal && (
         <VendorTerms 
           onClose={() => setShowTermsModal(false)}
-          onAcknowledgeComplete={() => setLegalCompleted(true)}
+          onBack={() => setShowTermsModal(false)}
+          onAcknowledgeComplete={() => {
+            setShowTermsModal(false);
+            setLegalCompleted(true);
+          }}
         />
       )}
     </div>

@@ -8,7 +8,6 @@ import {
   Loader2, 
   CheckCircle, 
   AlertCircle,
-  Maximize2,
   Search,
   X,
   Tag
@@ -23,6 +22,7 @@ import {
   VendorProfile
 } from '../../../services/vendorService';
 import { supabase } from '../../../lib/supabase';
+import { StoreLocationPicker, ConfirmLocationPayload } from '../maps/StoreLocationPicker';
 
 interface ProductCategory {
   id: string;
@@ -40,6 +40,9 @@ export default function StoreManagement() {
 
   // --- INDEPENDENT SECTIONS LOAD/SAVE STATES ---
   const [savingSection, setSavingSection] = useState<string | null>(null);
+
+  // --- MAP PICKER STATE ---
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
 
   // --- SECTION 1: STORE INFO ---
   const [storeName, setStoreName] = useState('');
@@ -231,22 +234,16 @@ export default function StoreManagement() {
     setAdditionalCategoryNames(additionalCategoryNames.filter(n => n.trim() !== trimmed));
   };
 
-  // --- DETECT CURRENT LOCATION GPS ---
-  const handleDetectLocation = () => {
-    if (!navigator.geolocation) {
-      showToast('Geolocation is not supported by your browser framework.', 'error');
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLatitude(String(position.coords.latitude));
-        setLongitude(String(position.coords.longitude));
-        showToast('Coordinates synchronized accurately.', 'success');
-      },
-      () => {
-        showToast('Unable to securely isolate current terminal location parameters.', 'error');
-      }
-    );
+  // --- LOCATION PICKER CONFIRM HANDLER ---
+  const handleLocationConfirm = (location: ConfirmLocationPayload) => {
+    setAddressLine1(location.addressLine1);
+    setCity(location.city);
+    setState(location.state);
+    setPinCode(location.pinCode);
+    setLatitude(String(location.latitude));
+    setLongitude(String(location.longitude));
+    setLocationPickerOpen(false);
+    showToast('Store location selected successfully.', 'success');
   };
 
   // --- SAVE ACTIONS BY SECTION ---
@@ -559,94 +556,43 @@ export default function StoreManagement() {
           </div>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Address Line 1</label>
-                <input 
-                  type="text" 
-                  value={addressLine1} 
-                  onChange={e => setAddressLine1(e.target.value)}
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Address Line 2</label>
-                <input 
-                  type="text" 
-                  value={addressLine2} 
-                  onChange={e => setAddressLine2(e.target.value)}
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-              </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">
+                Current Address
+              </label>
+              <p className="text-sm text-slate-900 dark:text-white font-medium bg-slate-50 dark:bg-slate-900/50 p-3 rounded-xl border border-slate-200 dark:border-slate-800">
+                {addressLine1 ? (
+                  [addressLine1, addressLine2, city, state, pinCode].filter(Boolean).join(', ')
+                ) : (
+                  <span className="text-slate-400 italic">No location selected</span>
+                )}
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">City</label>
-                <input 
-                  type="text" 
-                  value={city} 
-                  onChange={e => setCity(e.target.value)}
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">State</label>
-                <input 
-                  type="text" 
-                  value={state} 
-                  onChange={e => setState(e.target.value)}
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">PIN Code</label>
-                <input 
-                  type="text" 
-                  value={pinCode} 
-                  onChange={e => setPinCode(e.target.value)}
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={() => setLocationPickerOpen(true)}
+              className="h-10 px-4 bg-emerald-500 hover:bg-emerald-600 text-white transition rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-xs shadow-emerald-500/10"
+            >
+              <MapPin size={16} /> Pick Store Location
+            </button>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Latitude</label>
-                <input 
-                  type="text" 
-                  value={latitude} 
-                  onChange={e => setLatitude(e.target.value)}
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Longitude</label>
-                <input 
-                  type="text" 
-                  value={longitude} 
-                  onChange={e => setLongitude(e.target.value)}
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-4 items-stretch pt-2">
-              <button
-                type="button"
-                onClick={handleDetectLocation}
-                className="h-10 px-4 bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 transition rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
-              >
-                <MapPin size={14} /> Detect Current Location
-              </button>
-              
-              {latitude && longitude && (
-                <div className="flex-1 min-h-[60px] bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs text-slate-400">
-                  <span className="font-mono truncate">Map Matrix Active: Lat:{Number(latitude).toFixed(4)} Lon:{Number(longitude).toFixed(4)}</span>
-                  <Maximize2 size={14} className="opacity-40 shrink-0" />
+            {latitude && longitude && (
+              <div className="bg-slate-50 dark:bg-slate-900/50 border border-emerald-500/20 rounded-2xl p-4 space-y-2">
+                <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-xs uppercase tracking-wider">
+                  <CheckCircle size={14} /> Location Selected
                 </div>
-              )}
-            </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-300 font-mono pt-1">
+                  <div><span className="text-slate-400 font-sans">Latitude:</span> {latitude}</div>
+                  <div><span className="text-slate-400 font-sans">Longitude:</span> {longitude}</div>
+                </div>
+                {addressLine1 && (
+                  <div className="text-xs text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/50 dark:border-slate-800/50">
+                    <span className="font-semibold text-slate-700 dark:text-slate-300">Address:</span> {[addressLine1, addressLine2, city, state, pinCode].filter(Boolean).join(', ')}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end">
@@ -869,6 +815,15 @@ export default function StoreManagement() {
         </section>
 
       </div>
+
+      {/* STORE LOCATION PICKER MODAL */}
+      <StoreLocationPicker
+        open={locationPickerOpen}
+        initialLatitude={latitude ? Number(latitude) : null}
+        initialLongitude={longitude ? Number(longitude) : null}
+        onClose={() => setLocationPickerOpen(false)}
+        onConfirm={handleLocationConfirm}
+      />
     </div>
   );
 }
