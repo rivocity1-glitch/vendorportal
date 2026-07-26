@@ -7,6 +7,7 @@ import {
 import { supabase } from "../../lib/supabase";
 import { notificationService } from "../../services/notificationService";
 import { notificationSync } from "../../lib/notificationSync";
+import { updateStoreOperations } from "../../services/vendorService";
 
 type Page =
   | "dashboard" | "orders" | "invoices" | "products" | "add-product" | "inventory"
@@ -89,7 +90,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
           setPendingOrdersCount(ordersCount);
         }
 
-        // Fetch vendor store status safely from vendor_profiles matrix table
+        // Fetch vendor store status strictly from vendor_profiles.store_status
         const { data: profileData } = await supabase
           .from("vendor_profiles")
           .select("store_status")
@@ -103,13 +104,11 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
           }
         }
 
-        // Fetch unread notification count via notificationService unpacking ServiceResponse wrapper
         const countResult = await notificationService.getUnreadNotificationCount(vendorProfile.id, "vendor");
         if (countResult.success) {
           setUnreadNotificationsCount(countResult.data?.count ?? 0);
         }
 
-        // Fetch latest notifications via notificationService unpacking ServiceResponse wrapper
         const notificationsResult = await notificationService.fetchNotifications(vendorProfile.id, "vendor", 1, 5);
         if (notificationsResult.success) {
           setLatestNotifications(notificationsResult.data ?? []);
@@ -124,6 +123,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
     fetchInitialData();
 
     let orderChannel: any;
+    let storeChannel: any;
 
     const setupSubscriptions = async () => {
       const { data: authData } = await supabase.auth.getUser();
@@ -148,7 +148,6 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
           }
         };
 
-        // Realtime notification sync hook integration
         notificationSync.startNotificationSync(vendorProfile.id, "vendor", {
           onInsert: () => {
             setAnimateBell(true);
@@ -162,6 +161,28 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
             refreshNotificationsData();
           }
         });
+
+        // Realtime Subscription on vendor_profiles for instant sidebar updates across tabs
+        storeChannel = supabase
+          .channel(`vendor-profiles-${vendorProfile.id}`)
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "vendor_profiles",
+              filter: `vendor_id=eq.${vendorProfile.id}`
+            },
+            (payload: any) => {
+              if (payload.new && payload.new.store_status) {
+                const val = payload.new.store_status.toLowerCase();
+                if (val === "open" || val === "busy" || val === "closed") {
+                  setStoreStatus(val);
+                }
+              }
+            }
+          )
+          .subscribe();
 
         orderChannel = supabase
           .channel("orders-sync")
@@ -201,6 +222,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
     return () => {
       notificationSync.stopNotificationSync();
       if (orderChannel) supabase.removeChannel(orderChannel);
+      if (storeChannel) supabase.removeChannel(storeChannel);
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
@@ -212,9 +234,9 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
       setStatusError(null);
       setIsChanging(true);
       setTimeout(() => setIsChanging(false), 200);
-      
+
       const { data: authData } = await supabase.auth.getUser();
-      if (!authData?.user) throw new Error("No active authentication token signature discovered.");
+      if (!authData?.user) throw new Error("No active authentication token.");
 
       const { data: vendorProfile } = await supabase
         .from("vendors")
@@ -224,15 +246,17 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
 
       if (!vendorProfile) throw new Error("Merchant identifier missing.");
 
-      const { error } = await supabase
-        .from("vendor_profiles")
-        .update({ store_status: nextStatus })
-        .eq("vendor_id", vendorProfile.id);
+      // Centralized single function update for manual override and store status
+      const res = await updateStoreOperations(vendorProfile.id, {
+        store_status: nextStatus,
+        manual_override: true,
+        manual_override_at: new Date().toISOString()
+      });
 
-      if (error) throw error;
+      if (!res.success) throw new Error(res.error || "Failed to update store status.");
       setStoreStatus(nextStatus);
     } catch (err: any) {
-      setStatusError(err.message || "Failed to commit operational code.");
+      setStatusError(err.message || "Failed to update store status.");
     } finally {
       setUpdatingStatus(false);
     }
@@ -242,7 +266,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
     try {
       await supabase.auth.signOut();
     } catch (err) {
-      console.error("Sign out standard error:", err);
+      console.error("Sign out error:", err);
     } finally {
       localStorage.clear();
       sessionStorage.clear();

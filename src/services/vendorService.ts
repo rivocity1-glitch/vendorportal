@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase'; // Assuming the existing supabase client is imported from here
+import { supabase } from '../lib/supabase';
 
 // ==========================================
 // Types & Interfaces
@@ -39,6 +39,9 @@ export interface VendorProfile {
   store_status: string | null;
   status_remarks: string | null;
   business_hours: any | null;
+  manual_override?: boolean | null;
+  manual_override_at?: string | null;
+  auto_closed_at?: string | null;
   delivery_radius_km: number | null;
   minimum_order: number | null;
   preparation_time_minutes: number | null;
@@ -82,9 +85,6 @@ export interface RiderStats {
 // Vendor Service Functions
 // ==========================================
 
-/**
- * Fetches the current vendor record using the authenticated user's ID.
- */
 export async function getCurrentVendor(): Promise<ServiceResponse<Vendor>> {
   try {
     const { data: authData, error: authError } = await supabase.auth.getUser();
@@ -113,9 +113,6 @@ export async function getCurrentVendor(): Promise<ServiceResponse<Vendor>> {
   }
 }
 
-/**
- * Fetches the specific profile details for a given vendor ID.
- */
 export async function getVendorProfile(vendorId: string): Promise<ServiceResponse<VendorProfile>> {
   try {
     if (!vendorId) {
@@ -142,10 +139,6 @@ export async function getVendorProfile(vendorId: string): Promise<ServiceRespons
   }
 }
 
-/**
- * Calculates metrics for a vendor's inventory, distinguishing between active,
- * inactive, and completely out-of-stock products.
- */
 export async function getProductStats(vendorId: string): Promise<ServiceResponse<ProductStats>> {
   try {
     if (!vendorId) {
@@ -181,17 +174,12 @@ export async function getProductStats(vendorId: string): Promise<ServiceResponse
   }
 }
 
-/**
- * Aggregates statistics about the riders assigned to the vendor,
- * mapping active assignments against current availability states.
- */
 export async function getRiderStats(vendorId: string): Promise<ServiceResponse<RiderStats>> {
   try {
     if (!vendorId) {
       return { success: false, error: 'Vendor ID is required.' };
     }
 
-    // Resolves assigned riders using the rider_vendor_assignments mapping table
     const { data, error } = await supabase
       .from('rider_vendor_assignments')
       .select('riders(id, rider_name, status, availability_status)')
@@ -222,9 +210,6 @@ export async function getRiderStats(vendorId: string): Promise<ServiceResponse<R
   }
 }
 
-/**
- * Updates comprehensive vendor profile data records.
- */
 export async function updateVendorProfile(
   vendorId: string,
   profileData: Partial<Omit<VendorProfile, 'vendor_id' | 'created_at' | 'updated_at'>>
@@ -252,16 +237,20 @@ export async function updateVendorProfile(
 }
 
 /**
- * Updates localized operational configurations and parameters for store mapping.
+ * Single source function for updating store operational state and business hours.
+ * Saves store_status, business_hours, manual_override, manual_override_at, and auto_closed_at together in one update query.
  */
 export async function updateStoreOperations(
   vendorId: string,
   operations: {
     store_status: string | null;
-    business_hours: any | null;
-    delivery_radius_km: number | null;
-    minimum_order: number | null;
-    preparation_time_minutes: number | null;
+    business_hours?: any | null;
+    manual_override?: boolean | null;
+    manual_override_at?: string | null;
+    auto_closed_at?: string | null;
+    delivery_radius_km?: number | null;
+    minimum_order?: number | null;
+    preparation_time_minutes?: number | null;
   }
 ): Promise<ServiceResponse<VendorProfile>> {
   try {
@@ -286,9 +275,6 @@ export async function updateStoreOperations(
   }
 }
 
-/**
- * Updates disbursement variables and clearing routing settings for the vendor.
- */
 export async function updateBankDetails(
   vendorId: string,
   bankDetails: {
@@ -321,9 +307,6 @@ export async function updateBankDetails(
   }
 }
 
-/**
- * Updates required compliance verification context strings safely.
- */
 export async function updateBusinessDocuments(
   vendorId: string,
   documents: {
@@ -356,9 +339,6 @@ export async function updateBusinessDocuments(
   }
 }
 
-/**
- * Returns complete layout storage arrays of store images sorted sequentially.
- */
 export async function getStoreImages(vendorId: string): Promise<ServiceResponse<StoreImage[]>> {
   try {
     if (!vendorId) {
@@ -381,9 +361,6 @@ export async function getStoreImages(vendorId: string): Promise<ServiceResponse<
   }
 }
 
-/**
- * Appends new store visuals safely into structural reference tables.
- */
 export async function createStoreImage(
   vendorId: string,
   imageUrl: string,
@@ -416,9 +393,6 @@ export async function createStoreImage(
   }
 }
 
-/**
- * Removes individual asset context row parameters using record index keys.
- */
 export async function deleteStoreImage(imageId: string): Promise<ServiceResponse<null>> {
   try {
     if (!imageId) {
@@ -440,9 +414,6 @@ export async function deleteStoreImage(imageId: string): Promise<ServiceResponse
   }
 }
 
-/**
- * Re-orders array sequential variables matching specified identification pointers.
- */
 export async function updateStoreImageOrder(
   imagesOrder: { id: string; display_order: number }[]
 ): Promise<ServiceResponse<null>> {
@@ -451,7 +422,6 @@ export async function updateStoreImageOrder(
       return { success: false, error: 'Images order payload is required.' };
     }
 
-    // Upsert payload array containing target primary keys and their updated indexes
     const { error } = await supabase
       .from('vendor_store_images')
       .upsert(imagesOrder);

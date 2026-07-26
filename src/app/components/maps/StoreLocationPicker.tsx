@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import * as maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css" with { type: "css" };
+import "maplibre-gl/dist/maplibre-gl.css";
 import { Navigation } from "lucide-react";
 import { MapSearchBox, SelectedSearchResult } from "./MapSearchBox";
 import {
