@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { 
-  Search, Plus, Upload, Edit2, Trash2, MoreVertical, Filter, ArrowLeft, Save, Percent, Sparkles, Loader2, Calendar, X, ImagePlus, FileText,
-  ShoppingBasket, Pill, Milk, CupSoda, Croissant, Apple, Beef, Fish, Laptop, NotebookPen, Package
+  Search, Plus, Upload, Edit2, Trash2, MoreVertical, Loader2, Calendar, FileText,
+  ShoppingBasket, Pill, Milk, CupSoda, Croissant, Apple, Beef, Fish, Laptop, NotebookPen, Package, Sparkles
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase"; 
 
@@ -17,10 +17,7 @@ const statusStyles: Record<string, string> = {
   Draft: "bg-muted text-muted-foreground",
 };
 
-export function Products({ onNavigate }: { onNavigate: (page: string) => void }) {
-  const [view, setView] = useState<"list" | "add">("list");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  
+export function Products({ onNavigate }: { onNavigate: (page: string, params?: any) => void }) {
   const [search, setSearch] = useState("");
   const [activeCategoryId, setActiveCategoryId] = useState("All"); 
   const [productList, setProductList] = useState<any[]>([]);
@@ -32,30 +29,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
-  // Form States
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [name, setName] = useState("");
-  const [categoryId, setCategoryId] = useState(""); 
-  const [price, setPrice] = useState("");          
-  const [wholesaleRate, setWholesaleRate] = useState(""); 
-  const [mrp, setMrp] = useState("");
-  const [gstRate, setGstRate] = useState("5");     
-  const [batchNumber, setBatchNumber] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
-  const [weightValue, setWeightValue] = useState("");
-  const [weightUnit, setWeightUnit] = useState("Gm");
-  const [description, setDescription] = useState("");
-  const [stock, setStock] = useState("");
-  
-  // Image Upload States
-  const [imageUrl, setImageUrl] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [isDragActive, setIsDragActive] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const gstOptions = [0, 5, 12, 18, 28];
-  const unitOptions = ["Gm", "Kg", "Ltr", "Ml", "Pcs", "Pack"];
-
   const csvCategoryMap: Record<string, string> = {
     "beverages": "Grocery",
     "staples": "Grocery",
@@ -65,15 +38,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
     "dairy": "Dairy"
   };
 
-  const sellPriceNum = parseFloat(price) || 0;
-  const costPriceNum = parseFloat(wholesaleRate) || 0;
-  const gstPercent = parseFloat(gstRate) || 0;
-
-  const taxableSellingPrice = sellPriceNum / (1 + gstPercent / 100);
-  const netProfit = costPriceNum > 0 && sellPriceNum > 0 ? taxableSellingPrice - costPriceNum : 0;
-  const profitPercentage = costPriceNum > 0 ? (netProfit / costPriceNum) * 100 : 0;
-
-  // Category Icon Helper Function
   const getCategoryIcon = (categoryName: string) => {
     switch (categoryName) {
       case "Grocery":
@@ -95,7 +59,7 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
       case "Personal Care":
         return <Sparkles className="w-4 h-4 text-muted-foreground" />;
       case "Home & Kitchen":
-        return <HomeIcon className="w-4 h-4 text-muted-foreground" />; // Home icon falls back if needed, or map directly below
+        return <HomeIcon className="w-4 h-4 text-muted-foreground" />;
       case "Electronics":
         return <Laptop className="w-4 h-4 text-muted-foreground" />;
       case "Stationery":
@@ -105,7 +69,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
     }
   };
 
-  // Custom localized inline alias for Home to avoid conflicting with original standard elements
   const HomeIcon = ({ className }: { className?: string }) => {
     return (
       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -184,7 +147,9 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
             batch_number: p.batch_number,
             weight: p.weight,
             description: p.description,
-            low_stock_threshold: p.low_stock_threshold ?? 5
+            low_stock_threshold: p.low_stock_threshold ?? 5,
+            sku: p.sku || "",
+            barcode: p.barcode || ""
           };
         });
 
@@ -197,197 +162,9 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
     }
   };
 
-  // Automatically refresh catalog values whenever returning to the list view context
   useEffect(() => {
-    if (view === "list") {
-      fetchLiveProducts();
-    }
-  }, [view]);
-
-  const validateAndSetImage = (file: File) => {
-    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-    if (!validTypes.includes(file.type)) {
-      alert("Invalid format. Accepted formats are: JPG, JPEG, PNG, WEBP");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      alert("Maximum file size exceeded. Max size limit is 5MB.");
-      return;
-    }
-    setImageFile(file);
-    setImageUrl(URL.createObjectURL(file));
-  };
-
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setIsDragActive(true);
-    } else if (e.type === "dragleave") {
-      setIsDragActive(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      validateAndSetImage(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      validateAndSetImage(e.target.files[0]);
-    }
-  };
-
-  const handleRemoveImage = () => {
-    setImageFile(null);
-    setImageUrl("");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  const handleSaveProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name || !categoryId || !price || !wholesaleRate || !mrp || !stock) {
-      alert("Please fill in all required fields.");
-      return;
-    }
-
-    const selectedCategoryName = categories.find(c => c.id === categoryId)?.name;
-    if (selectedCategoryName === "Medical") {
-      if (!batchNumber.trim() || !expiryDate.trim()) {
-        alert("Batch Number and Expiry Date are strictly required for products under the Medical category.");
-        return;
-      }
-    }
-
-    try {
-      setIsSubmitting(true);
-      
-      const { data: authData } = await supabase.auth.getUser();
-      if (!authData?.user) throw new Error("User session not found.");
-
-      const { data: vendor, error: vendorErr } = await supabase
-        .from("vendors")
-        .select("id")
-        .eq("auth_user_id", authData.user.id)
-        .single();
-
-      if (vendorErr || !vendor) throw new Error("Vendor profile missing.");
-
-      if (!editingId) {
-        const { data: existingProd, error: checkErr } = await supabase
-          .from("products")
-          .select("id")
-          .eq("vendor_id", vendor.id)
-          .ilike("name", name.trim())
-          .maybeSingle();
-
-        if (checkErr) throw checkErr;
-
-        if (existingProd) {
-          alert("Product already exists. Please edit the existing product.");
-          setIsSubmitting(false);
-          return;
-        }
-      } else {
-        const { data: conflictingProd, error: checkErr } = await supabase
-          .from("products")
-          .select("id")
-          .eq("vendor_id", vendor.id)
-          .ilike("name", name.trim())
-          .neq("id", editingId)
-          .maybeSingle();
-
-        if (checkErr) throw checkErr;
-
-        if (conflictingProd) {
-          alert("Product already exists. Please edit the existing product.");
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
-      // Upload selected image to Supabase Storage if vendor chose a new one
-      let finalImageUrl = imageUrl;
-      if (imageFile) {
-        const fileExt = imageFile.name.split('.').pop();
-        const fileName = `${crypto.randomUUID()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from("product-images")
-          .upload(fileName, imageFile);
-
-        if (uploadError) throw uploadError;
-
-        const { data: publicUrlData } = supabase.storage
-          .from("product-images")
-          .getPublicUrl(fileName);
-
-        finalImageUrl = publicUrlData.publicUrl;
-      }
-
-      const finalWeightString = weightValue.trim() ? `${weightValue.trim()} ${weightUnit}` : null;
-
-      const productPayload = {
-        name: name.trim(),
-        category_id: categoryId, 
-        price: parseFloat(price),
-        cost_price: parseFloat(wholesaleRate), 
-        mrp: parseFloat(mrp),
-        gst_slab: gstPercent, 
-        batch_number: batchNumber || null,
-        expiry_date: expiryDate || null,
-        weight: finalWeightString,
-        description: description || null,
-        stock: parseInt(stock) || 0, 
-        image_url: finalImageUrl || null,
-        vendor_id: vendor.id
-      };
-
-      if (editingId) {
-        const { error } = await supabase
-          .from("products")
-          .update(productPayload)
-          .eq("id", editingId);
-        
-        if (error) {
-          if (error.code === "23505") {
-            alert("Product already exists. Please edit the existing product.");
-            setIsSubmitting(false);
-            return;
-          }
-          throw error;
-        }
-      } else {
-        const { error } = await supabase.from("products").insert([productPayload]);
-        
-        if (error) {
-          if (error.code === "23505") {
-            alert("Product already exists. Please edit the existing product.");
-            setIsSubmitting(false);
-            return;
-          }
-          throw error;
-        }
-      }
-
-      setName(""); setCategoryId(""); setPrice(""); setWholesaleRate(""); setMrp("");
-      setBatchNumber(""); setExpiryDate(""); setWeightValue(""); setWeightUnit("Gm"); setDescription(""); setStock("");
-      setImageUrl(""); setImageFile(null);
-      setEditingId(null);
-      
-      setView("list");
-    } catch (err: any) {
-      console.error("Product preservation exception:", err);
-      alert(`Operation failed: ${err.message || err}`);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    fetchLiveProducts();
+  }, []);
 
   const handleImportCSV = async () => {
     if (!importFile) {
@@ -579,14 +356,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
     }
   };
 
-  const handleCancelForm = () => {
-    setName(""); setCategoryId(""); setPrice(""); setWholesaleRate(""); setMrp("");
-    setBatchNumber(""); setExpiryDate(""); setWeightValue(""); setWeightUnit("Gm"); setDescription(""); setStock("");
-    setImageUrl(""); setImageFile(null);
-    setEditingId(null);
-    setView("list");
-  };
-
   const handleDelete = async (id: any) => {
     const confirmation = window.confirm("Are you sure you want to permanently delete this product listing?");
     if (!confirmation) return;
@@ -611,286 +380,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
     const matchCat = activeCategoryId === "All" || p.category_id === activeCategoryId; 
     return matchSearch && matchCat;
   });
-
-  if (view === "add") {
-    return (
-      <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center gap-3">
-          <button 
-            type="button"
-            onClick={handleCancelForm}
-            className="w-9 h-9 rounded-lg border border-border flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </button>
-          <div>
-            <h2 className="text-xl font-bold text-foreground">{editingId ? "Edit Product" : "Add New Product"}</h2>
-            <p className="text-xs text-muted-foreground">List a new item with dynamic margin evaluations</p>
-          </div>
-        </div>
-
-        <form onSubmit={handleSaveProduct} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Product Name *</label>
-                <input 
-                  type="text"
-                  required
-                  placeholder="e.g., Amul Full Cream Milk 1L"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981] focus:ring-2 focus:ring-[#10B981]/10"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Category *</label>
-                <select
-                  required
-                  value={categoryId}
-                  onChange={e => setCategoryId(e.target.value)}
-                  className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
-                >
-                  <option value="" disabled>Select category</option>
-                  {categories.map(cat => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Wholesale (Cost) *</label>
-                  <input 
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    value={wholesaleRate}
-                    onChange={e => setWholesaleRate(e.target.value)}
-                    className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Selling Price *</label>
-                  <input 
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    value={price}
-                    onChange={e => setPrice(e.target.value)}
-                    className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">MRP *</label>
-                  <input 
-                    type="number"
-                    step="0.01"
-                    required
-                    placeholder="0.00"
-                    value={mrp}
-                    onChange={e => setMrp(e.target.value)}
-                    className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">GST Slab *</label>
-                <select
-                  value={gstRate}
-                  onChange={e => setGstRate(e.target.value)}
-                  className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
-                >
-                  {gstOptions.map(rate => (
-                    <option key={rate} value={rate}>{rate}% GST slab</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
-              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border pb-1">Logistics / Expiry Attributes</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">
-                    Batch Number {categories.find(c => c.id === categoryId)?.name === "Medical" && "*"}
-                  </label>
-                  <input 
-                    type="text"
-                    placeholder={categories.find(c => c.id === categoryId)?.name === "Medical" ? "Required batch code" : "Optional batch code"}
-                    value={batchNumber}
-                    onChange={e => setBatchNumber(e.target.value)}
-                    className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">
-                    Expiry Date {categories.find(c => c.id === categoryId)?.name === "Medical" && "*"}
-                  </label>
-                  <input 
-                    type="date"
-                    value={expiryDate}
-                    onChange={e => setExpiryDate(e.target.value)}
-                    className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Weight / Volume</label>
-                  <div className="flex items-center gap-1">
-                    <input 
-                      type="number"
-                      step="any"
-                      placeholder="e.g. 500"
-                      value={weightValue}
-                      onChange={e => setWeightValue(e.target.value)}
-                      className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
-                    />
-                    <select
-                      value={weightUnit}
-                      onChange={e => setWeightUnit(e.target.value)}
-                      className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
-                    >
-                      {unitOptions.map(unit => (
-                        <option key={unit} value={unit}>{unit}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label>
-                  <input 
-                    type="number"
-                    required
-                    placeholder="0"
-                    value={stock}
-                    onChange={e => setStock(e.target.value)}
-                    className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
-                  <textarea 
-                    rows={2}
-                    placeholder="Describe the product..."
-                    value={description}
-                    onChange={e => setDescription(e.target.value)}
-                    className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {/* Image Upload Component Box */}
-            <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
-              <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                <ImagePlus className="w-4 h-4 text-[#10B981]" /> Product Media
-              </h3>
-              
-              <input 
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileChange}
-                accept="image/jpeg, image/jpg, image/png, image/webp"
-                className="hidden"
-              />
-
-              {imageUrl ? (
-                <div className="relative group rounded-xl border border-border overflow-hidden bg-muted aspect-square w-full max-w-[240px] mx-auto">
-                  <img 
-                    src={imageUrl} 
-                    alt="Product Preview" 
-                    className="w-full h-full object-cover"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleRemoveImage}
-                    className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors"
-                    title="Remove Image"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              ) : (
-                <div
-                  onDragEnter={handleDrag}
-                  onDragOver={handleDrag}
-                  onDragLeave={handleDrag}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors flex flex-col items-center justify-center gap-2 ${
-                    isDragActive ? "border-[#10B981] bg-[#10B981]/5" : "border-border hover:border-[#10B981]"
-                  }`}
-                >
-                  <Upload className="w-6 h-6 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs font-medium text-foreground">Click to upload or drag & drop</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">JPG, JPEG, PNG, WEBP up to 5MB</p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-4">
-              <h3 className="font-semibold text-sm text-foreground flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-[#10B981]" /> Margin Insights
-              </h3>
-              <div className="space-y-2 text-xs">
-                <div className="flex justify-between py-1 border-b border-border/60">
-                  <span className="text-muted-foreground">Selling Price:</span>
-                  <span className="font-medium text-foreground">₹{sellPriceNum.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-border/60">
-                  <span className="text-muted-foreground">GST Output Tax ({gstPercent}%):</span>
-                  <span className="font-medium text-[#EF4444]">₹{(sellPriceNum - taxableSellingPrice).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-border/60">
-                  <span className="text-muted-foreground">Taxable Value (Rate):</span>
-                  <span className="font-medium text-foreground">₹{taxableSellingPrice.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between py-1 border-b border-border/60">
-                  <span className="text-muted-foreground">Wholesale Cost:</span>
-                  <span className="font-medium text-foreground">₹{costPriceNum.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className={`rounded-xl p-4 text-center border ${netProfit > 0 ? "bg-[#ECFDF5] border-[#A7F3D0]" : "bg-muted/40 border-border"}`}>
-                <p className="text-xs font-medium text-muted-foreground">Net Profit Margin</p>
-                <p className={`text-2xl font-bold mt-1 ${netProfit > 0 ? "text-[#065F46]" : "text-muted-foreground"}`}>
-                  ₹{netProfit.toFixed(2)}
-                </p>
-                {netProfit > 0 && (
-                  <div className="inline-flex items-center gap-1 bg-[#10B981]/10 text-[#10B981] font-semibold text-xs px-2 py-0.5 rounded-md mt-1.5">
-                    <Percent className="w-3 h-3" /> {profitPercentage.toFixed(1)}% Profit
-                  </div>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full h-11 bg-[#10B981] hover:bg-[#059669] text-white font-medium rounded-xl text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                {isSubmitting ? "Publishing..." : editingId ? "Update Product" : "Publish Product"}
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
-    );
-  }
 
   if (loading && productList.length === 0) {
     return (
@@ -924,7 +413,7 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
           </button>
           <button
             type="button"
-            onClick={() => setView("add")}
+            onClick={() => onNavigate("add-product")}
             className="h-9 px-3 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-medium flex items-center gap-2 transition-colors"
           >
             <Plus className="w-4 h-4" /> Add Product
@@ -1029,45 +518,7 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => {
-                            setEditingId(p.id);
-                            setName(p.name);
-                            setCategoryId(p.category_id);
-                            setPrice(p.price.toString());
-                            setWholesaleRate((p.cost_price ?? "").toString());
-                            setMrp(p.mrp.toString());
-                            setGstRate((p.gst_slab ?? "5").toString());
-                            setBatchNumber(p.batch_number || "");
-                            setExpiryDate(p.expiry_date || "");
-                            setDescription(p.description || "");
-                            setStock(p.stock.toString());
-                            
-                            setImageUrl(p.image_url || "");
-                            setImageFile(null);
-
-                            if (p.weight) {
-                              const weightStr = p.weight.toString().trim();
-                              const numericMatch = weightStr.match(/^[\d.]+/);
-                              if (numericMatch) {
-                                const numVal = numericMatch[0];
-                                setWeightValue(numVal);
-                                const parsedUnit = weightStr.replace(numVal, "").trim();
-                                if (unitOptions.includes(parsedUnit)) {
-                                  setWeightUnit(parsedUnit);
-                                } else {
-                                  setWeightUnit("Gm");
-                                }
-                              } else {
-                                setWeightValue(weightStr);
-                                setWeightUnit("Gm");
-                              }
-                            } else {
-                              setWeightValue("");
-                              setWeightUnit("Gm");
-                            }
-
-                            setView("add");
-                          }}
+                          onClick={() => onNavigate("add-product", { product: p })}
                           className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-[#10B981] hover:bg-[#ECFDF5]"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
@@ -1109,7 +560,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
         </div>
       </div>
 
-      {/* Import Options Modal */}
       {showImportOptionsModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => setShowImportOptionsModal(false)} />
@@ -1120,7 +570,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
             </div>
 
             <div className="space-y-4">
-              {/* Smart Import Option */}
               <div className="border border-border rounded-xl p-4 bg-[#ECFDF5]/30 border-[#A7F3D0] hover:bg-[#ECFDF5]/50 transition-colors flex flex-col justify-between">
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-lg bg-[#10B981]/10 flex items-center justify-center text-[#10B981] shrink-0">
@@ -1147,7 +596,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
                 </button>
               </div>
 
-              {/* CSV Import Option */}
               <div className="border border-border rounded-xl p-4 bg-muted/20 hover:bg-muted/40 transition-colors flex flex-col justify-between">
                 <div className="flex items-start gap-3">
                   <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground shrink-0">
@@ -1184,7 +632,6 @@ export function Products({ onNavigate }: { onNavigate: (page: string) => void })
         </div>
       )}
 
-      {/* Functional CSV Import Modal */}
       {showImportModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/40" onClick={() => { if(!isImporting){ setShowImportModal(false); setImportFile(null); } }} />

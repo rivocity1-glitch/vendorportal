@@ -67,8 +67,9 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(hasSavedToken);
   const [isValidating, setIsValidating] = useState<boolean>(true); // Keeps loading indicator solid during token checks
   const [currentPage, setCurrentPage] = useState<Page>(hasSavedToken ? "dashboard" : "login");
+  const [pageParams, setPageParams] = useState<any>(null); // ✅ Route payload for passing product data to AddEditProduct
   const [isDark, setIsDark] = useState(false);
-  const [activeVendor, setActiveVendor] = useState<VendorMetaState | null>(null); // ✅ Added real-time global meta state hook
+  const [activeVendor, setActiveVendor] = useState<VendorMetaState | null>(null);
 
   // Theme Toggling Effect
   useEffect(() => {
@@ -103,7 +104,6 @@ export default function App() {
       const cleanStatus = profile.status?.toLowerCase();
 
       if (cleanStatus === "approved") {
-        // ✅ Synchronize live backend database variables straight to client context engine
         setActiveVendor({
           store_name: profile.shop_name || "Unnamed Storefront",
           shop_code: profile.shop_code || "SHOP-UNKNOWN"
@@ -146,7 +146,7 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = () => {
-    checkActiveSession(); // Re-trigger mapping fetch instantly upon successful login handler trigger
+    checkActiveSession();
     setIsLoggedIn(true);
     setCurrentPage("dashboard");
   };
@@ -159,7 +159,11 @@ export default function App() {
     setCurrentPage("login");
   };
 
-  const handleNavigate = (page: string) => setCurrentPage(page as any);
+  // ✅ Updated navigation handler to pass optional parameters (e.g. selected product data)
+  const handleNavigate = (page: string, params?: any) => {
+    setCurrentPage(page as Page);
+    setPageParams(params || null);
+  };
 
   if (isValidating) {
     return (
@@ -197,7 +201,7 @@ export default function App() {
       case "smart-import":
         return <SmartImport onNavigate={handleNavigate} />;
       case "add-product":
-        return <AddEditProduct onNavigate={handleNavigate} />;
+        return <AddEditProduct onNavigate={handleNavigate} product={pageParams?.product} />;
       case "inventory":
         return <Inventory />;
       case "offers":
@@ -244,7 +248,7 @@ export default function App() {
       onLogout={handleLogout}
       isDark={isDark}
       onToggleTheme={() => setIsDark(!isDark)}
-      vendorMeta={activeVendor} // ✅ Injected real-time database contextual bindings straight into our menu layout tree
+      vendorMeta={activeVendor}
     >
       {renderPage()}
     </Layout>
