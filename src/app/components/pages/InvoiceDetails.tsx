@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from "../../../lib/supabase"; // Adjust path based on your exact structure
+import { supabase } from "../../../lib/supabase";
 import { ArrowLeft, RefreshCw, FileText, ShoppingBag } from 'lucide-react';
 
 interface InvoiceDetailsProps {
@@ -7,7 +7,6 @@ interface InvoiceDetailsProps {
   onBack: () => void;
 }
 
-// Interfaces matching structural database footprints without additions
 interface Invoice {
   id: string;
   order_id: string;
@@ -29,8 +28,6 @@ interface Order {
   payment_status: string;
   delivered_at?: string;
   subtotal: number;
-  delivery_fee?: number;
-  platform_fee?: number;
   total_amount: number;
 }
 
@@ -45,7 +42,7 @@ interface CustomerAddress {
   address_line2?: string;
   city?: string;
   state?: string;
-  postal_code?: string; // Standard PIN configuration mapping
+  postal_code?: string;
   landmark?: string;
 }
 
@@ -65,7 +62,6 @@ export default function InvoiceDetails({ invoiceId, onBack }: InvoiceDetailsProp
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // States resolved through sequential query blocks
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [order, setOrder] = useState<Order | null>(null);
   const [vendor, setVendor] = useState<Vendor | null>(null);
@@ -130,7 +126,7 @@ export default function InvoiceDetails({ invoiceId, onBack }: InvoiceDetailsProp
 
         if (itemsErr) throw itemsErr;
 
-        // Step 6: Fetch Product Names for every single order item sequentially/separately
+        // Step 6: Fetch Product Names
         const enrichedItemsList: EnrichedItem[] = [];
         if (itemsData && itemsData.length > 0) {
           for (const item of itemsData) {
@@ -154,7 +150,7 @@ export default function InvoiceDetails({ invoiceId, onBack }: InvoiceDetailsProp
         setItems(enrichedItemsList);
       }
     } catch (err: any) {
-      setError(err.message || 'An error occurred while building the item layout view context.');
+      setError(err.message || 'An error occurred while building the invoice view.');
     } finally {
       setLoading(false);
     }
@@ -176,6 +172,10 @@ export default function InvoiceDetails({ invoiceId, onBack }: InvoiceDetailsProp
         return 'bg-gray-50 text-gray-600 border border-gray-200';
     }
   };
+
+  // Vendor Selling Subtotal
+  const vendorSubtotal = items.reduce((acc, item) => acc + (item.quantity * item.unit_price), 0);
+  const totalSellingAmount = order?.subtotal && order.subtotal > 0 ? order.subtotal : vendorSubtotal;
 
   if (loading) {
     return (
@@ -328,9 +328,9 @@ export default function InvoiceDetails({ invoiceId, onBack }: InvoiceDetailsProp
                 <tr key={item.id} className="hover:bg-gray-50/30 transition-colors">
                   <td className="py-3.5 px-4 font-medium text-gray-900">{item.product_name}</td>
                   <td className="py-3.5 px-4 text-center font-medium">{item.quantity}</td>
-                  <td className="py-3.5 px-4 text-right">{item.unit_price.toFixed(2)}</td>
+                  <td className="py-3.5 px-4 text-right">₹{item.unit_price.toFixed(2)}</td>
                   <td className="py-3.5 px-4 text-right font-medium text-gray-900">
-                    {(item.quantity * item.unit_price).toFixed(2)}
+                    ₹{(item.quantity * item.unit_price).toFixed(2)}
                   </td>
                 </tr>
               ))}
@@ -339,16 +339,12 @@ export default function InvoiceDetails({ invoiceId, onBack }: InvoiceDetailsProp
         </div>
       </div>
 
-      {/* Aggregate Cost Financial Breakdown Module summary footprint */}
+      {/* Financial Summary: Vendor Selling Amount Only */}
       <div className="flex justify-end">
         <div className="w-full md:w-80 bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-3 text-sm text-gray-600">
-          <div className="flex justify-between">
-            <span>Subtotal</span>
-            <span className="font-medium text-gray-900">{order?.subtotal?.toFixed(2) || '0.00'}</span>
-          </div>
-          <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
-            <span className="font-semibold text-gray-900 text-base">Grand Total</span>
-            <span className="font-bold text-indigo-600 text-lg">{order?.total_amount?.toFixed(2) || '0.00'}</span>
+          <div className="flex justify-between items-center">
+            <span className="font-semibold text-gray-900 text-base">Total Selling Amount</span>
+            <span className="font-bold text-indigo-600 text-lg">₹{totalSellingAmount.toFixed(2)}</span>
           </div>
         </div>
       </div>

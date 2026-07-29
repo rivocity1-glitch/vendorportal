@@ -17,8 +17,6 @@ interface Invoice {
 interface OrderData {
   order_number: string;
   subtotal?: number;
-  delivery_fee?: number;
-  platform_fee?: number;
   payment_status: string;
   payment_method: string;
   order_status: string;
@@ -70,7 +68,7 @@ export default function InvoiceManagement() {
         if (inv.order_id) {
           const { data: orderData } = await supabase
             .from('orders')
-            .select('order_number, subtotal, delivery_fee, platform_fee, payment_status, payment_method, order_status, total_amount')
+            .select('order_number, subtotal, payment_status, payment_method, order_status, total_amount')
             .eq('id', inv.order_id)
             .single();
 
@@ -223,46 +221,49 @@ export default function InvoiceManagement() {
                   <th className="py-3.5 px-4 font-semibold">Payment Method</th>
                   <th className="py-3.5 px-4 font-semibold">Payment Status</th>
                   <th className="py-3.5 px-4 font-semibold">Invoice Status</th>
-                  <th className="py-3.5 px-4 font-semibold">Grand Total</th>
+                  <th className="py-3.5 px-4 font-semibold">Selling Amount</th>
                   <th className="py-3.5 px-4 font-semibold text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-sm text-gray-600">
-                {filteredInvoices.map((invoice) => (
-                  <tr key={invoice.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="py-4 px-4 font-medium text-gray-900 whitespace-nowrap">
-                      {invoice.invoice_number}
-                    </td>
-                    <td className="py-4 px-4 whitespace-nowrap">
-                      {invoice.order?.order_number || 'N/A'}
-                    </td>
-                    <td className="py-4 px-4 whitespace-nowrap">
-                      {new Date(invoice.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="py-4 px-4 whitespace-nowrap capitalize">
-                      {invoice.order?.payment_method || 'N/A'}
-                    </td>
-                    <td className="py-4 px-4 whitespace-nowrap capitalize">
-                      {invoice.order?.payment_status || 'N/A'}
-                    </td>
-                    <td className="py-4 px-4 whitespace-nowrap">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${getStatusBadgeClass(invoice.status)}`}>
-                        {invoice.status || 'Unknown'}
-                      </span>
-                    </td>
-                    <td className="py-4 px-4 whitespace-nowrap font-medium text-gray-900">
-                      {(invoice.order?.total_amount ?? 0).toFixed(2)}
-                    </td>
-                    <td className="py-4 px-4 whitespace-nowrap text-right">
-                      <button
-                        onClick={() => setSelectedInvoiceId(invoice.id)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {filteredInvoices.map((invoice) => {
+                  const sellingAmount = invoice.order?.subtotal ?? invoice.order?.total_amount ?? 0;
+                  return (
+                    <tr key={invoice.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="py-4 px-4 font-medium text-gray-900 whitespace-nowrap">
+                        {invoice.invoice_number}
+                      </td>
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        {invoice.order?.order_number || 'N/A'}
+                      </td>
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        {new Date(invoice.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="py-4 px-4 whitespace-nowrap capitalize">
+                        {invoice.order?.payment_method || 'N/A'}
+                      </td>
+                      <td className="py-4 px-4 whitespace-nowrap capitalize">
+                        {invoice.order?.payment_status || 'N/A'}
+                      </td>
+                      <td className="py-4 px-4 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${getStatusBadgeClass(invoice.status)}`}>
+                          {invoice.status || 'Unknown'}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 whitespace-nowrap font-medium text-gray-900">
+                        ₹{sellingAmount.toFixed(2)}
+                      </td>
+                      <td className="py-4 px-4 whitespace-nowrap text-right">
+                        <button
+                          onClick={() => setSelectedInvoiceId(invoice.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

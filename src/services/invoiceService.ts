@@ -30,12 +30,12 @@ export interface OrderData {
   customer: CustomerDetails;
   items: InvoiceItem[];
   subtotal: number;
-  deliveryFee: number;
   grandTotal: number;
 }
 
 /**
- * Generates a Rivo.City invoice PDF and returns it as a Blob.
+ * Generates a Rivo.City vendor invoice PDF and returns it as a Blob.
+ * Excludes delivery fees and platform fees to reflect only vendor sales.
  * @param orderData The complete order details required for the invoice.
  * @returns Promise<Blob>
  */
@@ -53,13 +53,13 @@ export const generateInvoice = async (orderData: OrderData): Promise<Blob> => {
   // --- 1. HEADER (Rivo.City) ---
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(24);
-  doc.setTextColor(40, 116, 240); // Brand primary color example
+  doc.setTextColor(40, 116, 240); // Brand primary color
   doc.text('Rivo.City', margin, 20);
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 100, 100);
-  doc.text('Official Marketplace Invoice', margin, 25);
+  doc.text('Vendor Sales Invoice', margin, 25);
 
   // --- 2. INVOICE META METRICS (Right Aligned) ---
   doc.setFont('helvetica', 'bold');
@@ -111,8 +111,8 @@ export const generateInvoice = async (orderData: OrderData): Promise<Blob> => {
   const tableRows = orderData.items.map((item) => [
     item.name,
     item.quantity.toString(),
-    `$${item.unitPrice.toFixed(2)}`,
-    `$${item.total.toFixed(2)}`,
+    `₹${item.unitPrice.toFixed(2)}`,
+    `₹${item.total.toFixed(2)}`,
   ]);
 
   // Using autoTable plugin attached to jsPDF instance
@@ -132,37 +132,24 @@ export const generateInvoice = async (orderData: OrderData): Promise<Blob> => {
   });
 
   // --- 5. SUMMARY / TOTALS SECTION ---
-  // Get the Y position where the table ended dynamically
   const finalY = (doc as any).lastAutoTable.finalY + 10;
   const summaryX = pageWidth - margin - 60;
 
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(80, 80, 80);
-
-  // Subtotal Row
-  doc.text('Subtotal:', summaryX, finalY);
-  doc.text(`$${orderData.subtotal.toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
-
-  // Delivery Fee Row
-  doc.text('Delivery Fee:', summaryX, finalY + 6);
-  doc.text(`$${orderData.deliveryFee.toFixed(2)}`, pageWidth - margin, finalY + 6, { align: 'right' });
-
-  // Grand Total Row
+  // Vendor Sales Total Row (Excluding Platform & Delivery Fees)
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(12);
-  doc.text('Grand Total:', summaryX, finalY + 13);
-  doc.text(`$${orderData.grandTotal.toFixed(2)}`, pageWidth - margin, finalY + 13, { align: 'right' });
+  doc.text('Total Selling:', summaryX, finalY);
+  doc.text(`₹${(orderData.subtotal ?? orderData.grandTotal ?? 0).toFixed(2)}`, pageWidth - margin, finalY, { align: 'right' });
 
-  // --- 6. FOOTER (Static Brand Messaging) ---
+  // --- 6. FOOTER ---
   const pageHeight = doc.internal.pageSize.getHeight();
   
   doc.setFont('helvetica', 'italic');
   doc.setFontSize(10);
   doc.setTextColor(120, 120, 120);
   doc.text(
-    `Thank you for shopping with Rivo.City - ${orderData.vendor.name}`,
+    `Thank you for selling with Rivo.City - ${orderData.vendor.name}`,
     pageWidth / 2,
     pageHeight - 20,
     { align: 'center' }
