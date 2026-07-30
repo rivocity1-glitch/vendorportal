@@ -77,7 +77,9 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         price: product.price !== undefined && product.price !== null ? String(product.price) : "",
         cost_price: product.cost_price !== undefined && product.cost_price !== null ? String(product.cost_price) : "",
         mrp: product.mrp !== undefined && product.mrp !== null ? String(product.mrp) : "",
-        gst_slab: product.gst_slab !== undefined && product.gst_slab !== null ? String(product.gst_slab) : "5",
+        gst_slab: product.gst_slab !== undefined && product.gst_slab !== null 
+          ? String(product.gst_slab).replace("%", "").trim() 
+          : "5",
         batch_number: product.batch_number || "",
         expiry_date: product.expiry_date || "",
         weightValue: parsedWeightVal,
@@ -252,13 +254,16 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         ? `${form.weightValue.trim()} ${form.weightUnit}`
         : null;
 
+      const numericGst = parseFloat(form.gst_slab) || 0;
+
       const productPayload = {
         name: form.name.trim(),
         category_id: form.category_id,
         price: parseFloat(form.price),
         cost_price: parseFloat(form.cost_price),
         mrp: parseFloat(form.mrp),
-        gst_slab: parseFloat(form.gst_slab) || 0,
+        gst_slab: `${numericGst}%`,
+        gst_rate: numericGst,
         batch_number: form.batch_number || null,
         expiry_date: form.expiry_date || null,
         weight: finalWeightString,
