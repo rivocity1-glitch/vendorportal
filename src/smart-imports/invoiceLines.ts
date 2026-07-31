@@ -1,110 +1,98 @@
-export interface InvoiceTemplate {
-  id: string;
-  name: string;
-  detect(text: string): boolean;
-  parse(text: string): string[];
-}
-
 /**
- * Normalizes input text by forcing lowercase and stripping irregular 
- * whitespace layout characters to ensure predictable token keyword matching.
+ * Interface representing structured product row filtering criteria.
  */
-function normalizeText(text: string): string {
-  if (!text) return '';
-  return text.toLowerCase().replace(/\s+/g, ' ');
+export interface ProductLineFilterOptions {
+  minTokens?: number;
+  requireNumericPrice?: boolean;
 }
 
-/**
- * Checks if the normalized text contains any of the provided alias variations
- * and returns a boolean value.
- */
-function matchAliases(normalizedText: string, aliases: string[]): boolean {
-  return aliases.some(alias => normalizedText.includes(alias.toLowerCase()));
-}
+// Regex patterns targeting invoice boilerplate, headers, footers, addresses, and summary totals
+const SKIP_PATTERNS: RegExp[] = [
+  // Totals & Summaries
+  /\b(GRAND\s+TOTAL|NET\s+TOTAL|SUB\s*TOTAL|TOTAL\s+AMOUNT|BALANCE\s+DUE|ROUND\s*OFF|AMOUNT\s+IN\s+WORDS|TOTAL\s+TAXABLE)\b/i,
+  /\b(TOTAL\s+QTY|TOTAL\s+ITEMS|TOTAL\s+PCS|NET\s+PAYABLE|FINAL\s+AMOUNT)\b/i,
+  
+  // GST & Tax Breakdown Summaries
+  /\b(GST\s+SUMMARY|TAX\s+SUMMARY|CGST|SGST|IGST|UTGST|CESS|OUTPUT\s+TAX|INPUT\s+TAX)\b/i,
+  /\b(GSTIN|STATE\s+CODE|PAN\s+NO|CIN|LUT\s+NO|TAX\s+INVOICE)\b/i,
+  
+  // Discounts & Charges
+  /\b(SCHEME\s+DISCOUNT|TRADE\s+DISCOUNT|CASH\s+DISCOUNT|DISCOUNT\s+TOTAL|FREIGHT|DELIVERY\s+CHARGES|PACKING\s+CHARGES)\b/i,
 
-/**
- * Splits the multi-line layout text string into individual trimmed rows,
- * eliminating empty token slots.
- */
-function parseToRows(text: string, templateName: string): string[] {
-  const rows = text
-    .split("\n")
-    .map(l => l.trim())
-    .filter(l => l.length > 0);
+  // Invoice & Order Metadata
+  /\b(INVOICE\s*(NO|NUMBER|DATE)?|BILL\s*(NO|NUMBER|DATE)?|PO\s*(NO|NUMBER)?|ORDER\s*(NO|DATE)?|DUE\s+DATE)\b/i,
+  /\b(CHALLAN\s+NO|E-WAY\s+BILL|VEHICLE\s+NO|DISPATCH\s+THROUGH|PAYMENT\s+MODE|TERMS)\b/i,
 
-  console.log("Template Parse:", rows.length, rows);
-  return rows;
-}
+  // Contact Details: Phone, Mobile, Email, Address
+  /\b(PHONE|MOBILE|TEL|MOB|EMAIL|WEBSITE|FAX)\s*[:#-]?\s*\+?\d+/i,
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
+  /\b(ADDRESS|ROAD|STREET|CITY|DISTRICT|PINCODE|PIN|STATE|NEAR|OPP|BEHIND)\b/i,
+  /\b\d{6}\b/, // Standalone 6-digit PIN codes
 
-export const invoiceTemplates: InvoiceTemplate[] = [
-  {
-    id: 'wholesale-generic',
-    name: 'Wholesale Generic',
-    detect(text: string): boolean {
-      const normalized = normalizeText(text);
-      let score = 0;
+  // Banking & Payment Details
+  /\b(BANK\s+NAME|ACCOUNT\s+NO|A\/C\s+NO|IFSC|SWIFT|BRANCH|UPI\s+ID|QR\s+CODE|PAYTM|GPAY|PHONEPE)\b/i,
 
-      if (matchAliases(normalized, ['batch'])) score++;
-      if (matchAliases(normalized, ['expiry'])) score++;
-      if (matchAliases(normalized, ['rate', 'list price', 'price'])) score++;
-      if (matchAliases(normalized, ['gst', 'tax', 'tax %'])) score++;
-      if (matchAliases(normalized, ['amount', 'amount (₹)'])) score++;
-      if (matchAliases(normalized, ['qty', 'quantity'])) score++;
-      if (matchAliases(normalized, ['item', 'item description', 'product'])) score++;
+  // Table Column Headers
+  /^\s*(S\.?NO|SL\.?NO|ITEM|DESCRIPTION|PARTICULARS|PRODUCT|HSN|SAC|QTY|QUANTITY|RATE|PRICE|MRP|AMOUNT|DISC|TAX|GST)\b/i,
 
-      // Secondary constraint to prevent overlapping with medical layouts
-      if (normalized.includes('ptr')) {
-        score = 0;
-      }
-
-      console.log("Template:", "Wholesale Generic", "Score:", score);
-      return score >= 4;
-    },
-    parse(text: string): string[] {
-      return parseToRows(text, "Wholesale Generic");
-    }
-  },
-  {
-    id: 'retail-gst',
-    name: 'Retail GST Invoice',
-    detect(text: string): boolean {
-      const normalized = normalizeText(text);
-      let score = 0;
-
-      if (matchAliases(normalized, ['hsn', 'hsn/sac'])) score++;
-      if (matchAliases(normalized, ['gst', 'tax', 'tax %'])) score++;
-      if (matchAliases(normalized, ['rate', 'list price', 'price'])) score++;
-      if (matchAliases(normalized, ['amount', 'amount (₹)'])) score++;
-      if (matchAliases(normalized, ['qty', 'quantity'])) score++;
-      if (matchAliases(normalized, ['unit'])) score++;
-      if (matchAliases(normalized, ['item', 'item description', 'product'])) score++;
-
-      console.log("Template:", "Retail GST Invoice", "Score:", score);
-      return score >= 4;
-    },
-    parse(text: string): string[] {
-      return parseToRows(text, "Retail GST Invoice");
-    }
-  },
-  {
-    id: 'medical-distributor',
-    name: 'Medical Distributor',
-    detect(text: string): boolean {
-      const normalized = normalizeText(text);
-      let score = 0;
-
-      if (matchAliases(normalized, ['batch'])) score++;
-      if (matchAliases(normalized, ['expiry'])) score++;
-      if (matchAliases(normalized, ['mrp'])) score++;
-      if (matchAliases(normalized, ['ptr'])) score++;
-      if (matchAliases(normalized, ['qty', 'quantity'])) score++;
-      if (matchAliases(normalized, ['item', 'item description', 'product'])) score++;
-
-      console.log("Template:", "Medical Distributor", "Score:", score);
-      return score >= 4;
-    },
-    parse(text: string): string[] {
-      return parseToRows(text, "Medical Distributor");
-    }
-  }
+  // Footers & Terms
+  /\b(TERMS\s*&\s*CONDITIONS|TERMS\s+AND\s+CONDITIONS|THANK\s+YOU|VISIT\s+AGAIN|E\s*&\s*O\.?E)\b/i,
+  /\b(AUTHORIZED\s+SIGNATORY|AUTHORISED\s+SIGNATORY|SIGNATURE|SUBJECT\_TO)\b/i,
+  /PAGE\s+\d+\s+OF\s+\d+/i
 ];
+
+// Regex validating the mandatory presence of numeric product metrics (Quantity, Price, Rate, or Amount)
+const PRODUCT_ROW_METRIC_PATTERN = /\b\d+(\.\d{1,2})?\b/;
+
+/**
+ * Filters out metadata, summary, address, and total lines from extracted text rows,
+ * returning only high-confidence product line rows.
+ *
+ * @param lines Array of structural text line strings from the document.
+ * @param options Optional configuration parameters for line filtering.
+ * @returns Filtered array containing probable product rows only.
+ */
+export function filterProductLines(
+  lines: string[],
+  options: ProductLineFilterOptions = {}
+): string[] {
+  if (!lines || !Array.isArray(lines)) return [];
+
+  const minTokens = options.minTokens ?? 2;
+  const requireNumericPrice = options.requireNumericPrice ?? true;
+
+  const validProductLines: string[] = [];
+
+  for (const line of lines) {
+    const trimmedLine = line.trim();
+    if (!trimmedLine) continue;
+
+    // 1. Skip rows matching non-product metadata patterns (totals, tax, contact, terms, etc.)
+    const isSkipCandidate = SKIP_PATTERNS.some(pattern => pattern.test(trimmedLine));
+    if (isSkipCandidate) {
+      continue;
+    }
+
+    // 2. Ensure line meets minimum token count requirements
+    const tokens = trimmedLine.split(/\s+/);
+    if (tokens.length < minTokens) {
+      continue;
+    }
+
+    // 3. Ensure row contains at least one valid price/quantity numeric pattern
+    if (requireNumericPrice && !PRODUCT_ROW_METRIC_PATTERN.test(trimmedLine)) {
+      continue;
+    }
+
+    // 4. Reject standalone phone numbers or long numeric codes without text descriptions
+    const pureNumbers = tokens.filter(t => /^\d+$/.test(t));
+    if (pureNumbers.length === tokens.length) {
+      continue;
+    }
+
+    validProductLines.push(trimmedLine);
+  }
+
+  console.log(`Filtered ${lines.length} lines down to ${validProductLines.length} product rows.`);
+  return validProductLines;
+}

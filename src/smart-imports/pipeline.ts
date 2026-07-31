@@ -1,22 +1,32 @@
 import { prepareForOCR } from './imageProcessor';
-import { extractText } from './ocr';
+import { extractText, isInvoiceLikely } from './ocr';
 import { extractPdfText } from './pdfTextExtractor';
-import { reconstructInvoiceTable } from './tableReconstructor';
+import { reconstructInvoiceTable, StructuredRow } from './tableReconstructor';
 import { parseInvoiceLines } from './parser';
+import { parseCsvFile } from './csvImporter';
 import { matchCategory } from './categoryMatcher';
 import { matchProduct, ExistingProduct } from './productMatcher';
-import { PipelineResult, ReviewItem, ImportSummary } from './types';
+import { PipelineResult, ReviewItem, ImportSummary, ParsedProduct } from './types';
 import { IMPORT_STATUS, DEFAULT_IMPORT_VALUES } from './constants';
 import { invoiceTemplates } from "./invoiceTemplates";
 import { supabase } from "../lib/supabase";
+import { normalizeInvoiceRow } from './fieldNormalizer';
+
+/**
+ * Checks if the uploaded file is a CSV based on MIME type or file extension.
+ */
+function isCsvFile(file: File): boolean {
+  const csvMimeTypes = ['text/csv', 'application/csv', 'application/vnd.ms-excel'];
+  const isMimeMatch = csvMimeTypes.includes(file.type.toLowerCase());
+  const isExtensionMatch = file.name.toLowerCase().endsWith('.csv');
+  return isMimeMatch || isExtensionMatch;
+}
 
 /**
  * Orchestrates the complete end-to-end multi-layered Smart Import processing pipeline.
- * Ingests a raw file, processes its layout (using native text extraction for PDFs or 
- * OCR for image formats), reconstructs columnar text tables into structured rows,
- * validates the layout via template detection, parses, matches entity vectors,
- * and generates a deterministic reviewable item summary payload.
- * * @param file The uploaded invoice image or PDF file object.
+ * Routes CSVs directly to CSV parsing, digital PDFs to pdf.js text extraction, and images/scanned PDFs to OCR.
+ *
+ * @param file The uploaded invoice image, PDF, or CSV file object.
  * @param existingProducts Optional array of master reference inventory products for sync matching.
  * @returns A promise resolving to the final structured PipelineResult mapping details.
  */
@@ -28,119 +38,146 @@ export async function runImportPipeline(
     throw new Error('Pipeline execution aborted: No file payload provided.');
   }
 
-  let fullText = '';
+  let parsedProducts: ParsedProduct[] = [];
 
-  // Branch flow dynamically based on document MIME type structure
-  if (file.type === 'application/pdf') {
-    console.log("Using PDF text extraction");
-    console.log('extractPdfText() started');
-    try {
-      // Extract layout-preserved text matrix rows directly from the PDF file block
-      fullText = await extractPdfText(file);
-      console.log('extractPdfText() completed', 'Length of extracted text:', fullText.length);
-    } catch (error) {
-      console.error(error);
-      throw error;
-    }
-  } else if (file.type.startsWith('image/')) {
-    console.log("Using OCR");
-    // 1 & 2. Prepare image matrix components for the OCR layer
-    console.log('prepareForOCR() started');
-    let processedImageUrls: string[] = [];
-    try {
-      processedImageUrls = await prepareForOCR(file);
-      console.log('prepareForOCR() completed', 'Number of generated images:', processedImageUrls.length);
-    } catch (error) {
-      console.error(error);
-      throw error;
-    }
+  // Branch 1: Native CSV Processing Flow
+  if (isCsvFile(file)) {
+    console.log("CSV detected: Routing directly to CSV Importer without OCR or PDF processing...");
+    parsedProducts = await parseCsvFile(file);
+    console.log("CSV parsing completed. Total parsed items:", parsedProducts.length);
+  } else {
+    // Branch 2: Standard PDF & Image Ingestion Pipelines
+    let fullText = '';
+    let requiresOcr = false;
 
-    if (processedImageUrls.length === 0) {
-      throw new Error('Pipeline execution aborted: File preparation stage failed to return valid image paths.');
-    }
-
-    // 3. Run OCR over the prepared pages sequentially
-    console.log('OCR started');
-    for (const imageUrl of processedImageUrls) {
-      let inputForOcr: File | string = imageUrl;
-
-      if (typeof imageUrl === 'string') {
-        try {
-          if (imageUrl.startsWith('data:')) {
-            const res = await fetch(imageUrl);
-            const blob = await res.blob();
-            inputForOcr = new File([blob], 'page.png', { type: blob.type });
-          } else {
-            const res = await fetch(imageUrl);
-            const blob = await res.blob();
-            const name = imageUrl.split('/').pop() || 'page.png';
-            inputForOcr = new File([blob], name, { type: blob.type });
-          }
-        } catch (e) {
-          console.error(e);
-          console.warn('Failed to fetch image for OCR:', e);
-          continue;
-        }
-      }
-
+    if (file.type === 'application/pdf') {
+      console.log("PDF detected: Attempting pdf.js native text extraction...");
       try {
-        const pageText = await extractText(inputForOcr as File);
-        fullText += pageText + '\n';
+        fullText = await extractPdfText(file);
+        console.log('PDF text extraction completed', 'Length of extracted text:', fullText.length);
+
+        const MIN_TEXT_LENGTH_THRESHOLD = 50;
+        const isMeaningfulText = fullText.length >= MIN_TEXT_LENGTH_THRESHOLD && isInvoiceLikely(fullText);
+
+        if (isMeaningfulText) {
+          console.log("Sufficient digital PDF text extracted. Skipping OCR.");
+        } else {
+          console.log("PDF extraction returned insufficient text. Treating as scanned PDF and falling back to OCR.");
+          requiresOcr = true;
+        }
+      } catch (error) {
+        console.warn("Failed to extract native PDF text, falling back to OCR:", error);
+        requiresOcr = true;
+      }
+    } else if (file.type.startsWith('image/')) {
+      requiresOcr = true;
+    } else {
+      throw new Error(`Unsupported file layout format: ${file.type}`);
+    }
+
+    if (requiresOcr) {
+      console.log("Using OCR pipeline");
+      fullText = '';
+
+      let processedImageUrls: string[] = [];
+      try {
+        processedImageUrls = await prepareForOCR(file);
       } catch (error) {
         console.error(error);
         throw error;
       }
+
+      if (processedImageUrls.length === 0) {
+        throw new Error('Pipeline execution aborted: File preparation stage failed to return valid image paths.');
+      }
+
+      for (const imageUrl of processedImageUrls) {
+        let inputForOcr: File | string = imageUrl;
+
+        if (typeof imageUrl === 'string') {
+          try {
+            if (imageUrl.startsWith('data:')) {
+              const res = await fetch(imageUrl);
+              const blob = await res.blob();
+              inputForOcr = new File([blob], 'page.png', { type: blob.type });
+            } else {
+              const res = await fetch(imageUrl);
+              const blob = await res.blob();
+              const name = imageUrl.split('/').pop() || 'page.png';
+              inputForOcr = new File([blob], name, { type: blob.type });
+            }
+          } catch (e) {
+            console.error(e);
+            continue;
+          }
+        }
+
+        try {
+          const pageText = await extractText(inputForOcr as File);
+          fullText += pageText + '\n';
+        } catch (error) {
+          console.error(error);
+          throw error;
+        }
+      }
     }
-    console.log('OCR completed', 'Length of extracted text:', fullText.length);
-  } else {
-    throw new Error(`Unsupported file layout format: ${file.type}`);
+
+    // 1. Native PDF/OCR lines logging
+    const nativePdfLines = fullText.split(/\r?\n/).filter(line => line.trim().length > 0);
+    console.log('[Pipeline Debug] 1. Native PDF lines:', nativePdfLines);
+
+    // 2. Structured rows returned by tableReconstructor
+    const reconstructedRows: StructuredRow[] = reconstructInvoiceTable(fullText);
+    console.log('[Pipeline Debug] 2. Structured rows returned by tableReconstructor:', reconstructedRows);
+
+    if (reconstructedRows.length > 0) {
+      const normalizedRows: string[] = [];
+      normalizedRows.push('productName | hsn | quantity | unit | purchasePrice | mrp');
+
+      for (const rowObj of reconstructedRows) {
+        // 3. Objects passed into fieldNormalizer
+        console.log('[Pipeline Debug] 3. Object passed into fieldNormalizer:', rowObj);
+        const normObj = normalizeInvoiceRow(rowObj);
+        const lineStr = `${normObj.productName || ''} | ${normObj.hsn || ''} | ${normObj.quantity || ''} | ${normObj.unit || ''} | ${normObj.purchasePrice || ''} | ${normObj.mrp || ''}`;
+        normalizedRows.push(lineStr);
+      }
+
+      parsedProducts = parseInvoiceLines(normalizedRows);
+    } else {
+      let selectedTemplate = invoiceTemplates.find(t => t.detect(fullText));
+      if (!selectedTemplate) {
+        selectedTemplate = invoiceTemplates[invoiceTemplates.length - 1];
+        if (!selectedTemplate) {
+          throw new Error("Unsupported invoice format.");
+        }
+      }
+
+      let cleanLines: string[] = [];
+      try {
+        cleanLines = selectedTemplate.parse(fullText);
+      } catch (error) {
+        console.error(error);
+        throw error;
+      }
+
+      if (cleanLines.length === 0) {
+        return {
+          items: [],
+          summary: { total: 0, newProducts: 0, existingProducts: 0, needsReview: 0 }
+        };
+      }
+
+      parsedProducts = parseInvoiceLines(cleanLines);
+    }
   }
 
-  // Intercept layout and reconstruct tabular tokens column-to-row wise
-  console.log("Original Lines:", fullText.split("\n").length);
-  const reconstructedRows = reconstructInvoiceTable(fullText);
-  console.log("Reconstructed Rows:", reconstructedRows.length);
-  console.log(reconstructedRows);
-
-  const reconstructedText = reconstructedRows.join("\n");
-
-  // Template Detection and Layout Resolution Layer
-  let selectedTemplate = invoiceTemplates.find(t => t.detect(reconstructedText));
-  if (!selectedTemplate) {
-    throw new Error("Unsupported invoice format.");
-  }
-  console.log("Detected Template:", selectedTemplate?.name);
-
-  // 4. Resolve clean matching items using the matched template engine parsing strategy
-  console.log('Invoice line extraction started via template configuration');
-  let cleanLines: string[] = [];
-  try {
-    cleanLines = selectedTemplate.parse(reconstructedText);
-    console.log('Invoice line extraction completed', 'Number of lines matched:', cleanLines.length);
-  } catch (error) {
-    console.error(error);
-    throw error;
-  }
-
-  if (cleanLines.length === 0) {
+  if (parsedProducts.length === 0) {
     return {
       items: [],
       summary: { total: 0, newProducts: 0, existingProducts: 0, needsReview: 0 }
     };
   }
 
-  // 5. Parse clean rows into individual distinct products
-  console.log('Parser started');
-  let parsedProducts = [];
-  try {
-    parsedProducts = parseInvoiceLines(cleanLines);
-    console.log('Parser completed', 'Number of parsed products:', parsedProducts.length);
-  } catch (error) {
-    console.error(error);
-    throw error;
-  }
-
-  // Load master product category references from database to map names to strict UUID keys
   const { data: categories } = await supabase
     .from("product_categories")
     .select("id,name");
@@ -150,44 +187,32 @@ export async function runImportPipeline(
   let existingProductsCount = 0;
   let needsReviewCount = 0;
 
-  // 6, 7 & 8. Run matching metrics, status evaluation, and object generation loops
   for (let i = 0; i < parsedProducts.length; i++) {
-    const product = parsedProducts[i];
+    const product = parsedProducts[i] as any;
     
-    // Evaluate matching layers
-    console.log('Category matcher started');
     let categoryMatch;
     try {
       categoryMatch = matchCategory(product);
-      console.log('Category matcher completed');
     } catch (error) {
       console.error(error);
       throw error;
     }
 
-    console.log('Product matcher started');
     let productMatch;
     try {
       productMatch = matchProduct(product, existingProducts);
-      console.log('Product matcher completed');
     } catch (error) {
       console.error(error);
       throw error;
     }
 
-    // Resolve name strings against fetched tracking master indexes to extract matching UUID keys
     const matchedCategory = categoryMatch.categoryName
       ? categories?.find(c => c.name.toLowerCase() === categoryMatch.categoryName.toLowerCase())
       : null;
 
     const finalCategory = matchedCategory?.id ?? null;
-
-    console.log("Matched category:", categoryMatch.categoryName);
-    console.log("Resolved UUID:", finalCategory);
-
     const finalStock = product.quantity ?? DEFAULT_IMPORT_VALUES.STOCK;
 
-    // Evaluate operational checklist to assign standard statuses
     let status: typeof IMPORT_STATUS[keyof typeof IMPORT_STATUS] = IMPORT_STATUS.NEW;
 
     if (!product.name || product.costPrice === null || product.mrp === null) {
@@ -205,13 +230,36 @@ export async function runImportPipeline(
       ...product,
       id: `rev-${i}-${Date.now()}`,
       selected: true,
-      category: finalCategory, // Safely records either the matched reference UUID string or null setup mappings
+      category: finalCategory,
       stock: finalStock,
+      unit: product.unit ?? null,
+      costPrice: product.costPrice !== null && product.costPrice !== undefined ? product.costPrice : null,
+      mrp: product.mrp !== null && product.mrp !== undefined ? product.mrp : null,
+      packing: product.packing ?? product.unit ?? null,
+      manufacturer: product.manufacturer ?? null,
+      barcode: product.barcode ?? null,
+      sku: product.sku ?? null,
+      purchaseRate: product.purchaseRate ?? null,
+      sellingRate: product.sellingRate ?? null,
+      ptr: product.ptr ?? null,
+      pts: product.pts ?? null,
+      scheme: product.scheme ?? null,
+      schemeDiscount: product.schemeDiscount ?? null,
+      netRate: product.netRate ?? null,
+      gstRate: product.gstRate ?? null,
+      gstSlab: product.gstSlab ?? null,
+      cgst: product.cgst ?? null,
+      sgst: product.sgst ?? null,
+      igst: product.igst ?? null,
+      hsnCode: product.hsnCode ?? null,
+      batch: product.batch ?? product.batchNumber ?? null,
+      expiry: product.expiry ?? product.expiryDate ?? null,
+      manufacturingDate: product.manufacturingDate ?? null,
+      invoiceRaw: product.invoiceRaw ?? null,
       status,
       productMatch: productMatch.matchType !== 'None' ? productMatch : null,
-      categoryMatch: categoryMatch.confidence > 0 ? categoryMatch : null,
-      gst: null
-    };
+      categoryMatch: categoryMatch.confidence > 0 ? categoryMatch : null
+    } as ReviewItem;
 
     reviewItems.push(reviewItem);
   }
@@ -222,8 +270,6 @@ export async function runImportPipeline(
     existingProducts: existingProductsCount,
     needsReview: needsReviewCount
   };
-
-  console.log('Pipeline completed successfully');
 
   return {
     items: reviewItems,

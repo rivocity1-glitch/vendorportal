@@ -1,84 +1,68 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import { TextItem, TextMarkedContent } from 'pdfjs-dist/types/src/display/api';
 
-// Configures the PDF.js worker locally for a Vite environment using standard ESM asset resolution
+// Configures the PDF.js worker locally using Vite's ESM asset bundling resolution
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.mjs',
   import.meta.url
 ).toString();
 
-export interface PdfTextItem {
-  text: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+/**
+ * Type guard to check if a TextItem or TextMarkedContent item is a TextItem.
+ */
+function isTextItem(item: TextItem | TextMarkedContent): item is TextItem {
+  return 'str' in item;
 }
 
 /**
- * Extracts individual positioned text items from a PDF file using pdfjs-dist,
- * clusters them into logical visual rows based on their shared Y coordinates, 
- * orders them horizontally, and joins them to preserve a clean structural line layout.
- * * @param file The PDF document file object.
- * @returns A promise that resolves to the reconstructed multiline text string of the PDF.
+ * Extracts raw text from a PDF file while preserving layout structure by grouping
+ * text items that fall on the same horizontal line.
+ *
+ * @param file The PDF File object to process.
+ * @returns A promise resolving to the extracted multiline text string.
  */
 export async function extractPdfText(file: File): Promise<string> {
-  if (!file) {
-    throw new Error('Text extraction aborted: No file payload provided.');
-  }
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-  try {
-    const arrayBuffer = await file.arrayBuffer();
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
-    const pdf = await loadingTask.promise;
-    const items: PdfTextItem[] = [];
+  let fullText = '';
 
-    // 1. Gather all individual text items across all document pages
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+    const page = await pdf.getPage(pageNum);
+    const textContent = await page.getTextContent();
 
-      for (const item of textContent.items) {
-        if ('str' in item && 'transform' in item) {
-          items.push({
-            text: item.str,
-            x: item.transform[4],      // X-coordinate translation property
-            y: item.transform[5],      // Y-coordinate translation property
-            width: item.width,
-            height: item.height,
-          });
-        }
+    // Filter valid text items and group by Y-coordinate matrix position to retain row structure
+    const linesMap = new Map<number, TextItem[]>();
+
+    for (const item of textContent.items) {
+      if (!isTextItem(item) || !item.str.trim()) continue;
+
+      // Y-coordinate in transform matrix (transform[5])
+      const y = Math.round(item.transform[5]);
+
+      if (!linesMap.has(y)) {
+        linesMap.set(y, []);
       }
+      linesMap.get(y)!.push(item);
     }
 
-    // 2. Cluster text items by unique visual rows based on Y coordinate matching proximity
-    const rowTolerance = 5; // Variance threshold allowance for text tokens residing on the same visual line
-    const clusteredRows: PdfTextItem[][] = [];
+    // Sort Y-coordinates in descending order (top of page to bottom)
+    const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
 
-    for (const item of items) {
-      // Find an existing line cluster segment matching the current item's vertical canvas position
-      let matchedRow = clusteredRows.find(row => Math.abs(row[0].y - item.y) <= rowTolerance);
+    const pageLines: string[] = [];
 
-      if (matchedRow) {
-        matchedRow.push(item);
-      } else {
-        clusteredRows.push([item]);
-      }
+    for (const y of sortedY) {
+      const lineItems = linesMap.get(y)!;
+
+      // Sort items on the same line by X-coordinate (transform[4])
+      lineItems.sort((a, b) => a.transform[4] - b.transform[4]);
+
+      const lineText = lineItems.map((item) => item.str).join(' ');
+      pageLines.push(lineText);
     }
 
-    // 3. Sort visual row coordinates vertically from top to bottom (Higher Y value indicates higher position in canvas)
-    clusteredRows.sort((a, b) => b[0].y - a[0].y);
-
-    // 4. Sort columns horizontally by X order, map text tokens, and join them with spaces
-    const rows: string[] = clusteredRows.map(row => {
-      row.sort((a, b) => a.x - b.x);
-      return row.map(item => item.text).join(' ');
-    });
-
-    console.log("Rows:", rows);
-
-    // 5. Unify line elements cleanly using break boundaries
-    return rows.join("\n");
-  } catch (error: any) {
-    throw new Error(`Failed to extract layout-preserved text matrix from PDF: ${error?.message || error}`);
+    fullText += pageLines.join('\n') + '\n';
   }
+
+  return fullText.trim();
 }

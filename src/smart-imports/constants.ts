@@ -20,6 +20,20 @@ export const OCR_CONFIG = {
   LANGUAGE: 'eng',
   CONFIDENCE_THRESHOLD: 70, // Minimum engine confidence level required to accept text segments (0-100)
   MIN_LINE_LENGTH: 3,       // Minimum characters required for an independent line text block
+  HIGH_CONFIDENCE_THRESHOLD: 85, // High confidence threshold for auto-approval
+  LOW_CONFIDENCE_THRESHOLD: 50,  // Low confidence threshold triggering review
+  PSM_MODE: 3,                   // Fully automatic page segmentation without OSD
+  DPI: 300,                      // Ideal resolution DPI target for OCR preprocessing
+} as const;
+
+/**
+ * OCR Engine Confidence Thresholds for fine-grained field evaluation.
+ */
+export const OCR_FIELD_CONFIDENCE = {
+  EXACT: 90,
+  HIGH: 75,
+  MEDIUM: 60,
+  LOW: 40,
 } as const;
 
 /**
@@ -97,4 +111,9 @@ export const PARSING_PATTERNS = {
   EXPIRY: /(?:exp|expiry|exp\s*date|best\s*before)[:\s]*([0-9]{2}[-/:][0-9]{2,4}|[a-z]{3}[-/:][0-9]{2,4})/i,
   BATCH: /(?:batch|b\.?no|lot)[:\s]*([a-z0-9\-_/]+)/i,
   MANUFACTURER: /(?:mfg|mfd|manufactured\s*by|mfr)[:\s]*([a-z0-9\s.,&]+)/i,
+  BARCODE: /\b(\d{8}|\d{12,14})\b/,
+  GST_RATE: /\b(0|3|5|12|18|28)\s*%/,
+  GSTIN: /\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}\b/,
+  HSN: /\b\d{4,8}\b/,
+  SKU: /\b(?:SKU|ITEM CODE|CODE)[\s:#]*([A-Z0-9-]{4,15})\b/i,
 } as const;

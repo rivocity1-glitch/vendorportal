@@ -1,119 +1,164 @@
 import { ParsedProduct } from './types';
+import { normalizeFields } from './fieldNormalizer';
 
 /**
- * Parses individual invoice text lines into structured product models.
- * Filters out financial summaries, transactional boilerplate, and structural metadata
- * while extracting quantitative properties (quantity, price, metrics) from item rows.
- * * @param lines Array of structural text rows passed down from the template pipeline.
- * @returns Array of ParsedProduct payloads representing valid inventory entries.
+ * Normalizes common OCR artifacts in numerical or date strings.
+ */
+function fixOcrMistakes(text: string): string {
+  return text
+    .replace(/(?<=\d)[O|o](?=\d)/g, '0')
+    .replace(/(?<=\d)[I|l](?=\d)/g, '1')
+    .replace(/(?<=\d)[S|s](?=\d)/g, '5')
+    .replace(/(?<=\d)[B](?=\d)/g, '8');
+}
+
+/**
+ * Cleans leading row index numbers or bullet prefixes from product names
+ * (e.g. "2 Ambuja Cement 53 Grade" -> "Ambuja Cement 53 Grade").
+ */
+function stripLeadingRowIndex(name: string): string {
+  if (!name) return '';
+  return name.replace(/^\d+[\.\)\s\-]+(?=[A-Za-z])/, '').trim();
+}
+
+/**
+ * Parses pipe-delimited or structured reconstructed invoice rows into `ParsedProduct` objects
+ * utilizing centralized normalized fields from fieldNormalizer.
+ *
+ * @param lines Array of reconstructed row strings from tableReconstructor.
+ * @returns Array of ParsedProduct objects.
  */
 export function parseInvoiceLines(lines: string[]): ParsedProduct[] {
   const parsedProducts: ParsedProduct[] = [];
 
   const skipKeywords = [
-    'CGST', 'SGST', 'IGST', 'CESS', 'TOTAL', 'ROUND OFF', 
-    'SALE @', 'GST', 'TAX', 'AMOUNT IN WORDS', 'BANK', 
-    'ACCOUNT', 'IFSC', 'SIGNATURE', 'TERMS', 'THANK YOU'
+    'INVOICE NO', 'BILL NO', 'INVOICE NUMBER', 'BILL NUMBER',
+    'GST SUMMARY', 'TAX SUMMARY', 'CGST', 'SGST', 'IGST', 'CESS',
+    'GRAND TOTAL', 'NET TOTAL', 'SUB TOTAL', 'TOTAL AMOUNT', 'ROUND OFF',
+    'DISCOUNT', 'ADDRESS', 'PHONE', 'MOBILE', 'TEL', 'EMAIL',
+    'BANK DETAILS', 'ACCOUNT NO', 'IFSC', 'UPI', 'QR CODE',
+    'TERMS & CONDITIONS', 'TERMS AND CONDITIONS', 'SIGNATURE',
+    'AUTHORIZED SIGNATORY', 'THANK YOU', 'VISIT AGAIN', 'PAGE '
   ];
 
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (!trimmedLine) continue;
+  const headerLabels = [
+    'product', 'product name', 'item', 'description', 'name', 'productname', 'particulars'
+  ];
 
-    const upperLine = trimmedLine.toUpperCase();
+  for (let idx = 0; idx < lines.length; idx++) {
+    try {
+      const originalLine = lines[idx];
+      const trimmedLine = originalLine.trim();
+      if (!trimmedLine) continue;
 
-    // 1. Instantly skip lines containing summary keywords or financial declarations
-    const shouldSkip = skipKeywords.some(keyword => upperLine.includes(keyword));
-    if (shouldSkip) {
-      console.log("SKIPPED:", line);
-      continue;
-    }
+      const upperLine = trimmedLine.toUpperCase();
+      const shouldSkip = skipKeywords.some(keyword => upperLine.includes(keyword));
+      if (shouldSkip) continue;
 
-    // 2. Tokenize line and target regular data layout sequences
-    const tokens = trimmedLine.split(/\s+/);
-    if (tokens.length < 3) {
-      console.log("SKIPPED:", line);
-      continue;
-    }
+      const correctedLine = fixOcrMistakes(trimmedLine);
 
-    // Check if the row initializes with a numeric sequence index (serial identifier marker)
-    let startIndex = 0;
-    if (/^\d+$/.test(tokens[0])) {
-      startIndex = 1; // Step past the index token boundary layout
-    }
+      // Check if line is pipe-delimited structured output from tableReconstructor
+      if (correctedLine.includes('|')) {
+        const columns = correctedLine.split('|').map(col => col.trim());
+        if (columns.length === 0) continue;
 
-    // Collect continuous alphabetic string sequences forming the item description
-    const nameTokens: string[] = [];
-    let currentIdx = startIndex;
+        // Request normalized canonical fields from fieldNormalizer
+        const normalized = normalizeFields(columns);
 
-    while (currentIdx < tokens.length) {
-      const token = tokens[currentIdx];
-      // A typical numeric tracking tail starts when purely quantitative values are hit
-      // We check if it's a number (allowing decimals) or an HSN code block descriptor
-      if (/^\d+(\.\d+)?%?$/.test(token) && nameTokens.length > 0) {
-        break;
+        let rawProductName = normalized.productName || columns[0] || '';
+        rawProductName = stripLeadingRowIndex(rawProductName);
+
+        // Discard row completely if productName equals standard header labels
+        if (headerLabels.includes(rawProductName.toLowerCase())) {
+          continue;
+        }
+
+        const quantity = normalized.quantity !== null && normalized.quantity !== undefined && String(normalized.quantity).trim() !== ''
+          ? parseFloat(String(normalized.quantity))
+          : null;
+
+        const costPrice = normalized.purchasePrice !== null && normalized.purchasePrice !== undefined && String(normalized.purchasePrice).trim() !== ''
+          ? parseFloat(String(normalized.purchasePrice))
+          : null;
+
+        // Never copy purchasePrice into MRP. If MRP is missing, leave it null.
+        const mrp = normalized.mrp !== null && normalized.mrp !== undefined && String(normalized.mrp).trim() !== ''
+          ? parseFloat(String(normalized.mrp))
+          : null;
+
+        const gstPercent = normalized.gst !== null && normalized.gst !== undefined && String(normalized.gst).trim() !== ''
+          ? parseFloat(String(normalized.gst).replace(/%/g, '').trim())
+          : null;
+
+        const hsnCode = normalized.hsn || null;
+        const barcode = normalized.barcode || null;
+        const batchNumber = normalized.batch || null;
+        const expiryDate = normalized.expiry || null;
+        const unit = normalized.unit || null;
+
+        if (!rawProductName && quantity === null && costPrice === null) {
+          continue;
+        }
+
+        const parsedProduct: ParsedProduct = {
+          name: rawProductName || null,
+          quantity: isNaN(quantity as number) ? null : quantity,
+          mrp: isNaN(mrp as number) ? null : mrp,
+          costPrice: isNaN(costPrice as number) ? null : costPrice,
+          expiry: expiryDate || null,
+          batch: batchNumber || null,
+          manufacturer: null,
+          rawText: originalLine,
+          barcode: barcode || null,
+          sku: null,
+          gstRate: isNaN(gstPercent as number) ? null : gstPercent,
+          gstSlab: gstPercent !== null && !isNaN(gstPercent) ? `${gstPercent}%` : null,
+          gstPercent: isNaN(gstPercent as number) ? null : gstPercent,
+          hsnCode: hsnCode || null,
+          weight: null,
+          unit: unit || null,
+          confidence: 100,
+          manufacturingDate: null,
+          mfgDate: null
+        };
+
+        parsedProducts.push(parsedProduct);
+        continue;
       }
-      nameTokens.push(token);
-      currentIdx++;
-    }
 
-    // Capture the remainder trailing indices containing quantitative financial values
-    const valueTokens = tokens.slice(currentIdx);
-
-    // Ensure we collected a description layout and have quantitative indices to parse out
-    if (nameTokens.length === 0 || valueTokens.length < 2) {
-      console.log("SKIPPED:", line);
-      continue;
-    }
-
-    const productName = nameTokens.join(' ');
-
-    // Extract numerical entries out from unit descriptors (e.g., "Bags", "Pcs")
-    const numericValues: number[] = [];
-    for (const valToken of valueTokens) {
-      const cleanVal = valToken.replace(/%/g, '');
-      if (/^\d+(\.\d+)?$/.test(cleanVal)) {
-        numericValues.push(parseFloat(cleanVal));
+      // Fallback unformatted string parser
+      let cleanedName = stripLeadingRowIndex(correctedLine);
+      if (headerLabels.includes(cleanedName.toLowerCase())) {
+        continue;
       }
+
+      const parsedProduct: ParsedProduct = {
+        name: cleanedName || null,
+        quantity: null,
+        mrp: null,
+        costPrice: null,
+        expiry: null,
+        batch: null,
+        manufacturer: null,
+        rawText: originalLine,
+        barcode: null,
+        sku: null,
+        gstRate: null,
+        gstSlab: null,
+        gstPercent: null,
+        hsnCode: null,
+        weight: null,
+        unit: null,
+        confidence: 100,
+        manufacturingDate: null,
+        mfgDate: null
+      };
+
+      parsedProducts.push(parsedProduct);
+
+    } catch (error) {
+      console.error('Error parsing line:', error);
     }
-
-    // Validation guard: a product entry needs structural quantitative definitions (Qty, Rate/Price, GST)
-    if (numericValues.length < 2) {
-      console.log("SKIPPED:", line);
-      continue;
-    }
-
-    /**
-     * Parse row values based on standard visual item sequence metrics:
-     * If an HSN mapping exists, numeric values index shifts accordingly:
-     * Expected layout format: [HSN] -> Qty -> [Unit Text Descriptor] -> Rate/Cost -> GST -> Total Amount
-     */
-    let quantity = 0;
-    let costPrice = 0;
-
-    if (numericValues.length >= 4) {
-      // Structure contains HSN matching index at position 0
-      quantity = numericValues[1];
-      costPrice = numericValues[2];
-    } else {
-      // Standard item row: Qty -> Rate/Cost (+ optional extra numeric values)
-      quantity = numericValues[0];
-      costPrice = numericValues[1];
-    }
-
-    const parsedProduct: ParsedProduct = {
-      name: productName,
-      quantity: quantity,
-      costPrice: costPrice,
-      mrp: costPrice, // Fallback profile map configuration to avoid critical layout failure flags
-      batch: null,
-      expiry: null,
-      manufacturer: null,
-      rawText: ''
-    };
-
-    console.log("PRODUCT:", parsedProduct);
-    parsedProducts.push(parsedProduct);
   }
 
   return parsedProducts;
