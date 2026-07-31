@@ -322,7 +322,7 @@ export function Profile() {
       nextBanners[slotIndex] = publicUrl;
 
       setProfile(prev => prev ? { ...prev, banner_urls: nextBanners } : null);
-      setSavedMessage(`Storefront slot #${slotIndex + 1} workspace banner uploaded successfully.`);
+      setSavedMessage(`Store banner ${slotIndex + 1} uploaded successfully.`);
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
       setValidationError(err.message || "Failed to upload banner image.");
@@ -349,10 +349,10 @@ export function Profile() {
       nextBanners[slotIndex] = "";
 
       setProfile(prev => prev ? { ...prev, banner_urls: nextBanners } : null);
-      setSavedMessage(`Storefront slot #${slotIndex + 1} workspace banner removed.`);
+      setSavedMessage(`Store banner ${slotIndex + 1} removed.`);
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
-      setValidationError("Failed to clear layout banner entry.");
+      setValidationError("Failed to clear banner.");
     } finally {
       setUploadingBannerSlot(null);
     }
@@ -363,7 +363,7 @@ export function Profile() {
     setSavedMessage("");
 
     if (!profile.store_name.trim() || !profile.owner_name.trim() || !profile.primary_phone.trim() || !profile.email_address.trim()) {
-      setValidationError("Store Name, Owner Name, Email, and Phone Number fields are required parameters.");
+      setValidationError("Store Name, Owner Name, Email, and Phone Number fields are required.");
       return;
     }
 
@@ -393,13 +393,17 @@ export function Profile() {
 
       if (profileError) throw profileError;
 
-      setSavedMessage("Identity settings committed successfully!");
+      setSavedMessage("Store settings updated successfully.");
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
-      setValidationError(err.message || "Failed to save parameter adjustments.");
+      setValidationError(err.message || "Failed to save profile.");
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleSaveAll = async () => {
+    await handleSaveIdentity();
   };
 
   const badge = approvalBadgeConfig[profile.status] || approvalBadgeConfig.pending;
@@ -423,14 +427,37 @@ export function Profile() {
         className="hidden"
       />
 
+      <div className="pb-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Account Profile</h1>
+          <p className="text-slate-500 text-sm mt-1">Manage store details and banners</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleSaveAll}
+          disabled={saving}
+          className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+        >
+          {saving && <Loader2 size={14} className="animate-spin" />}
+          Save All Changes
+        </button>
+      </div>
+
       <div className="space-y-4">
         <div className="flex items-center justify-between px-1">
           <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Camera className="w-3.5 h-3.5 text-[#10B981]" /> Shop Profile Banner Gallery 
-            <span className="text-[10px] bg-slate-100 dark:bg-slate-955 font-mono font-bold text-slate-600 dark:text-slate-400 border px-1.5 py-0.5 rounded-md">
-              Allocation Cap: {maxProfileBanners} Slots
-            </span>
+            <Camera className="w-3.5 h-3.5 text-[#10B981]" /> Store Banners
           </label>
+        </div>
+
+        <div className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl space-y-2">
+          <p className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Store Banners</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs text-slate-500 dark:text-slate-400">
+            <div><span className="font-semibold text-slate-700 dark:text-slate-300">Maximum:</span> 3 banners</div>
+            <div><span className="font-semibold text-slate-700 dark:text-slate-300">Supported:</span> JPG • PNG • WEBP</div>
+            <div><span className="font-semibold text-slate-700 dark:text-slate-300">Maximum Size:</span> 5 MB each</div>
+            <div><span className="font-semibold text-slate-700 dark:text-slate-300">Recommended Size:</span> 1600 × 600 px</div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -453,7 +480,7 @@ export function Profile() {
                   <>
                     <img 
                       src={currentUrl} 
-                      alt={`Banner Node #${index + 1}`} 
+                      alt={`Banner ${index + 1}`} 
                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-955 via-transparent to-transparent z-10" />
@@ -461,13 +488,13 @@ export function Profile() {
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 dark:text-slate-800 bg-linear-to-tr from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-955 p-4 border-2 border-dashed border-slate-200 dark:border-slate-900 rounded-2xl">
                     <Camera size={24} className="opacity-40 mb-1.5 text-slate-400" />
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Empty Slot Position #{index + 1}</span>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Banner {index + 1}</span>
                   </div>
                 )}
 
                 <div className="absolute bottom-3 left-4 z-20">
                   <span className="text-[9px] font-mono font-black tracking-wider uppercase text-white/90 bg-slate-955/80 px-2 py-0.5 border border-white/10 rounded-md backdrop-blur-md shadow-sm">
-                    Slot {index + 1}
+                    Banner {index + 1}
                   </span>
                 </div>
 
@@ -514,14 +541,7 @@ export function Profile() {
               {profile.status === "approved" ? "✓ Verified" : profile.status}
             </div>
           </div>
-          <p className="text-xs text-slate-400 dark:text-slate-500 line-clamp-1 font-medium">{profile.tagline || "No slogan established yet"}</p>
-        </div>
-      </div>
-
-      <div className="pb-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Account Profile</h1>
-          <p className="text-slate-500 text-sm mt-1">Manage individual identification descriptors and storefront banners</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 line-clamp-1 font-medium">{profile.tagline || "No tagline established yet"}</p>
         </div>
       </div>
 
@@ -561,31 +581,41 @@ export function Profile() {
             </button>
           </div>
 
-          <div className="space-y-2 text-center sm:text-left flex-1 min-w-0">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Profile Picture</h2>
-            <p className="text-xs text-slate-400 leading-relaxed max-w-sm">JPG or PNG formats acceptable. Maximum file allocation size caps around 2MB.</p>
-            <div className="flex flex-wrap items-center justify-center sm:justify-flex-start gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="h-8 px-3 rounded-lg bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 transition-colors"
-              >
-                Change Photo
-              </button>
-              {profile.avatar_url && (
+          <div className="space-y-3 text-center sm:text-left flex-1 min-w-0">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Profile Picture</h2>
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={handleRemoveAvatar}
-                  className="h-8 px-3 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors flex items-center gap-1"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="h-8 px-3 rounded-lg bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 transition-colors"
                 >
-                  <Trash2 size={12} /> Remove
+                  Change Photo
                 </button>
-              )}
+                {profile.avatar_url && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveAvatar}
+                    className="h-8 px-3 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-bold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition-colors flex items-center gap-1"
+                  >
+                    <Trash2 size={12} /> Remove
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs space-y-1">
+              <p className="font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Profile Photo</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1 text-slate-500 dark:text-slate-400">
+                <div><span className="font-semibold text-slate-700 dark:text-slate-300">Supported:</span> • JPG • PNG • WEBP</div>
+                <div><span className="font-semibold text-slate-700 dark:text-slate-300">Maximum Size:</span> 2 MB</div>
+                <div><span className="font-semibold text-slate-700 dark:text-slate-300">Recommended Size:</span> 500 × 500 px</div>
+              </div>
             </div>
           </div>
         </div>
 
-        <Section title="Identity Management" icon={User}>
+        <Section title="Store Details" icon={User}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Store Name" value={profile.store_name} onChange={v => setProfile(p => p ? ({ ...p, store_name: v }) : null)} />
             <Field label="Owner Name" value={profile.owner_name} onChange={v => setProfile(p => p ? ({ ...p, owner_name: v }) : null)} />
@@ -596,22 +626,10 @@ export function Profile() {
             <Field label="Phone Number" value={profile.primary_phone} onChange={v => setProfile(p => p ? ({ ...p, primary_phone: v }) : null)} />
             <Field label="Alternate Phone (Optional)" value={profile.alternate_phone} onChange={v => setProfile(p => p ? ({ ...p, alternate_phone: v }) : null)} placeholder="Secondary connection channel" />
           </div>
-
-          <div className="flex justify-end pt-2">
-            <button 
-              type="button" 
-              onClick={handleSaveIdentity}
-              disabled={saving}
-              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
-            >
-              {saving && <Loader2 size={12} className="animate-spin" />}
-              Save Profile
-            </button>
-          </div>
         </Section>
       </div>
 
-      <Section title="Platform Metadata" icon={FileText}>
+      <Section title="Store Information" icon={FileText}>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           
           <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl flex items-center justify-between">
@@ -640,12 +658,12 @@ export function Profile() {
           </div>
 
           <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl">
-            <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Active Subscription Bundle</p>
+            <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Active Subscription</p>
             <p className="font-black text-slate-800 dark:text-white mt-1.5 tracking-wide">{profile.subscription_plan} TIER</p>
           </div>
 
           <div className="sm:col-span-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl">
-            <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-2">Selected Categories Matrix</p>
+            <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-2">Primary Category</p>
             {profile.store_categories.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
                 {profile.store_categories.map(c => (
@@ -655,12 +673,12 @@ export function Profile() {
                 ))}
               </div>
             ) : (
-              <span className="text-xs text-slate-400 italic">No channel nodes provisioned inside table matrices.</span>
+              <span className="text-xs text-slate-400 italic">No categories assigned.</span>
             )}
           </div>
 
           <div className="sm:col-span-2 text-xs text-slate-400 dark:text-slate-500 px-1 pt-1 flex items-center justify-between">
-            <span>Registration Sequence Finalized:</span>
+            <span>Registration Date:</span>
             <span className="font-semibold text-slate-600 dark:text-slate-400 font-mono">{profile.created_at}</span>
           </div>
 

@@ -26,7 +26,7 @@ interface VendorSettlement {
   id: string;
   vendor_id: string;
   amount: number;
-  status: 'pending_request' | 'processing' | 'paid' | 'rejected';
+  status: 'pending' | 'paid' | 'rejected';
   payment_method: string | null;
   utr_number: string | null;
   remarks: string | null;
@@ -78,10 +78,8 @@ export function Settlements() {
     switch (status) {
       case 'paid':
         return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
-      case 'pending_request':
+      case 'pending':
         return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
-      case 'processing':
-        return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
       case 'rejected':
         return 'bg-rose-500/10 text-rose-500 border-rose-500/20';
       default:
@@ -192,7 +190,7 @@ export function Settlements() {
     const paidSettlement = getPaidSettlement(orders);
 
     const pendingRequestsAmt = settlements
-      .filter(s => s.status === 'pending_request')
+      .filter(s => s.status === 'pending')
       .reduce((sum, s) => sum + (s.amount || 0), 0);
 
     const lastSettlementItem = settlements.find(s => s.status === 'paid');
@@ -206,7 +204,7 @@ export function Settlements() {
   }, [orders, settlements]);
 
   const hasPendingRequest = useMemo(() => {
-    return settlements.some(s => s.status === 'pending_request');
+    return settlements.some(s => s.status === 'pending');
   }, [settlements]);
 
   // --- ACTIONS ---
@@ -237,7 +235,7 @@ export function Settlements() {
         .from('vendor_settlements')
         .select('*', { count: 'exact', head: true })
         .eq('vendor_id', currentVendorId)
-        .in('status', ['pending_request', 'processing', 'paid'])
+        .in('status', ['pending', 'paid'])
         .gte('created_at', firstDayOfMonth)
         .lte('created_at', lastDayOfMonth);
 
@@ -259,7 +257,7 @@ export function Settlements() {
         .from('vendor_settlements')
         .select('order_ids')
         .eq('vendor_id', currentVendorId)
-        .in('status', ['pending_request', 'processing']);
+        .eq('status', 'pending');
 
       if (settlementError) throw settlementError;
 
@@ -312,7 +310,7 @@ export function Settlements() {
           {
             vendor_id: currentVendorId,
             amount: totalAmount,
-            status: 'pending_request',
+            status: 'pending',
             order_count: orderCount,
             order_ids: orderIds,
             created_at: new Date().toISOString(),
@@ -588,19 +586,19 @@ export function Settlements() {
             <ul className="text-xs text-muted-foreground space-y-2.5 list-none font-medium">
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Vendor payments will be processed **weekly every Monday** only.[cite: 3]</span>
+                <span>Vendor payments will be processed **weekly every Monday** only.</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Dispatches operate exclusively within the standard working hours of banks.[cite: 3]</span>
+                <span>Dispatches operate exclusively within the standard working hours of banks.</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span className="text-amber-600 dark:text-amber-400 font-semibold">Minimum settlement request threshold is ₹500.00. Always check and double-verify your bank details when submitting.[cite: 3]</span>
+                <span className="text-amber-600 dark:text-amber-400 font-semibold">Minimum settlement request threshold is ₹500.00. Always check and double-verify your bank details when submitting.</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Balances computed completely from final metric workspace configurations. Thank you.[cite: 3]</span>
+                <span>Balances computed completely from final metric workspace configurations. Thank you.</span>
               </li>
             </ul>
           </div>
@@ -797,7 +795,7 @@ export function Settlements() {
 
               </div>
 
-              <div className="flex items-center gap-2 pt-2 border-t border-border/40 text-xs font-semibold">
+              <div className="flex items-center gap-2 pt-2 border-border/40 text-xs font-semibold">
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}

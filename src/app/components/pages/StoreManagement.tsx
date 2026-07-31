@@ -75,8 +75,8 @@ export default function StoreManagement() {
   // --- TOAST NOTIFICATIONS STATE ---
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // --- INDEPENDENT SECTIONS LOAD/SAVE STATES ---
-  const [savingSection, setSavingSection] = useState<string | null>(null);
+  // --- SAVE STATE ---
+  const [isSavingAll, setIsSavingAll] = useState<boolean>(false);
   const [verifyingAddress, setVerifyingAddress] = useState<boolean>(false);
 
   // --- MAP PICKER STATE ---
@@ -257,7 +257,7 @@ export default function StoreManagement() {
 
         const vendorRes = await getCurrentVendor();
         if (!vendorRes.success || !vendorRes.data) {
-          throw new Error(vendorRes.error || 'Failed to locate vendor token metadata.');
+          throw new Error(vendorRes.error || 'Failed to locate vendor.');
         }
 
         const currentId = vendorRes.data.id;
@@ -268,13 +268,12 @@ export default function StoreManagement() {
 
         const profileRes = await getVendorProfile(currentId);
         if (!profileRes.success || !profileRes.data) {
-          throw new Error(profileRes.error || 'Failed to sync structural profile values.');
+          throw new Error(profileRes.error || 'Failed to sync profile.');
         }
 
         const shopName = vendorRes.data.shop_name;
         populateProfileData(profileRes.data, shopName);
 
-        // Realtime sync subscription on vendor_profiles for synchronized state changes across tabs
         profileChannel = supabase
           .channel(`store-mgmt-${currentId}`)
           .on(
@@ -294,7 +293,7 @@ export default function StoreManagement() {
           .subscribe();
 
       } catch (err: any) {
-        showToast(err.message || 'Error processing sync sequence.', 'error');
+        showToast(err.message || 'Error loading profile data.', 'error');
       } finally {
         setLoading(false);
       }
@@ -314,7 +313,6 @@ export default function StoreManagement() {
     const todayName = dayNames[now.getDay()] as DayName;
     const todaySchedule = schedule[todayName] || { open: '09:00', close: '22:00', closed: false };
 
-    // Parse time string "HH:MM" into total minutes from midnight
     const parseMins = (timeStr: string) => {
       if (!timeStr) return 0;
       const [h, m] = timeStr.split(':').map(Number);
@@ -325,7 +323,6 @@ export default function StoreManagement() {
     const openMins = parseMins(todaySchedule.open);
     const closeMins = parseMins(todaySchedule.close);
 
-    // 1. EVALUATE MANUAL OVERRIDE FIRST (Open, Busy, or Closed)
     if (manualOverride) {
       if (storeStatus === 'closed') {
         return {
@@ -357,7 +354,6 @@ export default function StoreManagement() {
       };
     }
 
-    // 2. CHECK CLOSED ALL DAY SCHEDULE
     if (todaySchedule.closed) {
       return {
         status: 'CLOSED' as const,
@@ -369,13 +365,11 @@ export default function StoreManagement() {
       };
     }
 
-    // 3. EVALUATE SCHEDULE WITH OVERNIGHT CROSS-MIDNIGHT SUPPORT
     const isOvernight = closeMins <= openMins;
     let isOpenNow = false;
     let minsLeft = 0;
 
     if (isOvernight) {
-      // Overnight schedule (e.g., Open 08:00 AM, Close 03:00 AM next day)
       if (currentMins >= openMins) {
         isOpenNow = true;
         minsLeft = (closeMins + 1440) - currentMins;
@@ -384,7 +378,6 @@ export default function StoreManagement() {
         minsLeft = closeMins - currentMins;
       }
     } else {
-      // Standard same-day schedule (e.g., Open 09:00 AM, Close 10:00 PM)
       if (currentMins >= openMins && currentMins < closeMins) {
         isOpenNow = true;
         minsLeft = closeMins - currentMins;
@@ -428,7 +421,6 @@ export default function StoreManagement() {
       };
     }
 
-    // 4. PRE-OPENING COUNTDOWN
     if (!isOvernight && currentMins < openMins) {
       const minsToOpen = openMins - currentMins;
       const h = Math.floor(minsToOpen / 60);
@@ -455,7 +447,6 @@ export default function StoreManagement() {
     };
   }, [schedule, storeStatus, manualOverride]);
 
-  // Handle Auto Close Effect
   useEffect(() => {
     if (
       currentEvaluation.status === 'AUTO_CLOSED' &&
@@ -466,7 +457,6 @@ export default function StoreManagement() {
       const nowIso = new Date().toISOString();
       setStoreStatus('closed');
       
-      // Centralized single function update for auto-closing stores
       updateStoreOperations(vendorId, {
         store_status: 'closed',
         auto_closed_at: nowIso,
@@ -479,7 +469,6 @@ export default function StoreManagement() {
     }
   }, [currentEvaluation.status, storeStatus, manualOverride, vendorId]);
 
-  // Manual Override Status Change
   const handleManualStatusChange = async (newStatus: 'open' | 'busy' | 'closed') => {
     if (!vendorId) return;
 
@@ -488,7 +477,6 @@ export default function StoreManagement() {
 
     const nowIso = new Date().toISOString();
 
-    // Single update function call committing all parameters together
     const res = await updateStoreOperations(vendorId, {
       store_status: newStatus,
       business_hours: schedule,
@@ -504,7 +492,6 @@ export default function StoreManagement() {
     }
   };
 
-  // Resume Auto Schedule
   const handleResetToAuto = async () => {
     if (!vendorId) return;
 
@@ -512,7 +499,6 @@ export default function StoreManagement() {
     setManualOverride(false);
     setStoreStatus(resolvedStatus);
 
-    // Single update function resetting override and updating status
     const res = await updateStoreOperations(vendorId, {
       store_status: resolvedStatus,
       business_hours: schedule,
@@ -542,7 +528,6 @@ export default function StoreManagement() {
     }));
   };
 
-  // HANDLERS FOR CATEGORY UI
   const handlePrimaryCategoryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setPrimaryCategoryId(e.target.value);
   };
@@ -616,77 +601,64 @@ export default function StoreManagement() {
     }
   };
 
-  // --- SAVE ACTIONS ---
+  // --- EXISTING SAVE FUNCTIONS ---
   const saveStoreInfo = async () => {
     if (!vendorId) return;
     if (!storeName.trim()) {
-      showToast('Store Name tracking constraint requires valid strings.', 'error');
-      return;
+      throw new Error('Store Name field is required.');
     }
     if (!primaryCategoryId) {
-      showToast('One primary category selection is mandatory.', 'error');
-      return;
+      throw new Error('One primary category selection is required.');
     }
 
-    setSavingSection('info');
-    try {
-      const primaryObj = availableCategories.find(c => c.id === primaryCategoryId);
-      if (!primaryObj) {
-        throw new Error('Selected primary category configuration parameters are out of sync.');
-      }
-
-      const primaryName = primaryObj.name.trim();
-      let updatedList = [...additionalCategoryNames.map(n => n.trim())];
-      if (!updatedList.includes(primaryName)) {
-        updatedList.push(primaryName);
-      }
-      
-      updatedList = Array.from(new Set(updatedList))
-        .filter(Boolean)
-        .sort((a, b) => a.localeCompare(b));
-
-      const { error: vendorError } = await supabase
-        .from('vendors')
-        .update({ category_id: primaryCategoryId })
-        .eq('id', vendorId);
-
-      if (vendorError) throw vendorError;
-
-      const res = await updateVendorProfile(vendorId, {
-        store_name: storeName.trim(),
-        tagline: tagline.trim(),
-        avatar_url: avatarUrl,
-        banner_url: bannerUrl,
-        categories: updatedList
-      });
-
-      if (!res.success) throw new Error(res.error || 'Extended vendor profiles updating routine failure.');
-      
-      setAdditionalCategoryNames(updatedList.filter(n => n !== primaryName));
-      showToast('Store Information saved successfully.', 'success');
-    } catch (err: any) {
-      showToast(err.message || 'Save execution fault.', 'error');
-    } finally {
-      setSavingSection(null);
+    const primaryObj = availableCategories.find(c => c.id === primaryCategoryId);
+    if (!primaryObj) {
+      throw new Error('Selected primary category configuration parameters are out of sync.');
     }
+
+    const primaryName = primaryObj.name.trim();
+    let updatedList = [...additionalCategoryNames.map(n => n.trim())];
+    if (!updatedList.includes(primaryName)) {
+      updatedList.push(primaryName);
+    }
+    
+    updatedList = Array.from(new Set(updatedList))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    const { error: vendorError } = await supabase
+      .from('vendors')
+      .update({ category_id: primaryCategoryId })
+      .eq('id', vendorId);
+
+    if (vendorError) throw vendorError;
+
+    const res = await updateVendorProfile(vendorId, {
+      store_name: storeName.trim(),
+      tagline: tagline.trim(),
+      avatar_url: avatarUrl,
+      banner_url: bannerUrl,
+      categories: updatedList
+    });
+
+    if (!res.success) throw new Error(res.error || 'Failed to update store info.');
+    
+    setAdditionalCategoryNames(updatedList.filter(n => n !== primaryName));
   };
 
   const saveLocation = async () => {
     if (!vendorId) return;
     if (pinCode && !/^\d{6}$/.test(pinCode.trim())) {
-      showToast('PIN format sequence must follow standard 6-digit constraints.', 'error');
-      return;
+      throw new Error('PIN Code must be a 6-digit number.');
     }
 
     const parsedLat = parseFloat(latitude);
     const parsedLng = parseFloat(longitude);
 
     if (isNaN(parsedLat) || isNaN(parsedLng)) {
-      showToast('Store location coordinates are incomplete. Please verify location or pick on map.', 'error');
-      return;
+      throw new Error('Store location coordinates are incomplete. Please verify location or pick on map.');
     }
 
-    setSavingSection('location');
     const res = await updateVendorProfile(vendorId, {
       address_line1: addressLine1,
       address_line2: addressLine2,
@@ -696,15 +668,12 @@ export default function StoreManagement() {
       latitude: parsedLat,
       longitude: parsedLng
     });
-    setSavingSection(null);
-    if (res.success) showToast('Store location saved successfully.', 'success');
-    else showToast(res.error || 'Save failed.', 'error');
+
+    if (!res.success) throw new Error(res.error || 'Failed to save location.');
   };
 
-  // Save Business Hours & Operational Data in Single Call
   const saveOperations = async () => {
     if (!vendorId) return;
-    setSavingSection('operations');
 
     const resolvedStatus = manualOverride
       ? storeStatus
@@ -712,7 +681,6 @@ export default function StoreManagement() {
       ? 'open'
       : 'closed';
 
-    // Save complete business_hours, store_status, manual_override, manual_override_at together
     const res = await updateStoreOperations(vendorId, {
       store_status: resolvedStatus,
       business_hours: schedule,
@@ -723,19 +691,12 @@ export default function StoreManagement() {
       preparation_time_minutes: null
     });
 
-    setSavingSection(null);
-    if (res.success) {
-      showToast('Operational schedule updated successfully.', 'success');
-      // Refetch and reload page state strictly from DB
-      if (res.data) populateProfileData(res.data);
-    } else {
-      showToast(res.error || 'Save failed.', 'error');
-    }
+    if (!res.success) throw new Error(res.error || 'Failed to save operations.');
+    if (res.data) populateProfileData(res.data);
   };
 
   const saveDocuments = async () => {
     if (!vendorId) return;
-    setSavingSection('documents');
     const res = await updateBusinessDocuments(vendorId, {
       pan_number: panNumber,
       gst_number: gstNumber,
@@ -743,14 +704,12 @@ export default function StoreManagement() {
       drug_license: displaysDrugLicense ? drugLicense : null,
       drug_license_expiry: displaysDrugLicense ? drugLicenseExpiry : null
     });
-    setSavingSection(null);
-    if (res.success) showToast('Verification vectors saved.', 'success');
-    else showToast(res.error || 'Save failed.', 'error');
+
+    if (!res.success) throw new Error(res.error || 'Failed to save business documents.');
   };
 
   const saveBankDetails = async () => {
     if (!vendorId) return;
-    setSavingSection('bank');
     const res = await updateBankDetails(vendorId, {
       account_holder_name: accountHolderName,
       bank_name: bankName,
@@ -758,9 +717,28 @@ export default function StoreManagement() {
       ifsc_code: ifscCode,
       upi_id: upiId
     });
-    setSavingSection(null);
-    if (res.success) showToast('Bank details saved.', 'success');
-    else showToast(res.error || 'Save failed.', 'error');
+
+    if (!res.success) throw new Error(res.error || 'Failed to save bank details.');
+  };
+
+  // --- SAVE EVERYTHING TOGETHER ---
+  const handleSaveAll = async () => {
+    if (!vendorId) return;
+    setIsSavingAll(true);
+
+    try {
+      await saveStoreInfo();
+      await saveLocation();
+      await saveOperations();
+      await saveDocuments();
+      await saveBankDetails();
+
+      showToast('Store settings updated successfully.', 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Error saving changes.', 'error');
+    } finally {
+      setIsSavingAll(false);
+    }
   };
 
   if (loading) {
@@ -785,9 +763,20 @@ export default function StoreManagement() {
       )}
 
       {/* HEADER SECTION */}
-      <div className="pb-4 border-b border-slate-200 dark:border-slate-800">
-        <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Store Management</h1>
-        <p className="text-slate-500 text-sm mt-1">Configure business operating metadata controls, weekly schedules, and verification references</p>
+      <div className="pb-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">Store Management</h1>
+          <p className="text-slate-500 text-sm mt-1">Manage your store details, weekly schedules, and business verification</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleSaveAll}
+          disabled={isSavingAll}
+          className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-xs shadow-emerald-500/10 flex items-center gap-1.5 cursor-pointer"
+        >
+          {isSavingAll && <Loader2 size={14} className="animate-spin" />}
+          Save All Changes
+        </button>
       </div>
 
       {/* SINGLE COLUMN LAYOUT */}
@@ -828,13 +817,13 @@ export default function StoreManagement() {
                 <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block">Primary Category</label>
                 {categoriesLoading ? (
                   <div className="flex items-center gap-2 text-xs text-slate-400 py-1.5">
-                    <Loader2 size={12} className="animate-spin text-emerald-500" /> Syncing tracking array...
+                    <Loader2 size={12} className="animate-spin text-emerald-500" /> Loading categories...
                   </div>
                 ) : (
                   <select
                     value={primaryCategoryId}
                     onChange={handlePrimaryCategoryChange}
-                    className="w-full h-10 px-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                    className="w-full h-10 px-3 bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
                   >
                     <option value="" disabled>Select Category ▼</option>
                     {availableCategories.map(cat => (
@@ -854,11 +843,11 @@ export default function StoreManagement() {
                     value={categorySearch}
                     onChange={e => setCategorySearch(e.target.value)}
                     placeholder="Search Categories"
-                    className="w-full h-10 pl-9 pr-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
+                    className="w-full h-10 pl-9 pr-3 bg-white dark:bg-slate-955 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
                   />
                 </div>
 
-                <div className="max-h-40 overflow-y-auto border border-slate-100 dark:border-slate-900 bg-white dark:bg-slate-950 rounded-xl p-3 grid grid-cols-2 gap-2 scrollbar-thin">
+                <div className="max-h-40 overflow-y-auto border border-slate-100 dark:border-slate-900 bg-white dark:bg-slate-955 rounded-xl p-3 grid grid-cols-2 gap-2 scrollbar-thin">
                   {filteredAvailableCategories.length > 0 ? (
                     filteredAvailableCategories.map(cat => {
                       const isChecked = additionalCategoryNames.includes(cat.name.trim());
@@ -893,7 +882,7 @@ export default function StoreManagement() {
                           className={`text-xs font-medium px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition-all select-none ${
                             isPrimary 
                               ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 font-bold'
-                              : 'bg-white dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                              : 'bg-white dark:bg-slate-955 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
                           }`}
                         >
                           <Tag size={12} className={isPrimary ? 'text-emerald-500' : 'text-slate-400'} />
@@ -910,22 +899,10 @@ export default function StoreManagement() {
                     })}
                   </div>
                 ) : (
-                  <span className="text-xs text-slate-400 italic">No categories selected. Required baseline mapping missing.</span>
+                  <span className="text-xs text-slate-400 italic">No categories selected.</span>
                 )}
               </div>
             </div>
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button 
-              type="button" 
-              onClick={saveStoreInfo}
-              disabled={savingSection !== null}
-              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-xs shadow-emerald-500/10 flex items-center gap-1.5"
-            >
-              {savingSection === 'info' && <Loader2 size={12} className="animate-spin" />}
-              Save Changes
-            </button>
           </div>
         </section>
 
@@ -1057,25 +1034,13 @@ export default function StoreManagement() {
               </div>
             )}
           </div>
-
-          <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-900">
-            <button 
-              type="button" 
-              onClick={saveLocation}
-              disabled={savingSection !== null}
-              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
-            >
-              {savingSection === 'location' && <Loader2 size={12} className="animate-spin" />}
-              Save Changes
-            </button>
-          </div>
         </section>
 
         {/* SECTION 3: BUSINESS HOURS & LIVE STORE STATUS */}
         <section className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs space-y-6">
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
             <Clock className="text-emerald-500" size={18} />
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">Business Hours & Availability</h2>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">Business Hours</h2>
           </div>
 
           {/* 1. LIVE STORE STATUS DISPLAY */}
@@ -1098,7 +1063,7 @@ export default function StoreManagement() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 rounded-xl bg-white p-3.5 dark:bg-slate-950 border border-slate-200/60 dark:border-slate-800">
+              <div className="flex items-center gap-3 rounded-xl bg-white p-3.5 dark:bg-slate-955 border border-slate-200/60 dark:border-slate-800">
                 <Clock className="h-5 w-5 text-emerald-500 shrink-0" />
                 <div>
                   <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
@@ -1238,7 +1203,7 @@ export default function StoreManagement() {
                             type="time"
                             value={daySchedule.open}
                             onChange={(e) => handleTimeChange(day, 'open', e.target.value)}
-                            className="rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                            className="rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-900 dark:border-slate-800 dark:bg-slate-955 dark:text-white"
                           />
                         </div>
 
@@ -1250,7 +1215,7 @@ export default function StoreManagement() {
                             type="time"
                             value={daySchedule.close}
                             onChange={(e) => handleTimeChange(day, 'close', e.target.value)}
-                            className="rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-white"
+                            className="rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-900 dark:border-slate-800 dark:bg-slate-955 dark:text-white"
                           />
                         </div>
                       </div>
@@ -1263,18 +1228,6 @@ export default function StoreManagement() {
                 );
               })}
             </div>
-          </div>
-
-          <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-900">
-            <button 
-              type="button" 
-              onClick={saveOperations}
-              disabled={savingSection !== null}
-              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
-            >
-              {savingSection === 'operations' && <Loader2 size={12} className="animate-spin" />}
-              Save Changes
-            </button>
           </div>
         </section>
 
@@ -1319,7 +1272,7 @@ export default function StoreManagement() {
             {displaysDrugLicense && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-dashed border-slate-100 dark:border-slate-900">
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Drug Licence Number</label>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Drug License Number</label>
                   <input 
                     type="text" 
                     value={drugLicense} 
@@ -1328,7 +1281,7 @@ export default function StoreManagement() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Drug Licence Expiry</label>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Drug License Expiry</label>
                   <input 
                     type="date" 
                     value={drugLicenseExpiry} 
@@ -1338,18 +1291,6 @@ export default function StoreManagement() {
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="flex justify-end">
-            <button 
-              type="button" 
-              onClick={saveDocuments}
-              disabled={savingSection !== null}
-              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
-            >
-              {savingSection === 'documents' && <Loader2 size={12} className="animate-spin" />}
-              Save Changes
-            </button>
           </div>
         </section>
 
@@ -1411,18 +1352,6 @@ export default function StoreManagement() {
                 />
               </div>
             </div>
-          </div>
-
-          <div className="flex justify-end">
-            <button 
-              type="button" 
-              onClick={saveBankDetails}
-              disabled={savingSection !== null}
-              className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5"
-            >
-              {savingSection === 'bank' && <Loader2 size={12} className="animate-spin" />}
-              Save Changes
-            </button>
           </div>
         </section>
 
