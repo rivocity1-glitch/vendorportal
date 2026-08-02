@@ -26,7 +26,7 @@ interface VendorSettlement {
   id: string;
   vendor_id: string;
   amount: number;
-  status: 'pending' | 'paid' | 'rejected';
+  status: 'REQUESTED' | 'PAID' | 'AVAILABLE';
   payment_method: string | null;
   utr_number: string | null;
   remarks: string | null;
@@ -76,11 +76,11 @@ export function Settlements() {
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
-      case 'paid':
+      case 'PAID':
         return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20';
-      case 'pending':
+      case 'REQUESTED':
         return 'bg-amber-500/10 text-amber-500 border-amber-500/20';
-      case 'rejected':
+      case 'AVAILABLE':
         return 'bg-rose-500/10 text-rose-500 border-rose-500/20';
       default:
         return 'bg-muted text-muted-foreground border-border';
@@ -190,10 +190,10 @@ export function Settlements() {
     const paidSettlement = getPaidSettlement(orders);
 
     const pendingRequestsAmt = settlements
-      .filter(s => s.status === 'pending')
+      .filter(s => s.status === 'REQUESTED')
       .reduce((sum, s) => sum + (s.amount || 0), 0);
 
-    const lastSettlementItem = settlements.find(s => s.status === 'paid');
+    const lastSettlementItem = settlements.find(s => s.status === 'PAID');
 
     return {
       pendingSettlement,
@@ -204,7 +204,7 @@ export function Settlements() {
   }, [orders, settlements]);
 
   const hasPendingRequest = useMemo(() => {
-    return settlements.some(s => s.status === 'pending');
+    return settlements.some(s => s.status === 'REQUESTED');
   }, [settlements]);
 
   // --- ACTIONS ---
@@ -235,7 +235,7 @@ export function Settlements() {
         .from('vendor_settlements')
         .select('*', { count: 'exact', head: true })
         .eq('vendor_id', currentVendorId)
-        .in('status', ['pending', 'paid'])
+        .in('status', ['REQUESTED', 'PAID'])
         .gte('created_at', firstDayOfMonth)
         .lte('created_at', lastDayOfMonth);
 
@@ -257,7 +257,7 @@ export function Settlements() {
         .from('vendor_settlements')
         .select('order_ids')
         .eq('vendor_id', currentVendorId)
-        .eq('status', 'pending');
+        .eq('status', 'REQUESTED');
 
       if (settlementError) throw settlementError;
 
@@ -310,7 +310,7 @@ export function Settlements() {
           {
             vendor_id: currentVendorId,
             amount: totalAmount,
-            status: 'pending',
+            status: 'REQUESTED',
             order_count: orderCount,
             order_ids: orderIds,
             created_at: new Date().toISOString(),
