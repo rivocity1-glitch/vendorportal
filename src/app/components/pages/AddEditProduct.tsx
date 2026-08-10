@@ -1,10 +1,20 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Upload, X, ChevronLeft, Loader2, Sparkles, Percent, Save } from "lucide-react";
+import {
+  Upload,
+  X,
+  ChevronLeft,
+  Loader2,
+  Sparkles,
+  Percent,
+  Save
+} from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
 interface StoreCategory {
   id: string;
   name: string;
+  status?: string;
+  display_order?: number;
 }
 
 interface Props {
@@ -17,12 +27,14 @@ const unitOptions = ["Gm", "Kg", "Ltr", "Ml", "Pcs", "Pack"];
 
 export function AddEditProduct({ onNavigate, product }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [imageUrl, setImageUrl] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isImageError, setIsImageError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
   const [form, setForm] = useState({
@@ -42,16 +54,46 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     barcode: ""
   });
 
+  // ---------------------------------------------------------
+  // CANONICAL CATEGORY LOADING
+  // Source of truth:
+  // public.product_categories
+  // ---------------------------------------------------------
   useEffect(() => {
+    let cancelled = false;
+
     const fetchCategories = async () => {
-      const { data, error } = await supabase.from("product_categories").select("id, name");
-      if (!error && data) {
-        setCategories(data);
+      try {
+        const { data, error } = await supabase
+          .from("product_categories")
+          .select("id, name, status, display_order")
+          .eq("status", "active")
+          .order("display_order", { ascending: true })
+          .order("name", { ascending: true });
+
+        if (error) {
+          console.error("Failed to load product categories:", error);
+          return;
+        }
+
+        if (!cancelled) {
+          setCategories(data || []);
+        }
+      } catch (err) {
+        console.error("Category loading exception:", err);
       }
     };
+
     fetchCategories();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  // ---------------------------------------------------------
+  // LOAD PRODUCT FOR EDITING
+  // ---------------------------------------------------------
   useEffect(() => {
     if (product) {
       let parsedWeightVal = "";
@@ -60,9 +102,14 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       if (product.weight) {
         const weightStr = product.weight.toString().trim();
         const numericMatch = weightStr.match(/^[\d.]+/);
+
         if (numericMatch) {
           parsedWeightVal = numericMatch[0];
-          const unitMatch = weightStr.replace(parsedWeightVal, "").trim();
+
+          const unitMatch = weightStr
+            .replace(parsedWeightVal, "")
+            .trim();
+
           if (unitOptions.includes(unitMatch)) {
             parsedWeightUnit = unitMatch;
           }
@@ -74,48 +121,96 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       setForm({
         name: product.name || "",
         category_id: product.category_id || "",
-        price: product.price !== undefined && product.price !== null ? String(product.price) : "",
-        cost_price: product.cost_price !== undefined && product.cost_price !== null ? String(product.cost_price) : "",
-        mrp: product.mrp !== undefined && product.mrp !== null ? String(product.mrp) : "",
-        gst_slab: product.gst_slab !== undefined && product.gst_slab !== null 
-          ? String(product.gst_slab).replace("%", "").trim() 
-          : "5",
+        price:
+          product.price !== undefined && product.price !== null
+            ? String(product.price)
+            : "",
+        cost_price:
+          product.cost_price !== undefined &&
+          product.cost_price !== null
+            ? String(product.cost_price)
+            : "",
+        mrp:
+          product.mrp !== undefined && product.mrp !== null
+            ? String(product.mrp)
+            : "",
+        gst_slab:
+          product.gst_slab !== undefined &&
+          product.gst_slab !== null
+            ? String(product.gst_slab)
+                .replace("%", "")
+                .trim()
+            : "5",
         batch_number: product.batch_number || "",
         expiry_date: product.expiry_date || "",
         weightValue: parsedWeightVal,
         weightUnit: parsedWeightUnit,
         description: product.description || "",
-        stock: product.stock !== undefined && product.stock !== null ? String(product.stock) : "",
+        stock:
+          product.stock !== undefined && product.stock !== null
+            ? String(product.stock)
+            : "",
         sku: product.sku || "",
         barcode: product.barcode || ""
       });
+
       setImageUrl(product.image_url || "");
       setImageFile(null);
       setIsImageError(false);
     } else {
       setForm({
-        name: "", category_id: "", price: "", cost_price: "", mrp: "", gst_slab: "5",
-        batch_number: "", expiry_date: "", weightValue: "", weightUnit: "Gm",
-        description: "", stock: "", sku: "", barcode: ""
+        name: "",
+        category_id: "",
+        price: "",
+        cost_price: "",
+        mrp: "",
+        gst_slab: "5",
+        batch_number: "",
+        expiry_date: "",
+        weightValue: "",
+        weightUnit: "Gm",
+        description: "",
+        stock: "",
+        sku: "",
+        barcode: ""
       });
+
       setImageUrl("");
       setImageFile(null);
       setIsImageError(false);
     }
   }, [product]);
 
-  const handleField = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+  const handleField = (key: string, value: string) => {
+    setForm(current => ({
+      ...current,
+      [key]: value
+    }));
+  };
 
+  // ---------------------------------------------------------
+  // IMAGE VALIDATION
+  // ---------------------------------------------------------
   const validateAndSetImage = (file: File) => {
-    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    const validTypes = [
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/webp"
+    ];
+
     if (!validTypes.includes(file.type)) {
-      alert("Invalid format. Accepted formats are: JPG, JPEG, PNG, WEBP");
+      alert(
+        "Invalid format. Accepted formats are: JPG, JPEG, PNG, WEBP"
+      );
       return;
     }
+
     if (file.size > 5 * 1024 * 1024) {
       alert("Maximum file size exceeded. Max size limit is 5MB.");
       return;
     }
+
     setImageFile(file);
     setImageUrl(URL.createObjectURL(file));
     setIsImageError(false);
@@ -124,7 +219,11 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
+
+    if (
+      e.type === "dragenter" ||
+      e.type === "dragover"
+    ) {
       setIsDragActive(true);
     } else if (e.type === "dragleave") {
       setIsDragActive(false);
@@ -134,13 +233,20 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+
     setIsDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+
+    if (
+      e.dataTransfer.files &&
+      e.dataTransfer.files[0]
+    ) {
       validateAndSetImage(e.dataTransfer.files[0]);
     }
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     if (e.target.files && e.target.files[0]) {
       validateAndSetImage(e.target.files[0]);
     }
@@ -148,35 +254,85 @@ export function AddEditProduct({ onNavigate, product }: Props) {
 
   const handleRemoveImage = async () => {
     if (!imageUrl) return;
-    if (imageUrl.startsWith("http") && !imageFile) {
+
+    if (
+      imageUrl.startsWith("http") &&
+      !imageFile
+    ) {
       try {
         const urlParts = imageUrl.split("/");
-        const fileName = urlParts[urlParts.length - 1];
+        const fileName =
+          urlParts[urlParts.length - 1];
+
         if (fileName) {
-          await supabase.storage.from("product-images").remove([fileName]);
+          await supabase.storage
+            .from("product-images")
+            .remove([fileName]);
         }
       } catch (err) {
-        console.error("Failed to delete file from storage:", err);
+        console.error(
+          "Failed to delete file from storage:",
+          err
+        );
       }
     }
+
     setImageUrl("");
     setImageFile(null);
     setIsImageError(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
-  const handleSaveProduct = async (e: React.FormEvent) => {
+  // ---------------------------------------------------------
+  // SAVE PRODUCT
+  // ---------------------------------------------------------
+  const handleSaveProduct = async (
+    e: React.FormEvent
+  ) => {
     e.preventDefault();
 
-    if (!form.name.trim() || !form.category_id || !form.price || !form.cost_price || !form.mrp || !form.stock) {
+    if (
+      !form.name.trim() ||
+      !form.category_id ||
+      !form.price ||
+      !form.cost_price ||
+      !form.mrp ||
+      !form.stock
+    ) {
       alert("Please fill in all required fields.");
       return;
     }
 
-    const selectedCategoryName = categories.find(c => c.id === form.category_id)?.name;
+    // Always resolve the category from the canonical
+    // product_categories table loaded above.
+    const selectedCategory =
+      categories.find(
+        category =>
+          category.id === form.category_id
+      );
+
+    if (!selectedCategory) {
+      alert(
+        "Selected category is no longer active. Please select a valid category."
+      );
+      return;
+    }
+
+    const selectedCategoryName =
+      selectedCategory.name.trim();
+
+    // Medical products require batch and expiry data.
     if (selectedCategoryName === "Medical") {
-      if (!form.batch_number.trim() || !form.expiry_date.trim()) {
-        alert("Batch Number and Expiry Date are strictly required for products under the Medical category.");
+      if (
+        !form.batch_number.trim() ||
+        !form.expiry_date.trim()
+      ) {
+        alert(
+          "Batch Number and Expiry Date are strictly required for products under the Medical category."
+        );
         return;
       }
     }
@@ -184,323 +340,644 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     try {
       setIsSubmitting(true);
 
-      const { data: authData } = await supabase.auth.getUser();
-      if (!authData?.user) throw new Error("User session not found.");
+      const { data: authData } =
+        await supabase.auth.getUser();
 
-      const { data: vendor, error: vendorErr } = await supabase
-        .from("vendors")
-        .select("id")
-        .eq("auth_user_id", authData.user.id)
-        .single();
+      if (!authData?.user) {
+        throw new Error("User session not found.");
+      }
 
-      if (vendorErr || !vendor) throw new Error("Vendor profile missing.");
+      // -----------------------------------------------------
+      // RESOLVE CURRENT VENDOR
+      // -----------------------------------------------------
+      const { data: vendor, error: vendorErr } =
+        await supabase
+          .from("vendors")
+          .select("id")
+          .eq(
+            "auth_user_id",
+            authData.user.id
+          )
+          .single();
+
+      if (vendorErr || !vendor) {
+        throw new Error("Vendor profile missing.");
+      }
 
       const editingId = product?.id;
 
+      // -----------------------------------------------------
+      // DUPLICATE PRODUCT CHECK
+      // -----------------------------------------------------
       if (!editingId) {
-        const { data: existingProd, error: checkErr } = await supabase
+        const {
+          data: existingProd,
+          error: checkErr
+        } = await supabase
           .from("products")
           .select("id")
           .eq("vendor_id", vendor.id)
-          .ilike("name", form.name.trim())
+          .ilike(
+            "name",
+            form.name.trim()
+          )
           .maybeSingle();
 
-        if (checkErr) throw checkErr;
+        if (checkErr) {
+          throw checkErr;
+        }
 
         if (existingProd) {
-          alert("Product already exists. Please edit the existing product.");
+          alert(
+            "Product already exists. Please edit the existing product."
+          );
           setIsSubmitting(false);
           return;
         }
       } else {
-        const { data: conflictingProd, error: checkErr } = await supabase
+        const {
+          data: conflictingProd,
+          error: checkErr
+        } = await supabase
           .from("products")
           .select("id")
           .eq("vendor_id", vendor.id)
-          .ilike("name", form.name.trim())
+          .ilike(
+            "name",
+            form.name.trim()
+          )
           .neq("id", editingId)
           .maybeSingle();
 
-        if (checkErr) throw checkErr;
+        if (checkErr) {
+          throw checkErr;
+        }
 
         if (conflictingProd) {
-          alert("Product already exists. Please edit the existing product.");
+          alert(
+            "Product already exists. Please edit the existing product."
+          );
           setIsSubmitting(false);
           return;
         }
       }
 
+      // -----------------------------------------------------
+      // IMAGE UPLOAD
+      // -----------------------------------------------------
       let finalImageUrl = imageUrl;
+
       if (imageFile) {
         setIsUploading(true);
-        const fileExt = imageFile.name.split('.').pop() || "jpg";
+
+        const fileExt =
+          imageFile.name.split(".").pop() ||
+          "jpg";
+
         const fileName = `${crypto.randomUUID()}.${fileExt}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from("product-images")
-          .upload(fileName, imageFile);
+        const { error: uploadError } =
+          await supabase.storage
+            .from("product-images")
+            .upload(
+              fileName,
+              imageFile
+            );
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          throw uploadError;
+        }
 
-        const { data: publicUrlData } = supabase.storage
-          .from("product-images")
-          .getPublicUrl(fileName);
+        const { data: publicUrlData } =
+          supabase.storage
+            .from("product-images")
+            .getPublicUrl(fileName);
 
-        finalImageUrl = publicUrlData.publicUrl;
+        finalImageUrl =
+          publicUrlData.publicUrl;
+
         setIsUploading(false);
       }
 
-      const finalWeightString = form.weightValue.trim()
-        ? `${form.weightValue.trim()} ${form.weightUnit}`
-        : null;
+      // -----------------------------------------------------
+      // NORMALIZED PRODUCT VALUES
+      // -----------------------------------------------------
+      const finalWeightString =
+        form.weightValue.trim()
+          ? `${form.weightValue.trim()} ${form.weightUnit}`
+          : null;
 
-      const numericGst = parseFloat(form.gst_slab) || 0;
+      const numericGst =
+        parseFloat(form.gst_slab) || 0;
 
+      // IMPORTANT:
+      // category_id is always the UUID from
+      // public.product_categories.id.
+      //
+      // We do not store category names in products.
       const productPayload = {
         name: form.name.trim(),
-        category_id: form.category_id,
+        category_id: selectedCategory.id,
         price: parseFloat(form.price),
-        cost_price: parseFloat(form.cost_price),
+        cost_price: parseFloat(
+          form.cost_price
+        ),
         mrp: parseFloat(form.mrp),
         gst_slab: `${numericGst}%`,
         gst_rate: numericGst,
-        batch_number: form.batch_number || null,
-        expiry_date: form.expiry_date || null,
+        batch_number:
+          form.batch_number || null,
+        expiry_date:
+          form.expiry_date || null,
         weight: finalWeightString,
-        description: form.description || null,
-        stock: parseInt(form.stock) || 0,
-        image_url: finalImageUrl || null,
+        description:
+          form.description || null,
+        stock:
+          parseInt(form.stock) || 0,
+        image_url:
+          finalImageUrl || null,
         vendor_id: vendor.id,
-        sku: form.sku || null,
-        barcode: form.barcode || null
+        sku:
+          form.sku || null,
+        barcode:
+          form.barcode || null
       };
 
+      // -----------------------------------------------------
+      // UPDATE EXISTING PRODUCT
+      // -----------------------------------------------------
       if (editingId) {
-        const { error } = await supabase
-          .from("products")
-          .update(productPayload)
-          .eq("id", editingId);
+        const { error } =
+          await supabase
+            .from("products")
+            .update(productPayload)
+            .eq("id", editingId);
 
         if (error) {
           if (error.code === "23505") {
-            alert("Product already exists. Please edit the existing product.");
+            alert(
+              "Product already exists. Please edit the existing product."
+            );
             setIsSubmitting(false);
             return;
           }
+
           throw error;
         }
-      } else {
-        const { error } = await supabase.from("products").insert([productPayload]);
+      }
+
+      // -----------------------------------------------------
+      // INSERT NEW PRODUCT
+      // -----------------------------------------------------
+      else {
+        const { error } =
+          await supabase
+            .from("products")
+            .insert([
+              productPayload
+            ]);
 
         if (error) {
           if (error.code === "23505") {
-            alert("Product already exists. Please edit the existing product.");
+            alert(
+              "Product already exists. Please edit the existing product."
+            );
             setIsSubmitting(false);
             return;
           }
+
           throw error;
         }
       }
 
       onNavigate("products");
     } catch (err: any) {
-      console.error("Product preservation exception:", err);
-      alert(`Operation failed: ${err.message || err}`);
+      console.error(
+        "Product preservation exception:",
+        err
+      );
+
+      alert(
+        `Operation failed: ${
+          err.message || err
+        }`
+      );
     } finally {
       setIsSubmitting(false);
+      setIsUploading(false);
     }
   };
 
-  const sellPriceNum = parseFloat(form.price) || 0;
-  const costPriceNum = parseFloat(form.cost_price) || 0;
-  const gstPercent = parseFloat(form.gst_slab) || 0;
+  // ---------------------------------------------------------
+  // MARGIN CALCULATIONS
+  // ---------------------------------------------------------
+  const sellPriceNum =
+    parseFloat(form.price) || 0;
 
-  const taxableSellingPrice = sellPriceNum / (1 + gstPercent / 100);
-  const netProfit = costPriceNum > 0 && sellPriceNum > 0 ? taxableSellingPrice - costPriceNum : 0;
-  const profitPercentage = costPriceNum > 0 ? (netProfit / costPriceNum) * 100 : 0;
+  const costPriceNum =
+    parseFloat(form.cost_price) || 0;
+
+  const gstPercent =
+    parseFloat(form.gst_slab) || 0;
+
+  const taxableSellingPrice =
+    sellPriceNum /
+    (1 + gstPercent / 100);
+
+  const netProfit =
+    costPriceNum > 0 &&
+    sellPriceNum > 0
+      ? taxableSellingPrice -
+        costPriceNum
+      : 0;
+
+  const profitPercentage =
+    costPriceNum > 0
+      ? (netProfit /
+          costPriceNum) *
+        100
+      : 0;
+
+  const selectedCategoryName =
+    categories.find(
+      category =>
+        category.id ===
+        form.category_id
+    )?.name || "";
 
   return (
     <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-6">
+
+      {/* HEADER */}
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => onNavigate("products")}
+          onClick={() =>
+            onNavigate("products")
+          }
           className="w-9 h-9 rounded-lg border border-border flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-all"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
+
         <div>
-          <h1 className="text-xl font-bold text-foreground">{product ? "Edit Product" : "Add New Product"}</h1>
-          <p className="text-xs text-muted-foreground">List a new item with dynamic margin evaluations</p>
+          <h1 className="text-xl font-bold text-foreground">
+            {product
+              ? "Edit Product"
+              : "Add New Product"}
+          </h1>
+
+          <p className="text-xs text-muted-foreground">
+            List a new item with dynamic
+            margin evaluations
+          </p>
         </div>
       </div>
 
-      <form onSubmit={handleSaveProduct} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <form
+        onSubmit={handleSaveProduct}
+        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
+      >
+
+        {/* LEFT CONTENT */}
         <div className="lg:col-span-2 space-y-4">
+
+          {/* PRODUCT BASIC DETAILS */}
           <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
+
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Product Name *</label>
+              <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
+                Product Name *
+              </label>
+
               <input
                 type="text"
                 required
                 placeholder="e.g., Amul Full Cream Milk 1L"
                 value={form.name}
-                onChange={e => handleField("name", e.target.value)}
+                onChange={e =>
+                  handleField(
+                    "name",
+                    e.target.value
+                  )
+                }
                 className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981] focus:ring-2 focus:ring-[#10B981]/10"
               />
             </div>
 
+            {/* CANONICAL CATEGORY SELECT */}
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Category *</label>
+              <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
+                Category *
+              </label>
+
               <select
                 required
                 value={form.category_id}
-                onChange={e => handleField("category_id", e.target.value)}
+                onChange={e =>
+                  handleField(
+                    "category_id",
+                    e.target.value
+                  )
+                }
                 className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
               >
-                <option value="" disabled>Select category</option>
-                {categories.map(cat => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
+                <option
+                  value=""
+                  disabled
+                >
+                  {categories.length === 0
+                    ? "Loading categories..."
+                    : "Select category"}
+                </option>
+
+                {categories.map(
+                  category => (
+                    <option
+                      key={category.id}
+                      value={category.id}
+                    >
+                      {category.name}
+                    </option>
+                  )
+                )}
               </select>
             </div>
 
+            {/* PRICING */}
             <div className="grid grid-cols-3 gap-3">
+
               <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Wholesale (Cost) *</label>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
+                  Wholesale (Cost) *
+                </label>
+
                 <input
                   type="number"
                   step="0.01"
                   required
                   placeholder="0.00"
                   value={form.cost_price}
-                  onChange={e => handleField("cost_price", e.target.value)}
+                  onChange={e =>
+                    handleField(
+                      "cost_price",
+                      e.target.value
+                    )
+                  }
                   className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
                 />
               </div>
+
               <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Selling Price *</label>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
+                  Selling Price *
+                </label>
+
                 <input
                   type="number"
                   step="0.01"
                   required
                   placeholder="0.00"
                   value={form.price}
-                  onChange={e => handleField("price", e.target.value)}
+                  onChange={e =>
+                    handleField(
+                      "price",
+                      e.target.value
+                    )
+                  }
                   className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
                 />
               </div>
+
               <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">MRP *</label>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
+                  MRP *
+                </label>
+
                 <input
                   type="number"
                   step="0.01"
                   required
                   placeholder="0.00"
                   value={form.mrp}
-                  onChange={e => handleField("mrp", e.target.value)}
+                  onChange={e =>
+                    handleField(
+                      "mrp",
+                      e.target.value
+                    )
+                  }
                   className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
                 />
               </div>
+
             </div>
 
+            {/* GST */}
             <div>
-              <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">GST Slab *</label>
+              <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">
+                GST Slab *
+              </label>
+
               <select
                 value={form.gst_slab}
-                onChange={e => handleField("gst_slab", e.target.value)}
+                onChange={e =>
+                  handleField(
+                    "gst_slab",
+                    e.target.value
+                  )
+                }
                 className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
               >
-                {gstOptions.map(rate => (
-                  <option key={rate} value={rate}>{rate}% GST slab</option>
-                ))}
+                {gstOptions.map(
+                  rate => (
+                    <option
+                      key={rate}
+                      value={rate}
+                    >
+                      {rate}% GST slab
+                    </option>
+                  )
+                )}
               </select>
             </div>
+
           </div>
 
+          {/* LOGISTICS */}
           <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
-            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border pb-1">Logistics / Expiry Attributes</h3>
+
+            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border pb-1">
+              Logistics / Expiry Attributes
+            </h3>
+
             <div className="grid grid-cols-2 gap-3">
+
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
-                  Batch Number {categories.find(c => c.id === form.category_id)?.name === "Medical" && "*"}
+                  Batch Number{" "}
+                  {selectedCategoryName ===
+                    "Medical" &&
+                    "*"}
                 </label>
+
                 <input
                   type="text"
-                  placeholder={categories.find(c => c.id === form.category_id)?.name === "Medical" ? "Required batch code" : "Optional batch code"}
-                  value={form.batch_number}
-                  onChange={e => handleField("batch_number", e.target.value)}
+                  placeholder={
+                    selectedCategoryName ===
+                    "Medical"
+                      ? "Required batch code"
+                      : "Optional batch code"
+                  }
+                  value={
+                    form.batch_number
+                  }
+                  onChange={e =>
+                    handleField(
+                      "batch_number",
+                      e.target.value
+                    )
+                  }
                   className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background"
                 />
               </div>
+
               <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-1">
-                  Expiry Date {categories.find(c => c.id === form.category_id)?.name === "Medical" && "*"}
+                  Expiry Date{" "}
+                  {selectedCategoryName ===
+                    "Medical" &&
+                    "*"}
                 </label>
+
                 <input
                   type="date"
-                  value={form.expiry_date}
-                  onChange={e => handleField("expiry_date", e.target.value)}
+                  value={
+                    form.expiry_date
+                  }
+                  onChange={e =>
+                    handleField(
+                      "expiry_date",
+                      e.target.value
+                    )
+                  }
                   className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background"
                 />
               </div>
+
             </div>
 
             <div className="grid grid-cols-2 gap-3">
+
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Weight / Volume</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Weight / Volume
+                </label>
+
                 <div className="flex items-center gap-1">
+
                   <input
                     type="number"
                     step="any"
                     placeholder="e.g. 500"
-                    value={form.weightValue}
-                    onChange={e => handleField("weightValue", e.target.value)}
+                    value={
+                      form.weightValue
+                    }
+                    onChange={e =>
+                      handleField(
+                        "weightValue",
+                        e.target.value
+                      )
+                    }
                     className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
                   />
+
                   <select
-                    value={form.weightUnit}
-                    onChange={e => handleField("weightUnit", e.target.value)}
+                    value={
+                      form.weightUnit
+                    }
+                    onChange={e =>
+                      handleField(
+                        "weightUnit",
+                        e.target.value
+                      )
+                    }
                     className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
                   >
-                    {unitOptions.map(unit => (
-                      <option key={unit} value={unit}>{unit}</option>
-                    ))}
+                    {unitOptions.map(
+                      unit => (
+                        <option
+                          key={unit}
+                          value={unit}
+                        >
+                          {unit}
+                        </option>
+                      )
+                    )}
                   </select>
+
                 </div>
               </div>
+
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Stock Quantity *
+                </label>
+
                 <input
                   type="number"
                   required
                   placeholder="0"
                   value={form.stock}
-                  onChange={e => handleField("stock", e.target.value)}
+                  onChange={e =>
+                    handleField(
+                      "stock",
+                      e.target.value
+                    )
+                  }
                   className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background"
                 />
               </div>
+
             </div>
 
             <div className="grid grid-cols-1 gap-4">
+
               <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">
+                  Description
+                </label>
+
                 <textarea
                   rows={2}
                   placeholder="Describe the product..."
-                  value={form.description}
-                  onChange={e => handleField("description", e.target.value)}
+                  value={
+                    form.description
+                  }
+                  onChange={e =>
+                    handleField(
+                      "description",
+                      e.target.value
+                    )
+                  }
                   className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none"
                 />
               </div>
+
             </div>
+
           </div>
+
         </div>
 
+        {/* RIGHT CONTENT */}
         <div className="space-y-4">
+
+          {/* PRODUCT MEDIA */}
           <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
+
             <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-              <Upload className="w-4 h-4 text-[#10B981]" /> Product Media
+              <Upload className="w-4 h-4 text-[#10B981]" />
+              Product Media
             </h3>
 
             <input
@@ -511,91 +988,178 @@ export function AddEditProduct({ onNavigate, product }: Props) {
               className="hidden"
             />
 
-            {imageUrl && !isImageError ? (
+            {imageUrl &&
+            !isImageError ? (
               <div className="relative group rounded-xl border border-border overflow-hidden bg-muted aspect-square w-full max-w-[240px] mx-auto">
+
                 <img
                   src={imageUrl}
                   alt="Product Preview"
-                  onError={() => setIsImageError(true)}
+                  onError={() =>
+                    setIsImageError(
+                      true
+                    )
+                  }
                   className="w-full h-full object-cover"
                 />
+
                 <button
                   type="button"
-                  onClick={handleRemoveImage}
+                  onClick={
+                    handleRemoveImage
+                  }
                   className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors"
                   title="Remove Image"
                 >
                   <X className="w-4 h-4" />
                 </button>
+
               </div>
             ) : (
               <div
-                onDragEnter={handleDrag}
-                onDragOver={handleDrag}
-                onDragLeave={handleDrag}
-                onDrop={handleDrop}
-                onClick={() => fileInputRef.current?.click()}
+                onDragEnter={
+                  handleDrag
+                }
+                onDragOver={
+                  handleDrag
+                }
+                onDragLeave={
+                  handleDrag
+                }
+                onDrop={
+                  handleDrop
+                }
+                onClick={() =>
+                  fileInputRef.current?.click()
+                }
                 className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors flex flex-col items-center justify-center gap-2 ${
-                  isDragActive ? "border-[#10B981] bg-[#10B981]/5" : "border-border hover:border-[#10B981]"
+                  isDragActive
+                    ? "border-[#10B981] bg-[#10B981]/5"
+                    : "border-border hover:border-[#10B981]"
                 }`}
               >
+
                 {isUploading ? (
                   <Loader2 className="w-6 h-6 animate-spin text-[#10B981]" />
                 ) : (
                   <>
                     <Upload className="w-6 h-6 text-muted-foreground" />
+
                     <div>
-                      <p className="text-xs font-medium text-foreground">Click to upload or drag & drop</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">JPG, JPEG, PNG, WEBP up to 5MB</p>
+                      <p className="text-xs font-medium text-foreground">
+                        Click to upload or drag & drop
+                      </p>
+
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        JPG, JPEG, PNG, WEBP up to 5MB
+                      </p>
                     </div>
                   </>
                 )}
+
               </div>
             )}
+
           </div>
 
+          {/* MARGIN INSIGHTS */}
           <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-4">
+
             <h3 className="font-semibold text-sm text-foreground flex items-center gap-1.5">
-              <Sparkles className="w-4 h-4 text-[#10B981]" /> Margin Insights
+              <Sparkles className="w-4 h-4 text-[#10B981]" />
+              Margin Insights
             </h3>
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between py-1 border-b border-border/60">
-                <span className="text-muted-foreground">Selling Price:</span>
-                <span className="font-medium text-foreground">₹{sellPriceNum.toFixed(2)}</span>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Selling Price</span>
+                <span className="font-semibold text-foreground">
+                  ₹{sellPriceNum.toFixed(2)}
+                </span>
               </div>
-              <div className="flex justify-between py-1 border-b border-border/60">
-                <span className="text-muted-foreground">GST Output Tax ({gstPercent}%):</span>
-                <span className="font-medium text-[#EF4444]">₹{(sellPriceNum - taxableSellingPrice).toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-border/60">
-                <span className="text-muted-foreground">Taxable Value (Rate):</span>
-                <span className="font-medium text-foreground">₹{taxableSellingPrice.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-border/60">
-                <span className="text-muted-foreground">Wholesale Cost:</span>
-                <span className="font-medium text-foreground">₹{costPriceNum.toFixed(2)}</span>
-              </div>
-            </div>
 
-            <div className={`rounded-xl p-4 text-center border ${netProfit > 0 ? "bg-[#ECFDF5] border-[#A7F3D0]" : "bg-muted/40 border-border"}`}>
-              <p className="text-xs font-medium text-muted-foreground">Net Profit Margin</p>
-              <p className={`text-2xl font-bold mt-1 ${netProfit > 0 ? "text-[#065F46]" : "text-muted-foreground"}`}>
-                ₹{netProfit.toFixed(2)}
-              </p>
-              {netProfit > 0 && (
-                <div className="inline-flex items-center gap-1 bg-[#10B981]/10 text-[#10B981] font-semibold text-xs px-2 py-0.5 rounded-md mt-1.5">
-                  <Percent className="w-3 h-3" /> {profitPercentage.toFixed(1)}% Profit
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Cost Price</span>
+                <span className="font-semibold text-foreground">
+                  ₹{costPriceNum.toFixed(2)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">GST</span>
+                <span className="font-semibold text-foreground">
+                  {gstPercent}%
+                </span>
+              </div>
+
+              <div className="border-t border-border pt-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Estimated Net Profit
+                  </span>
+                  <span
+                    className={`text-sm font-bold ${
+                      netProfit >= 0
+                        ? "text-[#059669]"
+                        : "text-[#DC2626]"
+                    }`}
+                  >
+                    ₹{netProfit.toFixed(2)}
+                  </span>
                 </div>
-              )}
-            </div>
 
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-xs text-muted-foreground">
+                    Profit Margin
+                  </span>
+                  <span
+                    className={`text-xs font-semibold ${
+                      profitPercentage >= 0
+                        ? "text-[#059669]"
+                        : "text-[#DC2626]"
+                    }`}
+                  >
+                    {profitPercentage.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-muted/40 rounded-lg p-2">
+                <Percent className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  Profit is calculated after removing GST from the selling
+                  price.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* ACTIONS */}
+          <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full h-11 bg-[#10B981] hover:bg-[#059669] text-white font-medium rounded-xl text-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+              disabled={isSubmitting || isUploading}
+              className="w-full h-10 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Save className="w-4 h-4" />
-              {isSubmitting ? "Saving..." : product ? "Update Product" : "Publish Product"}
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {product ? "Updating Product..." : "Saving Product..."}
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4" />
+                  {product ? "Update Product" : "Save Product"}
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => onNavigate("products")}
+              disabled={isSubmitting}
+              className="w-full h-10 rounded-lg border border-border bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              Cancel
             </button>
           </div>
         </div>

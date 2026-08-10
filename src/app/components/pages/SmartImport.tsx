@@ -196,7 +196,16 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
             description: "",
             category_id: item.category || null,
             subcategory: (item as any).subcategory ?? null,
-            price: item.sellingPrice ?? item.mrp ?? null,
+            // products.price is NOT NULL. Prefer an explicit selling price, then MRP,
+            // and finally purchase/cost price for CSVs without a selling-price field.
+            price:
+              item.sellingPrice != null && Number(item.sellingPrice) > 0
+                ? Number(item.sellingPrice)
+                : item.mrp != null && Number(item.mrp) > 0
+                  ? Number(item.mrp)
+                  : item.costPrice != null && Number(item.costPrice) > 0
+                    ? Number(item.costPrice)
+                    : null,
             cost_price: item.costPrice ?? null,
             mrp: item.mrp ?? null,
             stock: item.stock ?? 0,
