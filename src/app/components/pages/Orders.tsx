@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Search,
   Filter,
@@ -152,6 +152,7 @@ type OrderRow = {
   rivo_delivery_margin: number | null;
   vendor_commission: number | null;
   vendor_earning: number | null;
+  settled_vendor?: boolean | null;
   cash_received: number | null;
   change_returned: number | null;
   collection_method: string | null;
@@ -161,6 +162,15 @@ type OrderRow = {
   cancelled_by: string | null;
   cancel_reason: string | null;
   cancelled_at: string | null;
+};
+
+type VendorSettlementRow = {
+  id: string;
+  vendor_id: string;
+  amount: number | null;
+  status: string | null;
+  paid_at: string | null;
+  order_ids: string[] | null;
 };
 
 type CustomerRow = {
@@ -235,6 +245,7 @@ type DisplayOrder = {
   vendorCommission: number;
   riderEarning: number;
   rivoMargin: number;
+  isSettled: boolean;
   paymentStatus: string;
   orderStatus: string;
   paymentMethod: string | null;
@@ -365,30 +376,6 @@ export function Orders() {
     return formatted.charAt(0).toUpperCase() + formatted.slice(1);
   };
 
-  const calculateRowEta = (
-    status: string,
-    updatedAtStr: string
-  ): string => {
-    if (status === "Cancelled" || status === "Rejected") return "—";
-
-    if (status === "Delivered") return "Returned";
-
-    if (status !== "Out For Delivery") {
-      return "No active deliveries";
-    }
-
-    const oldestOrderTime = new Date(updatedAtStr).getTime();
-    const elapsedMins = Math.floor(
-      (Date.now() - oldestOrderTime) / 60000
-    );
-
-    const remainingMins = Math.max(5, 30 - elapsedMins);
-
-    return remainingMins <= 5
-      ? "Returned"
-      : `Returning in ${remainingMins} mins`;
-  };
-
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return "—";
 
@@ -470,12 +457,6 @@ export function Orders() {
     }
   };
 
-  /*
-   * IMPORTANT:
-   * This function deliberately does NOT use Supabase nested
-   * relationships. The current database schema does not expose
-   * the relationships required by the old Orders.tsx query.
-   */
   const fetchLiveOrders = async (
     showLoadingIndicator = true
   ) => {
@@ -532,6 +513,7 @@ export function Orders() {
             rivo_delivery_margin,
             vendor_commission,
             vendor_earning,
+            settled_vendor,
             cash_received,
             change_returned,
             collection_method,
@@ -581,7 +563,47 @@ export function Orders() {
       );
 
       /* ---------------------------------------------------------
-       * 2. ORDER ITEMS
+       * 2. VENDOR SETTLEMENTS
+       * --------------------------------------------------------- */
+
+      const settledOrderIdSet = new Set<string>();
+
+      const { data: settlementsData, error: settlementsError } =
+        await supabase
+          .from("vendor_settlements")
+          .select(`
+            id,
+            vendor_id,
+            amount,
+            status,
+            paid_at,
+            order_ids
+          `)
+          .eq("vendor_id", currentVendorId);
+
+      if (settlementsError) {
+        console.warn("Settlements fetch warning:", settlementsError);
+      } else if (settlementsData) {
+        ((settlementsData || []) as VendorSettlementRow[]).forEach(
+          (settlement) => {
+            const rawStatus = (settlement.status || "").trim().toLowerCase();
+            const isSettledStatus =
+              rawStatus === "paid" ||
+              rawStatus === "completed" ||
+              rawStatus === "settled" ||
+              Boolean(settlement.paid_at);
+
+            if (isSettledStatus && Array.isArray(settlement.order_ids)) {
+              settlement.order_ids.forEach((id) => {
+                if (id) settledOrderIdSet.add(id);
+              });
+            }
+          }
+        );
+      }
+
+      /* ---------------------------------------------------------
+       * 3. ORDER ITEMS
        * --------------------------------------------------------- */
 
       const { data: itemsData, error: itemsError } =
@@ -611,7 +633,7 @@ export function Orders() {
       );
 
       /* ---------------------------------------------------------
-       * 3. PRODUCTS
+       * 4. PRODUCTS
        * --------------------------------------------------------- */
 
       const productsMap = new Map<string, ProductRow>();
@@ -631,7 +653,7 @@ export function Orders() {
       }
 
       /* ---------------------------------------------------------
-       * 4. CUSTOMERS
+       * 5. CUSTOMERS
        * --------------------------------------------------------- */
 
       const customersMap = new Map<string, CustomerRow>();
@@ -653,7 +675,7 @@ export function Orders() {
       }
 
       /* ---------------------------------------------------------
-       * 5. CUSTOMER ADDRESSES
+       * 6. CUSTOMER ADDRESSES
        * --------------------------------------------------------- */
 
       const addressesMap = new Map<string, AddressRow>();
@@ -685,7 +707,7 @@ export function Orders() {
       }
 
       /* ---------------------------------------------------------
-       * 6. PAYMENTS
+       * 7. PAYMENTS
        * --------------------------------------------------------- */
 
       const paymentsMap = new Map<string, PaymentRow>();
@@ -709,10 +731,6 @@ export function Orders() {
       if (paymentsError) throw paymentsError;
 
       ((paymentsData || []) as PaymentRow[]).forEach((payment) => {
-        /*
-         * Keep the first payment for each order.
-         * Existing Rivo flow uses one primary payment record/order.
-         */
         if (!paymentsMap.has(payment.order_id)) {
           paymentsMap.set(payment.order_id, payment);
         }
@@ -723,7 +741,7 @@ export function Orders() {
       });
 
       /* ---------------------------------------------------------
-       * 7. ORDER TRACKING
+       * 8. ORDER TRACKING
        * --------------------------------------------------------- */
 
       const trackingMap = new Map<string, TrackingRow[]>();
@@ -750,7 +768,7 @@ export function Orders() {
       });
 
       /* ---------------------------------------------------------
-       * 8. RIDERS
+       * 9. RIDERS
        * --------------------------------------------------------- */
 
       const ridersMap = new Map<string, RiderRow>();
@@ -780,7 +798,7 @@ export function Orders() {
       }
 
       /* ---------------------------------------------------------
-       * 9. BUILD DISPLAY ORDERS
+       * 10. BUILD DISPLAY ORDERS
        * --------------------------------------------------------- */
 
       const processedOrders: DisplayOrder[] = typedOrders.map(
@@ -825,6 +843,10 @@ export function Orders() {
           const currentStatus = formatStatusString(
             parentOrder.order_status
           );
+
+          const isSettled =
+            parentOrder.settled_vendor === true ||
+            settledOrderIdSet.has(parentOrder.id);
 
           const trackingHistory = history.map((tracking) => {
             const trackingDate = new Date(tracking.created_at);
@@ -888,6 +910,8 @@ export function Orders() {
 
             rivoMargin:
               Number(parentOrder.rivo_delivery_margin || 0),
+
+            isSettled,
 
             paymentStatus:
               parentOrder.payment_status || "Pending",
@@ -1258,187 +1282,234 @@ export function Orders() {
   };
 
   useEffect(() => {
+    let mounted = true;
+
     let ordersChannel: any = null;
-    let itemsChannel: any = null;
     let trackingChannel: any = null;
     let paymentsChannel: any = null;
+    let settlementsChannel: any = null;
     let ridersChannel: any = null;
     let assignmentsChannel: any = null;
+
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let refreshInProgress = false;
+    let refreshQueued = false;
+
+    const scheduleOrdersRefresh = () => {
+      if (!mounted) return;
+
+      if (refreshTimer) clearTimeout(refreshTimer);
+
+      refreshTimer = setTimeout(async () => {
+        refreshTimer = null;
+        if (!mounted) return;
+
+        if (refreshInProgress) {
+          refreshQueued = true;
+          return;
+        }
+
+        refreshInProgress = true;
+        try {
+          await fetchLiveOrders(false);
+        } catch (error) {
+          console.error("Realtime order refresh error:", error);
+        } finally {
+          refreshInProgress = false;
+          if (refreshQueued && mounted) {
+            refreshQueued = false;
+            scheduleOrdersRefresh();
+          }
+        }
+      }, 350);
+    };
+
+    const scheduleRiderMetricsRefresh = () => {
+      if (!mounted) return;
+
+      if (refreshTimer) clearTimeout(refreshTimer);
+
+      refreshTimer = setTimeout(async () => {
+        refreshTimer = null;
+        if (!mounted) return;
+
+        try {
+          await fetchRiderMetrics();
+        } catch (error) {
+          console.error("Realtime rider metrics refresh error:", error);
+        }
+      }, 350);
+    };
+
+    const subscribeSafely = (
+      channel: any,
+      channelName: string
+    ) => {
+      channel.subscribe((status: string, error?: unknown) => {
+        if (status === "SUBSCRIBED") {
+          console.log(
+            `[Vendor Orders Realtime] ${channelName}: SUBSCRIBED`
+          );
+        } else if (status === "CHANNEL_ERROR") {
+          console.error(
+            `[Vendor Orders Realtime] ${channelName}: CHANNEL_ERROR`,
+            error
+          );
+        } else if (status === "TIMED_OUT") {
+          console.warn(
+            `[Vendor Orders Realtime] ${channelName}: TIMED_OUT`
+          );
+        } else if (status === "CLOSED") {
+          console.warn(
+            `[Vendor Orders Realtime] ${channelName}: CLOSED`
+          );
+        }
+      });
+
+      return channel;
+    };
 
     const setupRealtime = async () => {
       try {
         await syncAllPortalData(true);
 
-        const { data: authData } =
+        if (!mounted) return;
+
+        const { data: authData, error: authError } =
           await supabase.auth.getUser();
 
+        if (authError) throw authError;
         if (!authData?.user) return;
 
-        const { data: vendorProfile } =
+        const { data: vendorProfile, error: vendorError } =
           await supabase
             .from("vendors")
             .select("id")
-            .eq(
-              "auth_user_id",
-              authData.user.id
-            )
+            .eq("auth_user_id", authData.user.id)
             .maybeSingle();
 
-        if (!vendorProfile?.id) return;
+        if (vendorError) throw vendorError;
+        if (!vendorProfile?.id || !mounted) return;
 
-        const currentVendorId =
-          vendorProfile.id;
+        const currentVendorId = vendorProfile.id;
 
-        ordersChannel = supabase
-          .channel(
-            `vendor-orders-${currentVendorId}`
-          )
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "orders",
-              filter: `vendor_id=eq.${currentVendorId}`,
-            },
-            () => {
-              syncAllPortalData(false);
-            }
-          )
-          .subscribe();
-
-        itemsChannel = supabase
-          .channel(
-            `vendor-order-items-${currentVendorId}`
-          )
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "order_items",
-            },
-            () => {
-              syncAllPortalData(false);
-            }
-          )
-          .subscribe();
-
-        trackingChannel = supabase
-          .channel(
-            `vendor-order-tracking-${currentVendorId}`
-          )
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "order_tracking",
-            },
-            () => {
-              syncAllPortalData(false);
-            }
-          )
-          .subscribe();
-
-        paymentsChannel = supabase
-          .channel(
-            `vendor-payments-${currentVendorId}`
-          )
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "payments",
-            },
-            () => {
-              syncAllPortalData(false);
-            }
-          )
-          .subscribe();
-
-        ridersChannel = supabase
-          .channel(
-            `vendor-riders-${currentVendorId}`
-          )
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "riders",
-            },
-            () => {
-              syncAllPortalData(false);
-            }
-          )
-          .subscribe();
-
-        assignmentsChannel = supabase
-          .channel(
-            `vendor-rider-assignments-${currentVendorId}`
-          )
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table:
-                "rider_vendor_assignments",
-              filter: `vendor_id=eq.${currentVendorId}`,
-            },
-            () => {
-              syncAllPortalData(false);
-            }
-          )
-          .subscribe();
-      } catch (err) {
-        console.error(
-          "Realtime setup error:",
-          err
+        ordersChannel = subscribeSafely(
+          supabase
+            .channel(`vendor-orders-${currentVendorId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "orders",
+                filter: `vendor_id=eq.${currentVendorId}`,
+              },
+              () => scheduleOrdersRefresh()
+            ),
+          "orders"
         );
+
+        trackingChannel = subscribeSafely(
+          supabase
+            .channel(`vendor-order-tracking-${currentVendorId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "order_tracking",
+              },
+              () => scheduleOrdersRefresh()
+            ),
+          "order_tracking"
+        );
+
+        paymentsChannel = subscribeSafely(
+          supabase
+            .channel(`vendor-payments-${currentVendorId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "payments",
+              },
+              () => scheduleOrdersRefresh()
+            ),
+          "payments"
+        );
+
+        settlementsChannel = subscribeSafely(
+          supabase
+            .channel(`vendor-settlements-${currentVendorId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "vendor_settlements",
+                filter: `vendor_id=eq.${currentVendorId}`,
+              },
+              () => scheduleOrdersRefresh()
+            ),
+          "vendor_settlements"
+        );
+
+        ridersChannel = subscribeSafely(
+          supabase
+            .channel(`vendor-riders-${currentVendorId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "riders",
+              },
+              () => scheduleRiderMetricsRefresh()
+            ),
+          "riders"
+        );
+
+        assignmentsChannel = subscribeSafely(
+          supabase
+            .channel(`vendor-rider-assignments-${currentVendorId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "rider_vendor_assignments",
+                filter: `vendor_id=eq.${currentVendorId}`,
+              },
+              () => scheduleRiderMetricsRefresh()
+            ),
+          "rider_vendor_assignments"
+        );
+      } catch (err) {
+        console.error("Realtime setup error:", err);
       }
     };
 
     setupRealtime();
 
     return () => {
-      if (ordersChannel) {
-        supabase.removeChannel(
-          ordersChannel
-        );
+      mounted = false;
+
+      if (refreshTimer) {
+        clearTimeout(refreshTimer);
+        refreshTimer = null;
       }
 
-      if (itemsChannel) {
-        supabase.removeChannel(
-          itemsChannel
-        );
-      }
-
-      if (trackingChannel) {
-        supabase.removeChannel(
-          trackingChannel
-        );
-      }
-
-      if (paymentsChannel) {
-        supabase.removeChannel(
-          paymentsChannel
-        );
-      }
-
-      if (ridersChannel) {
-        supabase.removeChannel(
-          ridersChannel
-        );
-      }
-
-      if (assignmentsChannel) {
-        supabase.removeChannel(
-          assignmentsChannel
-        );
-      }
+      [
+        ordersChannel,
+        trackingChannel,
+        paymentsChannel,
+        settlementsChannel,
+        ridersChannel,
+        assignmentsChannel,
+      ].forEach((channel) => {
+        if (channel) supabase.removeChannel(channel);
+      });
     };
   }, []);
 
@@ -2423,10 +2494,6 @@ export function Orders() {
             }
           }
 
-          /*
-           * vendor_settlements.order_ids is uuid[].
-           * Use .contains() with a UUID array.
-           */
           const { data: existingVendorSettlement } =
             await supabase
               .from(
@@ -2528,11 +2595,6 @@ export function Orders() {
             }
           }
 
-          /*
-           * Notification service is optional.
-           * The database workflow remains successful even if
-           * the global notification service is unavailable.
-           */
           try {
             const notificationService =
               (
@@ -2592,79 +2654,33 @@ export function Orders() {
     };
 
   const renderPaymentBadge = (
-    method: string | null | undefined,
-    status: string | null | undefined
+    method: string | null | undefined
   ) => {
     const formattedMethod =
       (method || "")
         .trim()
         .toLowerCase();
 
-    const formattedStatus =
-      (status || "")
-        .trim()
-        .toLowerCase();
-
-    let methodBadge = (
-      <span className="bg-muted text-muted-foreground text-xs px-2 py-0.5 rounded-full font-medium capitalize">
-        {method || "—"}
-      </span>
-    );
-
     if (formattedMethod === "cod") {
-      methodBadge = (
-        <span className="bg-blue-100 text-blue-800 text-xs px-2 py-0.5 rounded-full font-medium">
+      return (
+        <span className="bg-blue-100 text-blue-800 text-xs px-2.5 py-0.5 rounded-full font-medium inline-block">
           COD
         </span>
       );
     }
 
     if (formattedMethod === "upi") {
-      methodBadge = (
-        <span className="bg-purple-100 text-purple-800 text-xs px-2 py-0.5 rounded-full font-medium">
+      return (
+        <span className="bg-purple-100 text-purple-800 text-xs px-2.5 py-0.5 rounded-full font-medium inline-block">
           UPI
         </span>
       );
     }
 
-    let statusBadge = (
-      <span className="bg-muted text-muted-foreground text-xs px-2 py-0.5 rounded-full font-medium capitalize">
-        {status || "—"}
-      </span>
-    );
-
-    if (
-      formattedStatus === "paid" ||
-      formattedStatus === "completed"
-    ) {
-      statusBadge = (
-        <span className="bg-green-100 text-green-800 text-xs px-2 py-0.5 rounded-full font-medium">
-          Paid
-        </span>
-      );
-    } else if (
-      formattedStatus === "pending"
-    ) {
-      statusBadge = (
-        <span className="bg-amber-100 text-amber-800 text-xs px-2 py-0.5 rounded-full font-medium">
-          Pending
-        </span>
-      );
-    } else if (
-      formattedStatus === "failed"
-    ) {
-      statusBadge = (
-        <span className="bg-red-100 text-red-800 text-xs px-2 py-0.5 rounded-full font-medium">
-          Failed
-        </span>
-      );
-    }
-
     return (
-      <div className="flex gap-1.5 items-center">
-        {methodBadge}
-        {statusBadge}
-      </div>
+      <span className="bg-muted text-muted-foreground text-xs px-2.5 py-0.5 rounded-full font-medium capitalize inline-block">
+        {method || "—"}
+      </span>
     );
   };
 
@@ -2946,23 +2962,8 @@ export function Orders() {
                       )}
                     </td>
 
-                    <td className="px-4 py-3">
-                      <span
-                        className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-                          status ===
-                          "Out For Delivery"
-                            ? "bg-[#FEF3C7] text-[#92400E]"
-                            : status ===
-                              "Delivered"
-                            ? "bg-[#D1FAE5] text-[#065F46]"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {calculateRowEta(
-                          status,
-                          order.updatedAt
-                        )}
-                      </span>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      —
                     </td>
 
                     <td className="px-4 py-3">
@@ -2975,18 +2976,26 @@ export function Orders() {
                       </p>
                     </td>
 
-                    <td className="px-4 py-3 text-sm font-semibold text-foreground">
-                      {money(
-                        order.vendorEarning
-                      )}
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          {money(order.vendorEarning)}
+                        </p>
+                        <p
+                          className={`text-xs font-medium ${
+                            order.isSettled
+                              ? "text-[#10B981]"
+                              : "text-[#F59E0B]"
+                          }`}
+                        >
+                          {order.isSettled ? "Settled" : "Pending"}
+                        </p>
+                      </div>
                     </td>
 
                     <td className="px-4 py-3">
                       {renderPaymentBadge(
-                        order.paymentDetails
-                          ?.method,
-                        order.paymentDetails
-                          ?.status
+                        order.paymentDetails?.method || order.paymentMethod
                       )}
                     </td>
 
@@ -3761,15 +3770,10 @@ export function Orders() {
                       Payment Status
                     </span>
 
-                    <span className="mt-0.5 block">
-                      {renderPaymentBadge(
-                        selectedOrder
-                          .paymentDetails
-                          ?.method,
-                        selectedOrder
-                          .paymentDetails
-                          ?.status
-                      )}
+                    <span className="mt-0.5 block font-semibold capitalize">
+                      {selectedOrder.paymentDetails?.status ||
+                        selectedOrder.paymentStatus ||
+                        "Pending"}
                     </span>
                   </div>
 
