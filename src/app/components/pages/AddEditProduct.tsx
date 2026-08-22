@@ -252,37 +252,112 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     }
   };
 
-  const handleRemoveImage = async () => {
-    if (!imageUrl) return;
-
-    if (
-      imageUrl.startsWith("http") &&
-      !imageFile
-    ) {
-      try {
-        const urlParts = imageUrl.split("/");
-        const fileName =
-          urlParts[urlParts.length - 1];
-
-        if (fileName) {
-          await supabase.storage
-            .from("product-images")
-            .remove([fileName]);
-        }
-      } catch (err) {
-        console.error(
-          "Failed to delete file from storage:",
-          err
-        );
-      }
-    }
-
+  // ---------------------------------------------------------
+  // REMOVE IMAGE
+  //
+  // IMPORTANT:
+  // Do not delete the physical storage object here.
+  // A product image may now be a shared universal image.
+  // Deleting the storage object could break images for
+  // other vendors/products.
+  // ---------------------------------------------------------
+  const handleRemoveImage = () => {
     setImageUrl("");
     setImageFile(null);
     setIsImageError(false);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
+    }
+  };
+
+  // ---------------------------------------------------------
+  // RESOLVE PRODUCT TO MASTER / UNIVERSAL PRODUCT
+  // ---------------------------------------------------------
+  const resolveUniversalProduct = async (
+    productId: string
+  ) => {
+    const { data: resolverData, error: resolverError } =
+      await supabase.rpc(
+        "resolve_product_master",
+        {
+          p_product_id: productId
+        }
+      );
+
+    if (resolverError) {
+      console.error(
+        "Universal product resolver failed:",
+        resolverError
+      );
+
+      throw new Error(
+        `Product saved, but universal product matching failed: ${
+          resolverError.message || resolverError
+        }`
+      );
+    }
+
+    const resolverResult =
+      Array.isArray(resolverData)
+        ? resolverData[0]
+        : resolverData;
+
+    if (!resolverResult?.universal_product_id) {
+      return;
+    }
+
+    // -------------------------------------------------------
+    // Get the universal product image.
+    // If it exists and the vendor product does not have
+    // its own uploaded image, use the universal image as
+    // the vendor product's fallback image.
+    // -------------------------------------------------------
+    const {
+      data: universalProduct,
+      error: universalError
+    } = await supabase
+      .from("universal_products")
+      .select("id, image_url")
+      .eq(
+        "id",
+        resolverResult.universal_product_id
+      )
+      .maybeSingle();
+
+    if (universalError) {
+      console.warn(
+        "Could not load universal product image:",
+        universalError
+      );
+      return;
+    }
+
+    if (
+      universalProduct?.image_url &&
+      !imageFile
+    ) {
+      const { error: fallbackError } =
+        await supabase
+          .from("products")
+          .update({
+            image_url:
+              universalProduct.image_url,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", productId);
+
+      if (fallbackError) {
+        console.warn(
+          "Could not apply universal image fallback:",
+          fallbackError
+        );
+      } else {
+        setImageUrl(
+          universalProduct.image_url
+        );
+        setIsImageError(false);
+      }
     }
   };
 
@@ -503,6 +578,8 @@ export function AddEditProduct({ onNavigate, product }: Props) {
           form.barcode || null
       };
 
+      let savedProductId: string;
+
       // -----------------------------------------------------
       // UPDATE EXISTING PRODUCT
       // -----------------------------------------------------
@@ -524,18 +601,24 @@ export function AddEditProduct({ onNavigate, product }: Props) {
 
           throw error;
         }
+
+        savedProductId = editingId;
       }
 
       // -----------------------------------------------------
       // INSERT NEW PRODUCT
       // -----------------------------------------------------
       else {
-        const { error } =
-          await supabase
-            .from("products")
-            .insert([
-              productPayload
-            ]);
+        const {
+          data: insertedProduct,
+          error
+        } = await supabase
+          .from("products")
+          .insert([
+            productPayload
+          ])
+          .select("id")
+          .single();
 
         if (error) {
           if (error.code === "23505") {
@@ -548,7 +631,26 @@ export function AddEditProduct({ onNavigate, product }: Props) {
 
           throw error;
         }
+
+        if (!insertedProduct?.id) {
+          throw new Error(
+            "Product was created but its ID could not be retrieved."
+          );
+        }
+
+        savedProductId =
+          insertedProduct.id;
       }
+
+      // -----------------------------------------------------
+      // UNIVERSAL PRODUCT RESOLUTION
+      //
+      // This is intentionally after the product is saved
+      // because resolve_product_master() expects products.id.
+      // -----------------------------------------------------
+      await resolveUniversalProduct(
+        savedProductId
+      );
 
       onNavigate("products");
     } catch (err: any) {
@@ -1069,33 +1171,46 @@ export function AddEditProduct({ onNavigate, product }: Props) {
               <Sparkles className="w-4 h-4 text-[#10B981]" />
               Margin Insights
             </h3>
+
             <div className="space-y-3">
+
               <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Selling Price</span>
+                <span className="text-muted-foreground">
+                  Selling Price
+                </span>
+
                 <span className="font-semibold text-foreground">
                   ₹{sellPriceNum.toFixed(2)}
                 </span>
               </div>
 
               <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">Cost Price</span>
+                <span className="text-muted-foreground">
+                  Cost Price
+                </span>
+
                 <span className="font-semibold text-foreground">
                   ₹{costPriceNum.toFixed(2)}
                 </span>
               </div>
 
               <div className="flex items-center justify-between text-xs">
-                <span className="text-muted-foreground">GST</span>
+                <span className="text-muted-foreground">
+                  GST
+                </span>
+
                 <span className="font-semibold text-foreground">
                   {gstPercent}%
                 </span>
               </div>
 
               <div className="border-t border-border pt-3">
+
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-muted-foreground">
                     Estimated Net Profit
                   </span>
+
                   <span
                     className={`text-sm font-bold ${
                       netProfit >= 0
@@ -1108,9 +1223,11 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                 </div>
 
                 <div className="flex items-center justify-between mt-1">
+
                   <span className="text-xs text-muted-foreground">
                     Profit Margin
                   </span>
+
                   <span
                     className={`text-xs font-semibold ${
                       profitPercentage >= 0
@@ -1120,48 +1237,70 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                   >
                     {profitPercentage.toFixed(1)}%
                   </span>
+
                 </div>
+
               </div>
 
               <div className="flex items-center gap-2 text-[10px] text-muted-foreground bg-muted/40 rounded-lg p-2">
+
                 <Percent className="w-3.5 h-3.5 shrink-0" />
+
                 <span>
                   Profit is calculated after removing GST from the selling
                   price.
                 </span>
+
               </div>
+
             </div>
           </div>
 
           {/* ACTIONS */}
           <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
+
             <button
               type="submit"
-              disabled={isSubmitting || isUploading}
+              disabled={
+                isSubmitting ||
+                isUploading
+              }
               className="w-full h-10 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
+
               {isSubmitting ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  {product ? "Updating Product..." : "Saving Product..."}
+
+                  {product
+                    ? "Updating Product..."
+                    : "Saving Product..."}
                 </>
               ) : (
                 <>
                   <Save className="w-4 h-4" />
-                  {product ? "Update Product" : "Save Product"}
+
+                  {product
+                    ? "Update Product"
+                    : "Save Product"}
                 </>
               )}
+
             </button>
 
             <button
               type="button"
-              onClick={() => onNavigate("products")}
+              onClick={() =>
+                onNavigate("products")
+              }
               disabled={isSubmitting}
               className="w-full h-10 rounded-lg border border-border bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
+
           </div>
+
         </div>
       </form>
     </div>
