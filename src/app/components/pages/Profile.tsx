@@ -132,13 +132,6 @@ export function Profile() {
   const bannerFileInputRef = useRef<HTMLInputElement>(null);
   const activeSlotRef = useRef<number | null>(null);
 
-  /**
-   * Normalize a stored vendor category value against the canonical
-   * product_categories table.
-   *
-   * This protects the UI from old casing / naming differences while
-   * keeping the database values untouched.
-   */
   const normalizeCategoryNames = (
     values: unknown,
     canonicalCategories: StoreCategory[]
@@ -154,7 +147,10 @@ export function Profile() {
     const canonicalMap = new Map<string, string>();
 
     canonicalCategories.forEach(category => {
-      canonicalMap.set(category.name.trim().toLowerCase(), category.name.trim());
+      canonicalMap.set(
+        category.name.trim().toLowerCase(),
+        category.name.trim()
+      );
     });
 
     return (values as unknown[])
@@ -164,14 +160,13 @@ export function Profile() {
         const raw = value.trim();
         if (!raw) return null;
 
-        // Direct canonical name match.
         const canonicalMatch = canonicalMap.get(raw.toLowerCase());
+
         if (canonicalMatch) return canonicalMatch;
 
-        // Handle common legacy category labels.
         const legacyAliases: Record<string, string> = {
           "personal care": "Personal Care",
-          "personalcare": "Personal Care",
+          personalcare: "Personal Care",
           "home and kitchen": "Home & Kitchen",
           "home & kitchen": "Home & Kitchen",
           "fruits and vegetables": "Fruits & Vegetables",
@@ -181,12 +176,15 @@ export function Profile() {
         };
 
         const aliasMatch = legacyAliases[raw.toLowerCase()];
+
         if (aliasMatch) {
-          const canonicalAlias = canonicalMap.get(aliasMatch.toLowerCase());
+          const canonicalAlias = canonicalMap.get(
+            aliasMatch.toLowerCase()
+          );
+
           return canonicalAlias || aliasMatch;
         }
 
-        // Preserve unknown values rather than silently deleting vendor data.
         return raw;
       })
       .filter((value): value is string => Boolean(value));
@@ -203,22 +201,22 @@ export function Profile() {
         return;
       }
 
-      /*
-       * Load the single canonical category source.
-       * All category display normalization in this page is based on
-       * public.product_categories.
-       */
-      const { data: categoriesData, error: categoriesError } = await supabase
-        .from("product_categories")
-        .select("id, name")
-        .eq("status", "active")
-        .order("display_order", { ascending: true });
+      const { data: categoriesData, error: categoriesError } =
+        await supabase
+          .from("product_categories")
+          .select("id, name")
+          .eq("status", "active")
+          .order("display_order", { ascending: true });
 
       if (categoriesError) {
-        console.error("Failed to load canonical product categories:", categoriesError);
+        console.error(
+          "Failed to load canonical product categories:",
+          categoriesError
+        );
       }
 
       const canonicalCategories: StoreCategory[] = categoriesData || [];
+
       setAvailableCategories(canonicalCategories);
 
       const { data: vendorCore, error: vendorError } = await supabase
@@ -228,7 +226,10 @@ export function Profile() {
         .maybeSingle();
 
       if (vendorError) {
-        console.error("Failed to load vendor profile:", vendorError);
+        console.error(
+          "Failed to load vendor profile:",
+          vendorError
+        );
       }
 
       if (!vendorCore) {
@@ -236,14 +237,18 @@ export function Profile() {
         return;
       }
 
-      const { data: profileExtended, error: profileError } = await supabase
-        .from("vendor_profiles")
-        .select("*")
-        .eq("vendor_id", vendorCore.id)
-        .maybeSingle();
+      const { data: profileExtended, error: profileError } =
+        await supabase
+          .from("vendor_profiles")
+          .select("*")
+          .eq("vendor_id", vendorCore.id)
+          .maybeSingle();
 
       if (profileError) {
-        console.error("Failed to load extended vendor profile:", profileError);
+        console.error(
+          "Failed to load extended vendor profile:",
+          profileError
+        );
       }
 
       const rawProfileCategories = profileExtended?.categories;
@@ -276,17 +281,23 @@ export function Profile() {
         }
       }
 
-      const { data: bannersData, error: bannersError } = await supabase
-        .from("vendor_profile_banners")
-        .select("*")
-        .eq("vendor_id", vendorCore.id)
-        .order("banner_order", { ascending: true });
+      const { data: bannersData, error: bannersError } =
+        await supabase
+          .from("vendor_profile_banners")
+          .select("*")
+          .eq("vendor_id", vendorCore.id)
+          .order("banner_order", { ascending: true });
 
       if (bannersError) {
-        console.error("Failed to load vendor profile banners:", bannersError);
+        console.error(
+          "Failed to load vendor profile banners:",
+          bannersError
+        );
       }
 
-      const constructedBannerUrls: string[] = Array(maxProfileBanners).fill("");
+      const constructedBannerUrls: string[] = Array(
+        maxProfileBanners
+      ).fill("");
 
       if (bannersData && bannersData.length > 0) {
         bannersData.forEach((row: ProfileBannerRow) => {
@@ -294,7 +305,8 @@ export function Profile() {
             row.banner_order >= 0 &&
             row.banner_order < maxProfileBanners
           ) {
-            constructedBannerUrls[row.banner_order] = row.banner_url || "";
+            constructedBannerUrls[row.banner_order] =
+              row.banner_url || "";
           }
         });
       }
@@ -303,7 +315,8 @@ export function Profile() {
         vendor_id: vendorCore.id,
         store_name: vendorCore.shop_name || "",
         owner_name: vendorCore.owner_name || "",
-        email_address: vendorCore.email || auth.user.email || "",
+        email_address:
+          vendorCore.email || auth.user.email || "",
         primary_phone: vendorCore.phone || "",
         tagline: profileExtended?.tagline || "",
         store_code: vendorCore.shop_code || "NEW-SHOP",
@@ -314,7 +327,9 @@ export function Profile() {
         store_categories: normalizedCategories,
         subscription_plan: matchedPlan,
         created_at: vendorCore.created_at
-          ? new Date(vendorCore.created_at).toLocaleDateString("en-GB", {
+          ? new Date(
+              vendorCore.created_at
+            ).toLocaleDateString("en-GB", {
               day: "numeric",
               month: "short",
               year: "numeric"
@@ -324,7 +339,10 @@ export function Profile() {
 
       setProfile(validatedState);
     } catch (err) {
-      console.error("Error reading schema profile payload:", err);
+      console.error(
+        "Error reading schema profile payload:",
+        err
+      );
     } finally {
       setLoading(false);
     }
@@ -359,16 +377,20 @@ export function Profile() {
       setValidationError("");
 
       const file = event.target.files?.[0];
+
       if (!file) return;
 
       if (file.size > 2 * 1024 * 1024) {
-        setValidationError("Image file size must be less than 2MB.");
+        setValidationError(
+          "Image file size must be less than 2MB."
+        );
         return;
       }
 
       setUploadingImage(true);
 
       const fileExt = file.name.split(".").pop();
+
       const filePath = `${profile.vendor_id}/avatar-${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
@@ -384,18 +406,30 @@ export function Profile() {
         .getPublicUrl(filePath);
 
       setProfile(prev =>
-        prev ? { ...prev, avatar_url: publicUrl } : null
+        prev
+          ? {
+              ...prev,
+              avatar_url: publicUrl
+            }
+          : null
       );
 
       await supabase
         .from("vendor_profiles")
-        .update({ avatar_url: publicUrl })
+        .update({
+          avatar_url: publicUrl
+        })
         .eq("vendor_id", profile.vendor_id);
 
-      setSavedMessage("Profile photo uploaded successfully.");
+      setSavedMessage(
+        "Profile photo uploaded successfully."
+      );
+
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
-      setValidationError(err.message || "Failed to upload image.");
+      setValidationError(
+        err.message || "Failed to upload image."
+      );
     } finally {
       setUploadingImage(false);
     }
@@ -409,23 +443,37 @@ export function Profile() {
 
       await supabase
         .from("vendor_profiles")
-        .update({ avatar_url: null })
+        .update({
+          avatar_url: null
+        })
         .eq("vendor_id", profile.vendor_id);
 
       setProfile(prev =>
-        prev ? { ...prev, avatar_url: "" } : null
+        prev
+          ? {
+              ...prev,
+              avatar_url: ""
+            }
+          : null
       );
 
-      setSavedMessage("Profile photo removed successfully.");
+      setSavedMessage(
+        "Profile photo removed successfully."
+      );
+
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
-      setValidationError("Failed to remove avatar reference.");
+      setValidationError(
+        "Failed to remove avatar reference."
+      );
     } finally {
       setUploadingImage(false);
     }
   };
 
-  const handleTriggerBannerUpload = (slotIndex: number) => {
+  const handleTriggerBannerUpload = (
+    slotIndex: number
+  ) => {
     activeSlotRef.current = slotIndex;
     bannerFileInputRef.current?.click();
   };
@@ -435,15 +483,24 @@ export function Profile() {
   ) => {
     const slotIndex = activeSlotRef.current;
 
-    if (slotIndex === null || slotIndex === undefined) return;
+    if (slotIndex === null || slotIndex === undefined) {
+      return;
+    }
 
     try {
       setValidationError("");
 
       const file = event.target.files?.[0];
+
       if (!file) return;
 
-      const allowedExtensions = ["jpg", "jpeg", "png", "webp"];
+      const allowedExtensions = [
+        "jpg",
+        "jpeg",
+        "png",
+        "webp"
+      ];
+
       const fileExt =
         file.name.split(".").pop()?.toLowerCase() || "";
 
@@ -467,7 +524,9 @@ export function Profile() {
 
       const { error: uploadError } = await supabase.storage
         .from("vendor-store-images")
-        .upload(filePath, file, { upsert: true });
+        .upload(filePath, file, {
+          upsert: true
+        });
 
       if (uploadError) throw uploadError;
 
@@ -512,10 +571,16 @@ export function Profile() {
       }
 
       const nextBanners = [...profile.banner_urls];
+
       nextBanners[slotIndex] = publicUrl;
 
       setProfile(prev =>
-        prev ? { ...prev, banner_urls: nextBanners } : null
+        prev
+          ? {
+              ...prev,
+              banner_urls: nextBanners
+            }
+          : null
       );
 
       setSavedMessage(
@@ -537,7 +602,9 @@ export function Profile() {
     }
   };
 
-  const handleRemoveBannerSlot = async (slotIndex: number) => {
+  const handleRemoveBannerSlot = async (
+    slotIndex: number
+  ) => {
     try {
       setUploadingBannerSlot(slotIndex);
 
@@ -550,10 +617,16 @@ export function Profile() {
       if (deleteError) throw deleteError;
 
       const nextBanners = [...profile.banner_urls];
+
       nextBanners[slotIndex] = "";
 
       setProfile(prev =>
-        prev ? { ...prev, banner_urls: nextBanners } : null
+        prev
+          ? {
+              ...prev,
+              banner_urls: nextBanners
+            }
+          : null
       );
 
       setSavedMessage(
@@ -562,7 +635,9 @@ export function Profile() {
 
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
-      setValidationError("Failed to clear banner.");
+      setValidationError(
+        "Failed to clear banner."
+      );
     } finally {
       setUploadingBannerSlot(null);
     }
@@ -610,10 +685,15 @@ export function Profile() {
 
       if (profileError) throw profileError;
 
-      setSavedMessage("Store settings updated successfully.");
+      setSavedMessage(
+        "Store settings updated successfully."
+      );
+
       setTimeout(() => setSavedMessage(""), 3000);
     } catch (err: any) {
-      setValidationError(err.message || "Failed to save profile.");
+      setValidationError(
+        err.message || "Failed to save profile."
+      );
     } finally {
       setSaving(false);
     }
@@ -623,13 +703,20 @@ export function Profile() {
     await handleSaveIdentity();
   };
 
+  const handleDeleteAccount = () => {
+    window.open(
+      "https://rivocity.com/delete-account",
+      "_blank",
+      "noopener,noreferrer"
+    );
+  };
+
   const badge =
     approvalBadgeConfig[profile.status] ||
     approvalBadgeConfig.pending;
 
   return (
     <div className="p-6 max-w-(--size-breakpoint-md) mx-auto space-y-8 min-h-screen transition-colors duration-200">
-
       <input
         type="file"
         ref={fileInputRef}
@@ -651,6 +738,7 @@ export function Profile() {
           <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white">
             Account Profile
           </h1>
+
           <p className="text-slate-500 text-sm mt-1">
             Manage store details and banners
           </p>
@@ -663,8 +751,12 @@ export function Profile() {
           className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
         >
           {saving && (
-            <Loader2 size={14} className="animate-spin" />
+            <Loader2
+              size={14}
+              className="animate-spin"
+            />
           )}
+
           Save All Changes
         </button>
       </div>
@@ -714,8 +806,12 @@ export function Profile() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {Array.from({ length: maxProfileBanners }).map((_, index) => {
-            const currentUrl = profile.banner_urls[index];
+          {Array.from({
+            length: maxProfileBanners
+          }).map((_, index) => {
+            const currentUrl =
+              profile.banner_urls[index];
+
             const isSlotUploading =
               uploadingBannerSlot === index;
 
@@ -762,13 +858,16 @@ export function Profile() {
                 <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 opacity-90 group-hover:opacity-100 transition-opacity">
                   <button
                     type="button"
-                    disabled={uploadingBannerSlot !== null}
+                    disabled={
+                      uploadingBannerSlot !== null
+                    }
                     onClick={() =>
                       handleTriggerBannerUpload(index)
                     }
                     className="h-7 px-3 rounded-lg bg-white/90 dark:bg-slate-900/90 backdrop-blur-md text-slate-800 dark:text-white text-[10px] font-bold border border-slate-200 dark:border-slate-800 shadow-3xs hover:bg-white dark:hover:bg-slate-800 transition flex items-center gap-1.5 disabled:opacity-50"
                   >
                     <Camera className="w-3 h-3 text-emerald-500" />
+
                     {currentUrl
                       ? "Change Banner"
                       : "Upload Banner"}
@@ -777,7 +876,9 @@ export function Profile() {
                   {currentUrl && (
                     <button
                       type="button"
-                      disabled={uploadingBannerSlot !== null}
+                      disabled={
+                        uploadingBannerSlot !== null
+                      }
                       onClick={() =>
                         handleRemoveBannerSlot(index)
                       }
@@ -803,14 +904,18 @@ export function Profile() {
               className="w-full h-full object-cover"
             />
           ) : (
-            <User size={20} className="text-slate-400" />
+            <User
+              size={20}
+              className="text-slate-400"
+            />
           )}
         </div>
 
         <div className="space-y-0.5 text-center sm:text-left min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
             <h2 className="text-base font-black text-slate-900 dark:text-white tracking-tight truncate">
-              {profile.store_name || "New Premium Store"}
+              {profile.store_name ||
+                "New Premium Store"}
             </h2>
 
             <div
@@ -823,7 +928,8 @@ export function Profile() {
           </div>
 
           <p className="text-xs text-slate-400 dark:text-slate-500 line-clamp-1 font-medium">
-            {profile.tagline || "No tagline established yet"}
+            {profile.tagline ||
+              "No tagline established yet"}
           </p>
         </div>
       </div>
@@ -855,13 +961,18 @@ export function Profile() {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <User size={36} className="text-slate-400" />
+                <User
+                  size={36}
+                  className="text-slate-400"
+                />
               )}
             </div>
 
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() =>
+                fileInputRef.current?.click()
+              }
               disabled={uploadingImage}
               className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#10B981] hover:bg-[#059669] text-white flex items-center justify-center shadow-md transition-colors"
             >
@@ -878,7 +989,9 @@ export function Profile() {
               <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() =>
+                    fileInputRef.current?.click()
+                  }
                   className="h-8 px-3 rounded-lg bg-slate-100 dark:bg-slate-900 hover:bg-slate-200 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 transition-colors"
                 >
                   Change Photo
@@ -928,14 +1041,22 @@ export function Profile() {
           </div>
         </div>
 
-        <Section title="Store Details" icon={User}>
+        <Section
+          title="Store Details"
+          icon={User}
+        >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field
               label="Store Name"
               value={profile.store_name}
               onChange={v =>
                 setProfile(p =>
-                  p ? { ...p, store_name: v } : null
+                  p
+                    ? {
+                        ...p,
+                        store_name: v
+                      }
+                    : null
                 )
               }
             />
@@ -945,7 +1066,12 @@ export function Profile() {
               value={profile.owner_name}
               onChange={v =>
                 setProfile(p =>
-                  p ? { ...p, owner_name: v } : null
+                  p
+                    ? {
+                        ...p,
+                        owner_name: v
+                      }
+                    : null
                 )
               }
             />
@@ -956,7 +1082,12 @@ export function Profile() {
                 value={profile.tagline}
                 onChange={v =>
                   setProfile(p =>
-                    p ? { ...p, tagline: v } : null
+                    p
+                      ? {
+                          ...p,
+                          tagline: v
+                        }
+                      : null
                   )
                 }
                 placeholder="Establish branding statement lines"
@@ -968,7 +1099,12 @@ export function Profile() {
               value={profile.email_address}
               onChange={v =>
                 setProfile(p =>
-                  p ? { ...p, email_address: v } : null
+                  p
+                    ? {
+                        ...p,
+                        email_address: v
+                      }
+                    : null
                 )
               }
             />
@@ -978,7 +1114,12 @@ export function Profile() {
               value={profile.primary_phone}
               onChange={v =>
                 setProfile(p =>
-                  p ? { ...p, primary_phone: v } : null
+                  p
+                    ? {
+                        ...p,
+                        primary_phone: v
+                      }
+                    : null
                 )
               }
             />
@@ -988,7 +1129,12 @@ export function Profile() {
               value={profile.alternate_phone}
               onChange={v =>
                 setProfile(p =>
-                  p ? { ...p, alternate_phone: v } : null
+                  p
+                    ? {
+                        ...p,
+                        alternate_phone: v
+                      }
+                    : null
                 )
               }
               placeholder="Secondary connection channel"
@@ -997,9 +1143,11 @@ export function Profile() {
         </Section>
       </div>
 
-      <Section title="Store Information" icon={FileText}>
+      <Section
+        title="Store Information"
+        icon={FileText}
+      >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-
           <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-xl flex items-center justify-between">
             <div>
               <p className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
@@ -1027,7 +1175,9 @@ export function Profile() {
               </p>
             </div>
 
-            <div className={`font-bold text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full ${badge.bg} ${badge.text}`}>
+            <div
+              className={`font-bold text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full ${badge.bg} ${badge.text}`}
+            >
               {badge.label}
             </div>
           </div>
@@ -1084,6 +1234,38 @@ export function Profile() {
           </div>
         </div>
       </Section>
+
+      <div className="pt-2">
+        <div className="rounded-2xl border border-rose-200 dark:border-rose-900/50 bg-rose-50/50 dark:bg-rose-950/10 p-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Trash2 className="w-4 h-4 text-rose-600" />
+
+                <h3 className="text-sm font-bold text-rose-700 dark:text-rose-400">
+                  Delete Account
+                </h3>
+              </div>
+
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 max-w-xl">
+                Request permanent deletion of your RivoCity vendor
+                account and eligible personal data. You will be
+                redirected to the official RivoCity account deletion
+                page.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleDeleteAccount}
+              className="h-10 px-4 rounded-xl border border-rose-200 dark:border-rose-900 bg-white dark:bg-slate-950 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-50 dark:hover:bg-rose-950/30 transition flex items-center justify-center gap-2 shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Delete Account
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
