@@ -4,19 +4,14 @@ import * as fieldNormalizer from './fieldNormalizer';
 
 /**
  * Reusable helper to normalize various date formats into PostgreSQL 'YYYY-MM-DD'.
- * Supports MM/YYYY, M/YYYY, MM-YY, MM-YYYY, YYYY-MM, YYYY/MM, YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY.
  */
 function normalizeDate(dateStr: string | null | undefined): string | null {
   if (!dateStr) return null;
   const trimmed = String(dateStr).trim();
   if (!trimmed) return null;
 
-  // Already ISO date YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-    return trimmed;
-  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
 
-  // YYYY-MM or YYYY/MM -> first day
   const yearMonthMatch = trimmed.match(/^(\d{4})[-\/](\d{1,2})$/);
   if (yearMonthMatch) {
     const [, y, m] = yearMonthMatch;
@@ -26,7 +21,6 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
     }
   }
 
-  // MM/YYYY or M/YYYY or MM-YYYY
   const monthYearMatch = trimmed.match(/^(\d{1,2})[-\/](\d{4})$/);
   if (monthYearMatch) {
     const [, m, y] = monthYearMatch;
@@ -36,7 +30,6 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
     }
   }
 
-  // MM-YY (e.g. 12-27 -> 2027-12-01)
   const monthTwoDigitYearMatch = trimmed.match(/^(\d{1,2})-(\d{2})$/);
   if (monthTwoDigitYearMatch) {
     const [, m, yy] = monthTwoDigitYearMatch;
@@ -47,7 +40,6 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
     }
   }
 
-  // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
   const fullDateMatch = trimmed.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/);
   if (fullDateMatch) {
     const [, d, m, y] = fullDateMatch;
@@ -59,27 +51,20 @@ function normalizeDate(dateStr: string | null | undefined): string | null {
     }
   }
 
-  // Fallback: Try parsing native Date if standard string format
   const parsed = Date.parse(trimmed);
   if (!isNaN(parsed)) {
     const dateObj = new Date(parsed);
     const y = dateObj.getFullYear();
     const m = String(dateObj.getMonth() + 1).padStart(2, '0');
     const d = String(dateObj.getDate()).padStart(2, '0');
-    if (y > 1970 && y < 2100) {
-      return `${y}-${m}-${d}`;
-    }
+    if (y > 1970 && y < 2100) return `${y}-${m}-${d}`;
   }
 
   return null;
 }
 
 /**
- * Ingests a CSV File object, parses it using PapaParse, normalizes headers and rows via fieldNormalizer,
- * applies flexible row-acceptance logic, and logs debugging metrics.
- *
- * @param file The CSV File object to parse.
- * @returns A promise resolving to an array of ParsedProduct objects.
+ * Ingests a CSV File object and maps supplier-specific headers to the canonical product fields.
  */
 export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
   return new Promise((resolve, reject) => {
@@ -103,10 +88,11 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
 
         for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
           const rowData = rawRows[i] || [];
-          const normalizedTest = (fieldNormalizer as any).normalizeHeaders 
-            ? (fieldNormalizer as any).normalizeHeaders(rowData) 
-            : rowData;
-          const matchedCount = (normalizedTest as string[]).filter((h: string) => h && h.trim().length > 0).length;
+          const normalizedTest = fieldNormalizer.normalizeHeaders(rowData);
+          const matchedCount = normalizedTest.filter((h: string) =>
+            ['productName', 'hsn', 'quantity', 'unit', 'purchasePrice', 'sellingPrice', 'mrp', 'barcode', 'batch', 'expiry', 'gst', 'sku', 'manufacturer', 'category', 'subcategory'].includes(h)
+          ).length;
+
           if (matchedCount >= 2) {
             headerRowIndex = i;
             break;
@@ -119,12 +105,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         Papa.parse(adjustedCsvText, {
           header: true,
           skipEmptyLines: 'greedy',
-          transformHeader: (header: string) => {
-            const normalized = (fieldNormalizer as any).normalizeHeaders 
-              ? (fieldNormalizer as any).normalizeHeaders([header]) 
-              : [header];
-            return normalized[0] || header.trim();
-          },
+          transformHeader: (header: string) => fieldNormalizer.normalizeHeaders([header])[0] || header.trim(),
           complete: (results: Papa.ParseResult<Record<string, any>>) => {
             try {
               const rows = results.data as Record<string, any>[];
@@ -135,80 +116,90 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
 
               for (let index = 0; index < rows.length; index++) {
                 const row = rows[index];
-                
-                let hasData = false;
-                for (const val of Object.values(row)) {
-                  if (val !== null && val !== undefined && String(val).trim().length > 0) {
-                    hasData = true;
-                    break;
-                  }
-                }
+
+                const hasData = Object.values(row).some(
+                  val => val !== null && val !== undefined && String(val).trim().length > 0
+                );
 
                 if (!hasData) {
-                  console.log(`[CSV Debug] Discarded row ${index}: Reason -> Row is completely empty.`);
+                  console.log(`[CSV Debug] Discarded row ${index}: empty row.`);
                   continue;
                 }
 
-                const normalized = (fieldNormalizer as any).normalizeInvoiceRow 
-                  ? (fieldNormalizer as any).normalizeInvoiceRow(row) 
-                  : ((fieldNormalizer as any).normalizeFields ? (fieldNormalizer as any).normalizeFields(Object.values(row)) : row);
-
+                const normalized = fieldNormalizer.normalizeInvoiceRow(row);
                 console.log(`[CSV Debug] Normalized row ${index}:`, normalized);
 
-                const name = normalized.productName || normalized.name || row['Product'] || row['name'] || row['Item'] || Object.values(row)[0] || null;
+                const name = normalized.productName || null;
+
                 const quantityVal = normalized.quantity !== null && normalized.quantity !== undefined && String(normalized.quantity).trim() !== ''
                   ? parseFloat(String(normalized.quantity).replace(/,/g, ''))
-                  : (row['Qty'] ? parseFloat(String(row['Qty']).replace(/,/g, '')) : null);
+                  : null;
+
                 const costVal = normalized.purchasePrice !== null && normalized.purchasePrice !== undefined && String(normalized.purchasePrice).trim() !== ''
                   ? parseFloat(String(normalized.purchasePrice).replace(/,/g, ''))
-                  : (row['Rate'] ? parseFloat(String(row['Rate']).replace(/,/g, '')) : (row['Amount'] ? parseFloat(String(row['Amount']).replace(/,/g, '')) : null));
+                  : null;
+
+                const sellingPriceVal = normalized.sellingPrice !== null && normalized.sellingPrice !== undefined && String(normalized.sellingPrice).trim() !== ''
+                  ? parseFloat(String(normalized.sellingPrice).replace(/,/g, ''))
+                  : null;
+
                 const mrpVal = normalized.mrp !== null && normalized.mrp !== undefined && String(normalized.mrp).trim() !== ''
                   ? parseFloat(String(normalized.mrp).replace(/,/g, ''))
                   : null;
+
                 const gstVal = normalized.gst !== null && normalized.gst !== undefined && String(normalized.gst).trim() !== ''
                   ? parseFloat(String(normalized.gst).replace(/%/g, '').trim())
                   : null;
 
                 const hasName = Boolean(name && String(name).trim().length > 0);
-                const hasNumericField = (quantityVal !== null && !isNaN(quantityVal)) ||
-                                        (costVal !== null && !isNaN(costVal)) ||
-                                        (mrpVal !== null && !isNaN(mrpVal));
+                const hasNumericField =
+                  (quantityVal !== null && !isNaN(quantityVal)) ||
+                  (costVal !== null && !isNaN(costVal)) ||
+                  (sellingPriceVal !== null && !isNaN(sellingPriceVal)) ||
+                  (mrpVal !== null && !isNaN(mrpVal));
 
                 if (!hasName || !hasNumericField) {
-                  console.log(`[CSV Debug] Discarded row ${index}: Reason -> Missing required Product Name or minimum one numeric field (Quantity/PurchasePrice/MRP).`, { name, quantityVal, costVal, mrpVal, normalized, row });
+                  console.log(`[CSV Debug] Discarded row ${index}: Missing product name or numeric product field.`, {
+                    name,
+                    quantityVal,
+                    costVal,
+                    sellingPriceVal,
+                    mrpVal
+                  });
                   continue;
                 }
 
                 const rawTextTokens = Object.values(row).filter(Boolean);
                 const rawText = rawTextTokens.join(' | ');
 
-                const normalizedExpiry = normalizeDate(normalized.expiry || row['Expiry'] || row['Exp'] || null);
-                const normalizedMfg = normalizeDate(normalized.mfgDate || normalized.manufacturingDate || row['Mfg Date'] || row['Manufacturing Date'] || null);
+                const normalizedExpiry = normalizeDate(normalized.expiry || null);
+                const normalizedMfg = normalizeDate(normalized.mfgDate || normalized.manufacturingDate || null);
 
                 const parsedProduct: ParsedProduct = {
-                  name: name,
+                  name: String(name).trim(),
                   quantity: isNaN(quantityVal as number) ? null : quantityVal,
                   costPrice: isNaN(costVal as number) ? null : costVal,
+                  sellingPrice: isNaN(sellingPriceVal as number) ? null : sellingPriceVal,
                   mrp: isNaN(mrpVal as number) ? null : mrpVal,
                   expiry: normalizedExpiry,
                   batch: normalized.batch || null,
                   manufacturer: normalized.manufacturer || null,
-                  rawText: rawText,
+                  rawText,
                   barcode: normalized.barcode || null,
                   sku: normalized.sku || null,
                   gstRate: isNaN(gstVal as number) ? null : gstVal,
                   gstSlab: gstVal !== null && !isNaN(gstVal) ? `${gstVal}%` : null,
                   gstPercent: isNaN(gstVal as number) ? null : gstVal,
-                  hsnCode: normalized.hsn || normalized.hsnCode || row['HSN'] || null,
+                  hsnCode: normalized.hsn || null,
                   weight: normalized.weight || null,
-                  unit: normalized.unit || row['Unit'] || null,
+                  unit: normalized.unit || null,
                   confidence: 100,
                   manufacturingDate: normalizedMfg,
                   mfgDate: normalizedMfg
                 };
 
-                console.log(`[CSV Debug] Accepted row ${index}:`, parsedProduct);
                 parsedProducts.push(parsedProduct);
+                console.log(`[CSV Debug] Accepted row ${index}:`, parsedProduct);
               }
 
               console.log(`[CSV Debug] Final parsed array count: ${parsedProducts.length}`);
