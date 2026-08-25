@@ -25,16 +25,19 @@ function normalizeHeaderKey(header: string): string {
   if (['gst', 'gst%', 'gstrate', 'gstpercent', 'tax', 'tax%'].includes(clean)) {
     return 'gst';
   }
-  if (['quantity', 'qty', 'stock', 'units', 'count'].includes(clean)) {
+  if (['quantity', 'qty', 'stock', 'units', 'count', 'stockquantity', 'stockqty', 'quantityavailable', 'availablequantity'].includes(clean)) {
     return 'quantity';
   }
-  if (['unit', 'uom', 'pack'].includes(clean)) {
+  if (['unit', 'uom', 'pack', 'packing', 'packsize'].includes(clean)) {
     return 'unit';
   }
   if (['cost', 'costprice', 'purchaseprice', 'rate', 'unitprice', 'buyprice', 'cp', 'ptr', 'pts', 'netrate'].includes(clean)) {
     return 'purchasePrice';
   }
-  if (['mrp', 'sellingprice', 'retailprice', 'sp', 'maxretailprice'].includes(clean)) {
+  if (['price', 'priceinr', 'price(rs)', 'pricers', 'sellingprice', 'sellprice', 'retailprice', 'sp', 'maxretailprice'].includes(clean)) {
+    return 'sellingPrice';
+  }
+  if (['mrp', 'mrpinr', 'mrprs', 'maximumretailprice'].includes(clean)) {
     return 'mrp';
   }
   if (['sku', 'itemcode', 'code'].includes(clean)) {
@@ -49,8 +52,17 @@ function normalizeHeaderKey(header: string): string {
   if (['manufacturer', 'mfg', 'company', 'brand'].includes(clean)) {
     return 'manufacturer';
   }
-  if (['category', 'cat', 'group'].includes(clean)) {
+  if (['category', 'cat', 'group', 'vendorcategory', 'productcategory'].includes(clean)) {
     return 'category';
+  }
+  if (['subcategory', 'subcat', 'productsubcategory'].includes(clean)) {
+    return 'subcategory';
+  }
+  if (['lowstockthreshold', 'lowstock', 'reorderlevel', 'reorderpoint'].includes(clean)) {
+    return 'lowStockThreshold';
+  }
+  if (['variant', 'variantname', 'size', 'flavour', 'flavor'].includes(clean)) {
+    return 'variant';
   }
   if (['notes', 'remarks', 'note'].includes(clean)) {
     return 'notes';
@@ -114,15 +126,15 @@ export function normalizeFields(columns: string[]): Record<string, any> {
 function isRealHeaderRow(row: string[]): boolean {
   const knownKeywords = [
     'product', 'item', 'name', 'description', 'particulars',
-    'hsn', 'sac', 'qty', 'quantity', 'rate', 'mrp', 'cost',
-    'amount', 'barcode', 'batch', 'expiry', 'gst', 'sku', 'unit', 'stock', 'ptr', 'pts'
+    'hsn', 'sac', 'qty', 'quantity', 'rate', 'price', 'mrp', 'cost',
+    'amount', 'barcode', 'batch', 'expiry', 'gst', 'sku', 'unit', 'stock', 'stockquantity', 'ptr', 'pts'
   ];
 
   let matches = 0;
   for (const cell of row) {
     if (!cell) continue;
     const normalized = normalizeHeaderKey(cell);
-    if (knownKeywords.includes(normalized) || ['productName', 'hsn', 'quantity', 'purchasePrice', 'mrp'].includes(normalized)) {
+    if (knownKeywords.includes(normalized) || ['productName', 'hsn', 'quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(normalized)) {
       matches++;
     }
   }
@@ -193,13 +205,14 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
                 const name = normalized.productName || null;
                 const quantityVal = normalized.quantity ? parseFloat(String(normalized.quantity).replace(/,/g, '')) : null;
                 const costVal = normalized.purchasePrice ? parseFloat(String(normalized.purchasePrice).replace(/,/g, '')) : null;
+                const sellingPriceVal = normalized.sellingPrice ? parseFloat(String(normalized.sellingPrice).replace(/,/g, '')) : null;
                 const mrpVal = normalized.mrp ? parseFloat(String(normalized.mrp).replace(/,/g, '')) : null;
                 const gstVal = normalized.gst ? parseFloat(String(normalized.gst).replace(/%/g, '').trim()) : null;
 
                 const rawTextTokens = Object.values(row).filter(Boolean);
                 const rawText = rawTextTokens.join(' | ');
 
-                if (!name && quantityVal === null && costVal === null) {
+                if (!name && quantityVal === null && costVal === null && sellingPriceVal === null && mrpVal === null) {
                   continue;
                 }
 
@@ -207,6 +220,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
                   name: name,
                   quantity: isNaN(quantityVal as number) ? null : quantityVal,
                   costPrice: isNaN(costVal as number) ? null : costVal,
+                  sellingPrice: isNaN(sellingPriceVal as number) ? null : sellingPriceVal,
                   mrp: isNaN(mrpVal as number) ? null : mrpVal,
                   expiry: normalized.expiry || null,
                   batch: normalized.batch || null,
