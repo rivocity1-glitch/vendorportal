@@ -9,6 +9,11 @@ export interface ParsedProduct {
   manufacturer: string | null;
   rawText: string;
 
+  // CSV/catalog metadata
+  category?: string | null;
+  subcategory?: string | null;
+  variant?: string | null;
+
   // Extended extracted fields
   barcode?: string | null;
   sku?: string | null;
