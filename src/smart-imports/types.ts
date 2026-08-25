@@ -11,8 +11,13 @@ export interface ParsedProduct {
 
   // CSV/catalog metadata
   category?: string | null;
+  sourceCategory?: string | null;
+  productCategory?: string | null;
   subcategory?: string | null;
   variant?: string | null;
+  lowStockThreshold?: number | null;
+  notes?: string | null;
+  prescriptionRequired?: boolean | null;
 
   // Extended extracted fields
   barcode?: string | null;
@@ -40,7 +45,7 @@ export interface CategoryMatch {
 }
 
 export interface ReviewItem extends ParsedProduct {
-  gst: null;
+  gst: number | null;
   id: string;
   selected: boolean;
   category: string | null;
