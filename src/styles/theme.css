@@ -200,5 +200,10 @@
 
   .relative.h-\[160px\]:has(> img[alt^="Banner "]) > img[alt^="Banner "] {
     object-fit: contain;
+    transform: none !important;
+  }
+
+  .relative.h-\[160px\]:has(> img[alt^="Banner "]) > div.bg-gradient-to-t {
+    display: none !important;
   }
 }
