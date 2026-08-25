@@ -15,9 +15,22 @@ export interface ParsedProduct {
   productCategory?: string | null;
   subcategory?: string | null;
   variant?: string | null;
+  packSize?: string | null;
   lowStockThreshold?: number | null;
   notes?: string | null;
   prescriptionRequired?: boolean | null;
+
+  // Extended pricing/tax fields
+  purchaseRate?: number | null;
+  ptr?: number | null;
+  pts?: number | null;
+  scheme?: string | null;
+  schemeDiscount?: number | null;
+  netRate?: number | null;
+  cgst?: number | null;
+  sgst?: number | null;
+  igst?: number | null;
+  hsn?: string | null;
 
   // Extended extracted fields
   barcode?: string | null;
@@ -54,19 +67,8 @@ export interface ReviewItem extends ParsedProduct {
   productMatch: ProductMatch | null;
   categoryMatch: CategoryMatch | null;
   unit?: string | null;
-  purchaseRate?: number | null;
   sellingPrice?: number | null;
-  ptr?: number | null;
-  pts?: number | null;
-  scheme?: string | null;
-  schemeDiscount?: number | null;
-  netRate?: number | null;
-  hsn?: string | null;
-  cgst?: number | null;
-  sgst?: number | null;
-  igst?: number | null;
   invoiceRaw?: string | null;
-  packSize?: string | null;
 }
 
 export interface ImportSummary {
