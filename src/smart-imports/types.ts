@@ -3,6 +3,7 @@ export interface ParsedProduct {
   quantity: number | null;
   mrp: number | null;
   costPrice: number | null;
+  sellingPrice?: number | null;
   expiry: string | null;
   batch: string | null;
   manufacturer: string | null;
