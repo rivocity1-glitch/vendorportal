@@ -12,59 +12,71 @@ import { invoiceTemplates } from "./invoiceTemplates";
 import { supabase } from "../lib/supabase";
 import { normalizeInvoiceRow } from './fieldNormalizer';
 
-/**
- * Checks if the uploaded file is a CSV based on MIME type or file extension.
- */
 function isCsvFile(file: File): boolean {
   const csvMimeTypes = ['text/csv', 'application/csv', 'application/vnd.ms-excel'];
-  const isMimeMatch = csvMimeTypes.includes(file.type.toLowerCase());
-  const isExtensionMatch = file.name.toLowerCase().endsWith('.csv');
-  return isMimeMatch || isExtensionMatch;
+  return csvMimeTypes.includes(file.type.toLowerCase()) || file.name.toLowerCase().endsWith('.csv');
 }
 
-/**
- * Orchestrates the complete end-to-end multi-layered Smart Import processing pipeline.
- * Routes CSVs directly to CSV parsing, digital PDFs to pdf.js text extraction, and images/scanned PDFs to OCR.
- *
- * @param file The uploaded invoice image, PDF, or CSV file object.
- * @param existingProducts Optional array of master reference inventory products for sync matching.
- * @returns A promise resolving to the final structured PipelineResult mapping details.
- */
+function normalizeCategoryLabel(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** Prefer the category explicitly supplied by a CSV, then use known aliases, then product-name matching. */
+function resolveCategoryId(product: ParsedProduct, categories: { id: string; name: string }[] | null | undefined, fallbackName: string): string | null {
+  if (!categories?.length) return null;
+
+  const supplied = normalizeCategoryLabel(product.category);
+  if (supplied) {
+    const exact = categories.find(c => normalizeCategoryLabel(c.name) === supplied);
+    if (exact) return exact.id;
+
+    const aliases: Record<string, string[]> = {
+      pharmacy: ['medical', 'pharmacy'],
+      'pet store': ['pet supplies', 'pet store'],
+      'general store': ['grocery', 'general store'],
+      'beauty cosmetics': ['beauty cosmetics', 'beauty', 'cosmetics', 'personal care'],
+      'fruits vegetables': ['fruits vegetables', 'fruits and vegetables']
+    };
+
+    const candidates = aliases[String(product.category ?? '').trim().toLowerCase()] ?? [];
+    for (const candidate of candidates) {
+      const match = categories.find(c => normalizeCategoryLabel(c.name) === normalizeCategoryLabel(candidate));
+      if (match) return match.id;
+    }
+
+    // Last-resort partial match for catalog category labels such as "Beauty & Personal Care".
+    const partial = categories.find(c => {
+      const db = normalizeCategoryLabel(c.name);
+      return db.includes(supplied) || supplied.includes(db);
+    });
+    if (partial) return partial.id;
+  }
+
+  const fallback = categories.find(c => normalizeCategoryLabel(c.name) === normalizeCategoryLabel(fallbackName));
+  return fallback?.id ?? null;
+}
+
 export async function runImportPipeline(
   file: File,
   existingProducts: ExistingProduct[] = []
 ): Promise<PipelineResult> {
-  if (!file) {
-    throw new Error('Pipeline execution aborted: No file payload provided.');
-  }
+  if (!file) throw new Error('Pipeline execution aborted: No file payload provided.');
 
   let parsedProducts: ParsedProduct[] = [];
 
-  // Branch 1: Native CSV Processing Flow
   if (isCsvFile(file)) {
     console.log("CSV detected: Routing directly to CSV Importer without OCR or PDF processing...");
     parsedProducts = await parseCsvFile(file);
     console.log("CSV parsing completed. Total parsed items:", parsedProducts.length);
   } else {
-    // Branch 2: Standard PDF & Image Ingestion Pipelines
     let fullText = '';
     let requiresOcr = false;
 
     if (file.type === 'application/pdf') {
-      console.log("PDF detected: Attempting pdf.js native text extraction...");
       try {
         fullText = await extractPdfText(file);
-        console.log('PDF text extraction completed', 'Length of extracted text:', fullText.length);
-
-        const MIN_TEXT_LENGTH_THRESHOLD = 50;
-        const isMeaningfulText = fullText.length >= MIN_TEXT_LENGTH_THRESHOLD && isInvoiceLikely(fullText);
-
-        if (isMeaningfulText) {
-          console.log("Sufficient digital PDF text extracted. Skipping OCR.");
-        } else {
-          console.log("PDF extraction returned insufficient text. Treating as scanned PDF and falling back to OCR.");
-          requiresOcr = true;
-        }
+        const isMeaningfulText = fullText.length >= 50 && isInvoiceLikely(fullText);
+        requiresOcr = !isMeaningfulText;
       } catch (error) {
         console.warn("Failed to extract native PDF text, falling back to OCR:", error);
         requiresOcr = true;
@@ -76,111 +88,44 @@ export async function runImportPipeline(
     }
 
     if (requiresOcr) {
-      console.log("Using OCR pipeline");
       fullText = '';
-
-      let processedImageUrls: string[] = [];
-      try {
-        processedImageUrls = await prepareForOCR(file);
-      } catch (error) {
-        console.error(error);
-        throw error;
-      }
-
-      if (processedImageUrls.length === 0) {
-        throw new Error('Pipeline execution aborted: File preparation stage failed to return valid image paths.');
-      }
+      const processedImageUrls = await prepareForOCR(file);
+      if (processedImageUrls.length === 0) throw new Error('Pipeline execution aborted: File preparation stage failed to return valid image paths.');
 
       for (const imageUrl of processedImageUrls) {
         let inputForOcr: File | string = imageUrl;
-
-        if (typeof imageUrl === 'string') {
-          try {
-            if (imageUrl.startsWith('data:')) {
-              const res = await fetch(imageUrl);
-              const blob = await res.blob();
-              inputForOcr = new File([blob], 'page.png', { type: blob.type });
-            } else {
-              const res = await fetch(imageUrl);
-              const blob = await res.blob();
-              const name = imageUrl.split('/').pop() || 'page.png';
-              inputForOcr = new File([blob], name, { type: blob.type });
-            }
-          } catch (e) {
-            console.error(e);
-            continue;
-          }
-        }
-
         try {
-          const pageText = await extractText(inputForOcr as File);
-          fullText += pageText + '\n';
+          const res = await fetch(imageUrl);
+          const blob = await res.blob();
+          inputForOcr = new File([blob], typeof imageUrl === 'string' ? (imageUrl.split('/').pop() || 'page.png') : 'page.png', { type: blob.type });
+          fullText += await extractText(inputForOcr as File) + '\n';
         } catch (error) {
           console.error(error);
-          throw error;
         }
       }
     }
 
-    // 1. Native PDF/OCR lines logging
-    const nativePdfLines = fullText.split(/\r?\n/).filter(line => line.trim().length > 0);
-    console.log('[Pipeline Debug] 1. Native PDF lines:', nativePdfLines);
-
-    // 2. Structured rows returned by tableReconstructor
     const reconstructedRows: StructuredRow[] = reconstructInvoiceTable(fullText);
-    console.log('[Pipeline Debug] 2. Structured rows returned by tableReconstructor:', reconstructedRows);
-
     if (reconstructedRows.length > 0) {
-      const normalizedRows: string[] = [];
-      normalizedRows.push('productName | hsn | quantity | unit | purchasePrice | mrp');
-
+      const normalizedRows = ['productName | hsn | quantity | unit | purchasePrice | mrp'];
       for (const rowObj of reconstructedRows) {
-        // 3. Objects passed into fieldNormalizer
-        console.log('[Pipeline Debug] 3. Object passed into fieldNormalizer:', rowObj);
         const normObj = normalizeInvoiceRow(rowObj);
-        const lineStr = `${normObj.productName || ''} | ${normObj.hsn || ''} | ${normObj.quantity || ''} | ${normObj.unit || ''} | ${normObj.purchasePrice || ''} | ${normObj.mrp || ''}`;
-        normalizedRows.push(lineStr);
+        normalizedRows.push(`${normObj.productName || ''} | ${normObj.hsn || ''} | ${normObj.quantity || ''} | ${normObj.unit || ''} | ${normObj.purchasePrice || ''} | ${normObj.mrp || ''}`);
       }
-
       parsedProducts = parseInvoiceLines(normalizedRows);
     } else {
       let selectedTemplate = invoiceTemplates.find(t => t.detect(fullText));
-      if (!selectedTemplate) {
-        selectedTemplate = invoiceTemplates[invoiceTemplates.length - 1];
-        if (!selectedTemplate) {
-          throw new Error("Unsupported invoice format.");
-        }
-      }
-
-      let cleanLines: string[] = [];
-      try {
-        cleanLines = selectedTemplate.parse(fullText);
-      } catch (error) {
-        console.error(error);
-        throw error;
-      }
-
-      if (cleanLines.length === 0) {
-        return {
-          items: [],
-          summary: { total: 0, newProducts: 0, existingProducts: 0, needsReview: 0 }
-        };
-      }
-
+      if (!selectedTemplate) selectedTemplate = invoiceTemplates[invoiceTemplates.length - 1];
+      if (!selectedTemplate) throw new Error("Unsupported invoice format.");
+      const cleanLines = selectedTemplate.parse(fullText);
+      if (cleanLines.length === 0) return { items: [], summary: { total: 0, newProducts: 0, existingProducts: 0, needsReview: 0 } };
       parsedProducts = parseInvoiceLines(cleanLines);
     }
   }
 
-  if (parsedProducts.length === 0) {
-    return {
-      items: [],
-      summary: { total: 0, newProducts: 0, existingProducts: 0, needsReview: 0 }
-    };
-  }
+  if (parsedProducts.length === 0) return { items: [], summary: { total: 0, newProducts: 0, existingProducts: 0, needsReview: 0 } };
 
-  const { data: categories } = await supabase
-    .from("product_categories")
-    .select("id,name");
+  const { data: categories } = await supabase.from("product_categories").select("id,name");
 
   const reviewItems: ReviewItem[] = [];
   let newProductsCount = 0;
@@ -188,8 +133,8 @@ export async function runImportPipeline(
   let needsReviewCount = 0;
 
   for (let i = 0; i < parsedProducts.length; i++) {
-    const product = parsedProducts[i] as any;
-    
+    const product = parsedProducts[i] as ParsedProduct;
+
     let categoryMatch;
     try {
       categoryMatch = matchCategory(product);
@@ -206,16 +151,16 @@ export async function runImportPipeline(
       throw error;
     }
 
-    const matchedCategory = categoryMatch.categoryName
-      ? categories?.find(c => c.name.toLowerCase() === categoryMatch.categoryName.toLowerCase())
-      : null;
-
-    const finalCategory = matchedCategory?.id ?? null;
+    // CSV category wins over product-name guessing. This prevents e.g. Coca-Cola from being classified as Medical.
+    const finalCategory = resolveCategoryId(product, categories, categoryMatch.categoryName);
     const finalStock = product.quantity ?? DEFAULT_IMPORT_VALUES.STOCK;
 
     let status: typeof IMPORT_STATUS[keyof typeof IMPORT_STATUS] = IMPORT_STATUS.NEW;
 
-    if (!product.name || product.costPrice === null || product.mrp === null) {
+    // A CSV containing a valid selling price is importable even when supplier cost/MRP are absent.
+    const hasUsablePrice = [product.sellingPrice, product.mrp, product.costPrice].some(v => v !== null && v !== undefined && Number(v) > 0);
+
+    if (!product.name || !hasUsablePrice) {
       status = IMPORT_STATUS.NEEDS_REVIEW;
       needsReviewCount++;
     } else if (productMatch.matchType === 'Exact' || productMatch.matchType === 'Fuzzy') {
@@ -232,15 +177,15 @@ export async function runImportPipeline(
       selected: true,
       category: finalCategory,
       stock: finalStock,
-      unit: product.unit ?? null,
-      costPrice: product.costPrice !== null && product.costPrice !== undefined ? product.costPrice : null,
-      mrp: product.mrp !== null && product.mrp !== undefined ? product.mrp : null,
-      packing: product.packing ?? product.unit ?? null,
+      unit: product.unit ?? product.variant ?? null,
+      costPrice: product.costPrice ?? null,
+      mrp: product.mrp ?? null,
+      packing: product.variant ?? product.unit ?? null,
       manufacturer: product.manufacturer ?? null,
       barcode: product.barcode ?? null,
       sku: product.sku ?? null,
-      purchaseRate: product.purchaseRate ?? null,
-      sellingRate: product.sellingRate ?? null,
+      purchaseRate: product.purchaseRate ?? product.costPrice ?? null,
+      sellingRate: product.sellingPrice ?? null,
       ptr: product.ptr ?? null,
       pts: product.pts ?? null,
       scheme: product.scheme ?? null,
@@ -252,10 +197,10 @@ export async function runImportPipeline(
       sgst: product.sgst ?? null,
       igst: product.igst ?? null,
       hsnCode: product.hsnCode ?? null,
-      batch: product.batch ?? product.batchNumber ?? null,
-      expiry: product.expiry ?? product.expiryDate ?? null,
+      batch: product.batch ?? null,
+      expiry: product.expiry ?? null,
       manufacturingDate: product.manufacturingDate ?? null,
-      invoiceRaw: product.invoiceRaw ?? null,
+      invoiceRaw: product.rawText ?? null,
       status,
       productMatch: productMatch.matchType !== 'None' ? productMatch : null,
       categoryMatch: categoryMatch.confidence > 0 ? categoryMatch : null
@@ -264,15 +209,13 @@ export async function runImportPipeline(
     reviewItems.push(reviewItem);
   }
 
-  const summary: ImportSummary = {
-    total: reviewItems.length,
-    newProducts: newProductsCount,
-    existingProducts: existingProductsCount,
-    needsReview: needsReviewCount
-  };
-
   return {
     items: reviewItems,
-    summary
+    summary: {
+      total: reviewItems.length,
+      newProducts: newProductsCount,
+      existingProducts: existingProductsCount,
+      needsReview: needsReviewCount
+    }
   };
 }
