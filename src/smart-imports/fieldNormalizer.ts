@@ -1,5 +1,4 @@
 import Papa from 'papaparse';
-import { ParsedProduct } from './types';
 
 function normalizeHeaderKey(header: string): string {
   const clean = header.trim().toLowerCase().replace(/[_\s-]+/g, '');
@@ -13,29 +12,36 @@ function normalizeHeaderKey(header: string): string {
   if (['quantity', 'qty', 'stock', 'units', 'count', 'stockquantity', 'stockqty', 'quantityavailable', 'availablequantity'].includes(clean)) return 'quantity';
   if (['unit', 'uom', 'pack', 'packing', 'packsize'].includes(clean)) return 'unit';
   if (['cost', 'costprice', 'purchaseprice', 'rate', 'unitprice', 'buyprice', 'cp', 'ptr', 'pts', 'netrate'].includes(clean)) return 'purchasePrice';
-  if (['price', 'priceinr', 'price(inr)', 'price(rs)', 'pricers', 'sellingprice', 'sellprice', 'retailprice', 'sp', 'maxretailprice'].includes(clean)) return 'sellingPrice';
-  if (['mrp', 'mrpinr', 'mrp(inr)', 'mrprs', 'maximumretailprice'].includes(clean)) return 'mrp';
+  if (['price', 'priceinr', 'price(inr)', 'price(rs)', 'pricers', 'sellingprice', 'sellprice', 'retailprice', 'sp'].includes(clean)) return 'sellingPrice';
+  if (['mrp', 'mrpinr', 'mrp(inr)', 'mrprs', 'maximumretailprice', 'maxretailprice'].includes(clean)) return 'mrp';
   if (['sku', 'itemcode', 'code'].includes(clean)) return 'sku';
   if (['scheme', 'schemepct', 'sch'].includes(clean)) return 'scheme';
   if (['schemedisc', 'schemediscount'].includes(clean)) return 'schemeDiscount';
   if (['manufacturer', 'mfg', 'company', 'brand'].includes(clean)) return 'manufacturer';
-  if (['category', 'cat', 'group', 'vendorcategory', 'productcategory'].includes(clean)) return 'category';
+
+  // Keep the two CSV category concepts separate. Vendor Category is the
+  // top-level catalog category; Product Category is a product classification.
+  if (['vendorcategory', 'category', 'cat', 'group'].includes(clean)) return 'category';
+  if (['productcategory', 'productcat', 'category1'].includes(clean)) return 'productCategory';
   if (['subcategory', 'subcat', 'productsubcategory'].includes(clean)) return 'subcategory';
   if (['lowstockthreshold', 'lowstock', 'reorderlevel', 'reorderpoint'].includes(clean)) return 'lowStockThreshold';
   if (['variant', 'variantname', 'size', 'flavour', 'flavor'].includes(clean)) return 'variant';
+  if (['shelf/location', 'shelf', 'location', 'shelflocation', 'storelocation'].includes(clean)) return 'shelfLocation';
   if (['notes', 'remarks', 'note'].includes(clean)) return 'notes';
+  if (['prescriptionrequired', 'prescription', 'rxrequired'].includes(clean)) return 'prescriptionRequired';
 
   return clean;
 }
 
 export function normalizeHeaders(headers: string[]): string[] {
-  return headers.map(header => normalizeHeaderKey(header));
+  return headers.map(normalizeHeaderKey);
 }
 
 export function normalizeInvoiceRow(row: Record<string, any>): Record<string, any> {
   const canonicalRow: Record<string, any> = {};
   for (const [key, value] of Object.entries(row)) {
-    canonicalRow[normalizeHeaderKey(key)] = value;
+    const normalizedKey = normalizeHeaderKey(key);
+    canonicalRow[normalizedKey] = value;
   }
   return canonicalRow;
 }
@@ -50,11 +56,64 @@ export function normalizeFields(columns: string[]): Record<string, any> {
   return normalized;
 }
 
+function normalizeDate(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const trimmed = String(dateStr).trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+  const yearMonthMatch = trimmed.match(/^(\d{4})[-\/](\d{1,2})$/);
+  if (yearMonthMatch) {
+    const [, y, m] = yearMonthMatch;
+    const monthNum = parseInt(m, 10);
+    if (monthNum >= 1 && monthNum <= 12) return `${y}-${String(monthNum).padStart(2, '0')}-01`;
+  }
+
+  const monthYearMatch = trimmed.match(/^(\d{1,2})[-\/](\d{4})$/);
+  if (monthYearMatch) {
+    const [, m, y] = monthYearMatch;
+    const monthNum = parseInt(m, 10);
+    if (monthNum >= 1 && monthNum <= 12) return `${y}-${String(monthNum).padStart(2, '0')}-01`;
+  }
+
+  const fullDateMatch = trimmed.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/);
+  if (fullDateMatch) {
+    const [, d, m, y] = fullDateMatch;
+    const dayNum = parseInt(d, 10);
+    const monthNum = parseInt(m, 10);
+    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) return `${y}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+  }
+
+  const parsed = Date.parse(trimmed);
+  if (!isNaN(parsed)) {
+    const dateObj = new Date(parsed);
+    const y = dateObj.getFullYear();
+    if (y > 1970 && y < 2100) return `${y}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+  }
+
+  return null;
+}
+
+function parseNumber(value: unknown): number | null {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed = parseFloat(String(value).replace(/,/g, '').replace(/%/g, '').trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseBoolean(value: unknown): boolean | null {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', 'yes', 'y', '1'].includes(normalized)) return true;
+  if (['false', 'no', 'n', '0'].includes(normalized)) return false;
+  return null;
+}
+
 function isRealHeaderRow(row: string[]): boolean {
   const knownKeywords = [
     'product', 'item', 'name', 'description', 'particulars', 'hsn', 'sac',
     'qty', 'quantity', 'rate', 'price', 'mrp', 'cost', 'amount', 'barcode',
-    'batch', 'expiry', 'gst', 'sku', 'unit', 'stock', 'stockquantity', 'ptr', 'pts'
+    'batch', 'expiry', 'gst', 'sku', 'unit', 'stock', 'stockquantity', 'ptr', 'pts',
+    'vendorcategory', 'productcategory', 'subcategory', 'variant'
   ];
 
   let matches = 0;
@@ -66,8 +125,8 @@ function isRealHeaderRow(row: string[]): boolean {
   return matches >= 2;
 }
 
-export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
-  return new Promise((resolve, reject) => {
+export async function parseCsvFile(file: File) {
+  return new Promise<any[]>((resolve, reject) => {
     const reader = new FileReader();
 
     reader.onload = (event) => {
@@ -94,8 +153,8 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
           transformHeader: (header: string) => normalizeHeaderKey(header),
           complete: (results) => {
             try {
-              const rows = results.data as Record<string, string>[];
-              const parsedProducts: ParsedProduct[] = [];
+              const rows = results.data as Record<string, any>[];
+              const parsedProducts: any[] = [];
 
               for (let index = 0; index < rows.length; index++) {
                 const row = rows[index];
@@ -103,44 +162,54 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
 
                 const normalized = normalizeInvoiceRow(row);
                 const name = normalized.productName || null;
-                const quantityVal = normalized.quantity ? parseFloat(String(normalized.quantity).replace(/,/g, '')) : null;
-                const costVal = normalized.purchasePrice ? parseFloat(String(normalized.purchasePrice).replace(/,/g, '')) : null;
-                const sellingPriceVal = normalized.sellingPrice ? parseFloat(String(normalized.sellingPrice).replace(/,/g, '')) : null;
-                const mrpVal = normalized.mrp ? parseFloat(String(normalized.mrp).replace(/,/g, '')) : null;
-                const gstVal = normalized.gst ? parseFloat(String(normalized.gst).replace(/%/g, '').trim()) : null;
+                const quantityVal = parseNumber(normalized.quantity);
+                const costVal = parseNumber(normalized.purchasePrice);
+                const sellingPriceVal = parseNumber(normalized.sellingPrice);
+                const mrpVal = parseNumber(normalized.mrp);
+                const gstVal = parseNumber(normalized.gst);
+                const lowStockThreshold = parseNumber(normalized.lowStockThreshold);
 
                 const hasName = Boolean(name && String(name).trim());
-                const hasNumericField = [quantityVal, costVal, sellingPriceVal, mrpVal].some(v => v !== null && !isNaN(v));
+                const hasNumericField = [quantityVal, costVal, sellingPriceVal, mrpVal].some(v => v !== null);
 
-                if (!hasName || !hasNumericField) {
-                  console.log(`[CSV Debug] Discarded row ${index}: missing product name or numeric product field`, { name, quantityVal, costVal, sellingPriceVal, mrpVal });
-                  continue;
-                }
+                if (!hasName || !hasNumericField) continue;
 
-                const parsedProduct: ParsedProduct = {
+                const sourceCategory = normalized.category ? String(normalized.category).trim() : null;
+                const productCategory = normalized.productCategory ? String(normalized.productCategory).trim() : null;
+                const subcategory = normalized.subcategory ? String(normalized.subcategory).trim() : null;
+                const variant = normalized.variant ? String(normalized.variant).trim() : null;
+
+                parsedProducts.push({
                   name: String(name).trim(),
-                  quantity: isNaN(quantityVal as number) ? null : quantityVal,
-                  costPrice: isNaN(costVal as number) ? null : costVal,
-                  sellingPrice: isNaN(sellingPriceVal as number) ? null : sellingPriceVal,
-                  mrp: isNaN(mrpVal as number) ? null : mrpVal,
+                  quantity: quantityVal,
+                  costPrice: costVal,
+                  sellingPrice: sellingPriceVal,
+                  mrp: mrpVal,
                   expiry: normalizeDate(normalized.expiry || null),
                   batch: normalized.batch || null,
                   manufacturer: normalized.manufacturer || null,
                   rawText: Object.values(row).filter(Boolean).join(' | '),
                   barcode: normalized.barcode || null,
                   sku: normalized.sku || null,
-                  gstRate: isNaN(gstVal as number) ? null : gstVal,
-                  gstSlab: gstVal !== null && !isNaN(gstVal) ? `${gstVal}%` : null,
-                  gstPercent: isNaN(gstVal as number) ? null : gstVal,
+                  gstRate: gstVal,
+                  gstSlab: gstVal !== null ? `${gstVal}%` : null,
+                  gstPercent: gstVal,
                   hsnCode: normalized.hsn || null,
                   weight: normalized.weight || null,
                   unit: normalized.unit || null,
                   confidence: 100,
                   manufacturingDate: normalizeDate(normalized.mfgDate || normalized.manufacturingDate || null),
-                  mfgDate: normalizeDate(normalized.mfgDate || normalized.manufacturingDate || null)
-                };
-
-                parsedProducts.push(parsedProduct);
+                  mfgDate: normalizeDate(normalized.mfgDate || normalized.manufacturingDate || null),
+                  category: sourceCategory,
+                  sourceCategory,
+                  productCategory,
+                  subcategory,
+                  variant,
+                  packSize: variant || normalized.unit || null,
+                  lowStockThreshold,
+                  notes: normalized.notes ? String(normalized.notes).trim() : null,
+                  prescriptionRequired: parseBoolean(normalized.prescriptionRequired)
+                });
               }
 
               resolve(parsedProducts);
@@ -158,49 +227,4 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
     reader.onerror = (error) => reject(error);
     reader.readAsText(file);
   });
-}
-
-function normalizeDate(dateStr: string | null | undefined): string | null {
-  if (!dateStr) return null;
-  const trimmed = String(dateStr).trim();
-  if (!trimmed) return null;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-
-  const yearMonthMatch = trimmed.match(/^(\d{4})[-\/](\d{1,2})$/);
-  if (yearMonthMatch) {
-    const [, y, m] = yearMonthMatch;
-    const monthNum = parseInt(m, 10);
-    if (monthNum >= 1 && monthNum <= 12) return `${y}-${String(monthNum).padStart(2, '0')}-01`;
-  }
-
-  const monthYearMatch = trimmed.match(/^(\d{1,2})[-\/](\d{4})$/);
-  if (monthYearMatch) {
-    const [, m, y] = monthYearMatch;
-    const monthNum = parseInt(m, 10);
-    if (monthNum >= 1 && monthNum <= 12) return `${y}-${String(monthNum).padStart(2, '0')}-01`;
-  }
-
-  const monthTwoDigitYearMatch = trimmed.match(/^(\d{1,2})-(\d{2})$/);
-  if (monthTwoDigitYearMatch) {
-    const [, m, yy] = monthTwoDigitYearMatch;
-    const monthNum = parseInt(m, 10);
-    if (monthNum >= 1 && monthNum <= 12) return `${2000 + parseInt(yy, 10)}-${String(monthNum).padStart(2, '0')}-01`;
-  }
-
-  const fullDateMatch = trimmed.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{4})$/);
-  if (fullDateMatch) {
-    const [, d, m, y] = fullDateMatch;
-    const dayNum = parseInt(d, 10);
-    const monthNum = parseInt(m, 10);
-    if (monthNum >= 1 && monthNum <= 12 && dayNum >= 1 && dayNum <= 31) return `${y}-${String(monthNum).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-  }
-
-  const parsed = Date.parse(trimmed);
-  if (!isNaN(parsed)) {
-    const dateObj = new Date(parsed);
-    const y = dateObj.getFullYear();
-    if (y > 1970 && y < 2100) return `${y}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
-  }
-
-  return null;
 }
