@@ -8,6 +8,10 @@
   --card-foreground: #0F172A;
   --popover: #FFFFFF;
   --popover-foreground: #0F172A;
+  --primary: #10B981;
+  --primary-foreground: #FFFFFF;
+  --secondary: #3B82F6;
+  --secondary-foreground: #FFFFFF;
   --muted: #F1F5F9;
   --muted-foreground: #64748B;
   --accent: #ECFDF5;
@@ -53,6 +57,10 @@
   --card-foreground: #F8FAFC;
   --popover: #1E293B;
   --popover-foreground: #F8FAFC;
+  --primary: #10B981;
+  --primary-foreground: #FFFFFF;
+  --secondary: #3B82F6;
+  --secondary-foreground: #FFFFFF;
   --muted: #1E293B;
   --muted-foreground: #94A3B8;
   --accent: #064E3B;
@@ -88,6 +96,10 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
@@ -191,9 +203,9 @@
   }
 }
 
-/* Rivo vendor banner previews use the same 1600:600 ratio as the upload specification.
-   Profile.tsx uses h-[160px] for these three unique banner slots; override that fixed
-   height here so the full artwork is visible instead of being vertically cropped. */
+/* Rivo vendor banner previews: preserve the 1600:600 upload ratio.
+   Profile.tsx uses h-[160px] for these three unique banner slots; override
+   that fixed height so the full artwork is visible instead of vertically cropped. */
 @layer components {
   .relative.h-\[160px\]:has(> img[alt^="Banner"]) {
     height: auto !important;
