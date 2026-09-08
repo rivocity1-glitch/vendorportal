@@ -1,0 +1,49 @@
+name: Normalize product thumbnails
+
+on:
+  push:
+    branches:
+      - test/all-vendor
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/all-vendor
+          fetch-depth: 0
+
+      - name: Patch product list thumbnail parsing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/app/components/pages/Products.tsx')
+          s = p.read_text()
+          if 'const parseProductImageUrl' not in s:
+              marker = 'const statusStyles: Record<string, string> = {'
+              helper = '''const parseProductImageUrl = (value: unknown): string | null => {
+  if (!value) return null;
+  if (Array.isArray(value)) return typeof value[0] === "string" ? value[0] : null;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return typeof parsed[0] === "string" ? parsed[0] : null;
+  } catch {}
+  return value;
+};
+
+'''
+              s = s.replace(marker, helper + marker, 1)
+          s = s.replace('src={p.image_url}', 'src={parseProductImageUrl(p.image_url) || undefined}', 1)
+          p.write_text(s)
+          PY
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/components/pages/Products.tsx
+          git diff --cached --quiet || git commit -m "Fix multi-image product thumbnail display"
+          git push origin test/all-vendor
