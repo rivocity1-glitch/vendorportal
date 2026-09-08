@@ -805,7 +805,7 @@ export function Profile() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5 items-start">
           {Array.from({
             length: maxProfileBanners
           }).map((_, index) => {
@@ -818,7 +818,7 @@ export function Profile() {
             return (
               <div
                 key={index}
-                className="relative h-[160px] w-full rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-900 group bg-slate-50 dark:bg-slate-955"
+                className="relative w-full aspect-[8/3] rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-900 group bg-slate-50 dark:bg-slate-955"
               >
                 {isSlotUploading ? (
                   <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-20">
@@ -831,10 +831,10 @@ export function Profile() {
                     <img
                       src={currentUrl}
                       alt={`Banner ${index + 1}`}
-                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"
+                      className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-102"
                     />
 
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-955 via-transparent to-transparent z-10" />
+                    <div className="absolute inset-0 pointer-events-none" />
                   </>
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 dark:text-slate-800 bg-linear-to-tr from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-955 p-4 border-2 border-dashed border-slate-200 dark:border-slate-900 rounded-2xl">
