@@ -1,0 +1,82 @@
+name: Apply vendor UI fixes
+on:
+  push:
+    branches: [test/all-vendor]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/all-vendor
+          fetch-depth: 0
+      - name: Patch vendor UI
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          p=Path('src/app/components/pages/Profile.tsx')
+          s=p.read_text()
+          s=s.replace('className="relative h-[160px] w-full rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-900 group bg-slate-50 dark:bg-slate-955"','className="relative w-full aspect-[8/3] min-h-[120px] rounded-2xl overflow-hidden shadow-sm border border-slate-200 dark:border-slate-900 group bg-slate-50 dark:bg-slate-955"')
+          s=s.replace('className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-102"','className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-102"')
+          p.write_text(s)
+
+          p=Path('src/app/components/pages/AddEditProduct.tsx')
+          s=p.read_text()
+          s=s.replace('const [imageFile, setImageFile] = useState<File | null>(null);','const [imageFile, setImageFile] = useState<File | null>(null);\n  const [imageFiles, setImageFiles] = useState<File[]>([]);')
+          s=re.sub(r'const validateAndSetImage = \(file: File\) => \{.*?\n  \};\n\n  const handleDrag', '''const parseImageUrls = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && !!v);
+    if (typeof value !== "string") return [];
+    try { const parsed = JSON.parse(value); if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === "string" && !!v); } catch {}
+    return [value];
+  };
+
+  const validateAndSetImages = (files: File[]) => {
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    const invalid = files.find(file => !validTypes.includes(file.type) || file.size > 5 * 1024 * 1024);
+    if (invalid) { alert("Each product image must be JPG, JPEG, PNG, or WEBP and under 5MB."); return; }
+    const limited = files.slice(0, 5);
+    setImageFiles(limited);
+    setImageFile(limited[0] || null);
+    if (limited[0]) setImageUrl(URL.createObjectURL(limited[0]));
+    setIsImageError(false);
+  };
+
+  const handleDrag''', s, flags=re.S)
+          s=re.sub(r'if \(\n      e\.dataTransfer\.files &&\n      e\.dataTransfer\.files\[0\]\n    \) \{\n      validateAndSetImage\(e\.dataTransfer\.files\[0\]\);\n    \}', 'if (e.dataTransfer.files && e.dataTransfer.files.length) validateAndSetImages(Array.from(e.dataTransfer.files));', s)
+          s=re.sub(r'if \(e\.target\.files && e\.target\.files\[0\]\) \{\n      validateAndSetImage\(e\.target\.files\[0\]\);\n    \}', 'if (e.target.files && e.target.files.length) validateAndSetImages(Array.from(e.target.files));', s)
+          s=s.replace('ref={fileInputRef}','ref={fileInputRef} multiple')
+          s=s.replace('setImageUrl(product.image_url || "");\n      setImageFile(null);','setImageUrl(product.image_url || "");\n      setImageFile(null);\n      setImageFiles([]);')
+          s=s.replace('setImageUrl("");\n      setImageFile(null);','setImageUrl("");\n      setImageFile(null);\n      setImageFiles([]);')
+          pat=r'let finalImageUrl = imageUrl;\n\n      if \(imageFile\) \{.*?\n        setIsUploading\(false\);\n      \}'
+          rep='''let finalImageUrl = imageUrl;
+
+      if (imageFiles.length) {
+        setIsUploading(true);
+        const uploadedUrls: string[] = [];
+        for (const file of imageFiles.slice(0, 5)) {
+          const fileExt = file.name.split(".").pop() || "jpg";
+          const fileName = `${crypto.randomUUID()}.${fileExt}`;
+          const { error: uploadError } = await supabase.storage.from("product-images").upload(fileName, file);
+          if (uploadError) throw uploadError;
+          const { data: publicUrlData } = supabase.storage.from("product-images").getPublicUrl(fileName);
+          uploadedUrls.push(publicUrlData.publicUrl);
+        }
+        finalImageUrl = uploadedUrls.length > 1 ? JSON.stringify(uploadedUrls) : (uploadedUrls[0] || "");
+        setIsUploading(false);
+      }'''
+          s,n=re.subn(pat,rep,s,flags=re.S)
+          if n!=1: raise SystemExit(f'product upload block mismatch: {n}')
+          p.write_text(s)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "src/app/components/pages/Profile.tsx" "src/app/components/pages/AddEditProduct.tsx"
+          git commit -m "Fix vendor banner layout and multi-image products"
+          git push origin test/all-vendor
