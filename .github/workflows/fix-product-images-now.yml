@@ -1,0 +1,93 @@
+name: Fix product images now
+on:
+  push:
+    branches:
+      - test/all-vendor
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/all-vendor
+          fetch-depth: 0
+      - name: Patch source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('src/app/components/pages/AddEditProduct.tsx')
+          s=p.read_text()
+          if 'imageFiles' not in s:
+              s=s.replace('const [imageFile, setImageFile] = useState<File | null>(null);','const [imageFile, setImageFile] = useState<File | null>(null);\n  const [imageFiles, setImageFiles] = useState<File[]>([]);')
+          marker='  const validateAndSetImage = (file: File) => {'
+          if marker in s and 'validateAndSetImages' not in s:
+              s=s.replace(marker, '''  const validateAndSetImages = (files: File[]) => {
+    if (!files.length) return;
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (files.some(file => !validTypes.includes(file.type) || file.size > 5 * 1024 * 1024)) {
+      alert("Each product image must be JPG, JPEG, PNG, or WEBP and under 5MB.");
+      return;
+    }
+    const limited = files.slice(0, 5);
+    setImageFiles(limited);
+    setImageFile(limited[0]);
+    setImageUrl(URL.createObjectURL(limited[0]));
+    setIsImageError(false);
+  };
+
+  const validateAndSetImage = (file: File) => {''',1)
+          s=s.replace('validateAndSetImage(e.dataTransfer.files[0]);','validateAndSetImages(Array.from(e.dataTransfer.files));')
+          s=s.replace('validateAndSetImage(e.target.files[0]);','validateAndSetImages(Array.from(e.target.files));')
+          s=s.replace('ref={fileInputRef}\n        onChange={handleFileChange}','ref={fileInputRef}\n        multiple\n        onChange={handleFileChange}')
+          s=s.replace('setImageFile(null);\n      setIsImageError(false);','setImageFile(null);\n      setImageFiles([]);\n      setIsImageError(false);')
+          # Replace upload condition and loop while preserving the existing surrounding code.
+          s=s.replace('if (imageFile) {','if (imageFiles.length) {',1)
+          old='''        const fileExt =
+          imageFile.name.split(".").pop() ||
+          "jpg";
+
+        const fileName = `${crypto.randomUUID()}.${fileExt}`;
+
+        const { error: uploadError } =
+          await supabase.storage
+            .from("product-images")
+            .upload(
+              fileName,
+              imageFile
+            );
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        const { data: publicUrlData } =
+          supabase.storage
+            .from("product-images")
+            .getPublicUrl(fileName);
+
+        finalImageUrl =
+          publicUrlData.publicUrl;
+'''
+          new='''        const uploadedUrls: string[] = [];
+        for (const imageFile of imageFiles.slice(0, 5)) {
+          const fileExt = imageFile.name.split(".").pop() || "jpg";
+          const fileName = `${crypto.randomUUID()}.${fileExt}`;
+          const { error: uploadError } = await supabase.storage.from("product-images").upload(fileName, imageFile);
+          if (uploadError) throw uploadError;
+          const { data: publicUrlData } = supabase.storage.from("product-images").getPublicUrl(fileName);
+          uploadedUrls.push(publicUrlData.publicUrl);
+        }
+        finalImageUrl = uploadedUrls.length > 1 ? JSON.stringify(uploadedUrls) : (uploadedUrls[0] || "");
+'''
+          if old in s:
+              s=s.replace(old,new,1)
+          p.write_text(s)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/components/pages/AddEditProduct.tsx
+          git diff --cached --quiet || git commit -m "Add multiple product image upload"
+          git push origin test/all-vendor
