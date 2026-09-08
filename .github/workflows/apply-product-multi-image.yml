@@ -1,0 +1,112 @@
+name: Apply product multi-image update
+on:
+  push:
+    branches: [test/all-vendor]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/all-vendor
+          fetch-depth: 0
+      - name: Patch product editor
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('src/app/components/pages/AddEditProduct.tsx')
+          s=p.read_text()
+          if 'const [imageFiles, setImageFiles]' not in s:
+              s=s.replace('const [imageFile, setImageFile] = useState<File | null>(null);','const [imageFile, setImageFile] = useState<File | null>(null);\n  const [imageFiles, setImageFiles] = useState<File[]>([]);')
+          if 'const parseImageUrls' not in s:
+              marker='  const validateAndSetImage = (file: File) => {'
+              replacement='''  const parseImageUrls = (value: unknown): string[] => {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.filter((v): v is string => typeof v === "string" && !!v);
+    if (typeof value !== "string") return [];
+    try { const parsed = JSON.parse(value); if (Array.isArray(parsed)) return parsed.filter((v): v is string => typeof v === "string" && !!v); } catch {}
+    return [value];
+  };
+
+  const validateAndSetImages = (files: File[]) => {
+    if (!files.length) return;
+    const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    if (files.some(file => !validTypes.includes(file.type) || file.size > 5 * 1024 * 1024)) {
+      alert("Each product image must be JPG, JPEG, PNG, or WEBP and under 5MB.");
+      return;
+    }
+    const limited = files.slice(0, 5);
+    setImageFiles(limited);
+    setImageFile(limited[0]);
+    setImageUrl(URL.createObjectURL(limited[0]));
+    setIsImageError(false);
+  };
+
+  const handleRemoveSelectedImage = (index: number) => {
+    const next = imageFiles.filter((_, i) => i !== index);
+    setImageFiles(next);
+    setImageFile(next[0] || null);
+    if (next[0]) setImageUrl(URL.createObjectURL(next[0]));
+  };
+
+  const validateAndSetImage = (file: File) => {'''
+              if marker in s: s=s.replace(marker,replacement,1)
+          s=s.replace('validateAndSetImage(e.dataTransfer.files[0]);','validateAndSetImages(Array.from(e.dataTransfer.files));')
+          s=s.replace('validateAndSetImage(e.target.files[0]);','validateAndSetImages(Array.from(e.target.files));')
+          s=s.replace('ref={fileInputRef}\n        onChange={handleFileChange}','ref={fileInputRef}\n        multiple\n        onChange={handleFileChange}')
+          s=s.replace('setImageFile(null);\n      setIsImageError(false);','setImageFile(null);\n      setImageFiles([]);\n      setIsImageError(false);')
+          # Ensure edit mode understands existing JSON image_url.
+          s=s.replace('setImageUrl(product.image_url || "");','setImageUrl(parseImageUrls(product.image_url)[0] || "");')
+          # Replace upload block if still single-file based.
+          pat=r'      let finalImageUrl = imageUrl;\n\n      if \(imageFile\) \{.*?      \}'
+          m=re.search(pat,s,re.S)
+          if m and 'uploadedUrls' not in m.group(0):
+              block='''      let finalImageUrl = imageUrl;
+
+      if (imageFiles.length) {
+        setIsUploading(true);
+        const uploadedUrls: string[] = [];
+        for (const file of imageFiles.slice(0, 5)) {
+          const fileExt = file.name.split(".").pop() || "jpg";
+          const fileName = `${crypto.randomUUID()}.${fileExt}`;
+          const { error: uploadError } = await supabase.storage.from("product-images").upload(fileName, file);
+          if (uploadError) throw uploadError;
+          const { data: publicUrlData } = supabase.storage.from("product-images").getPublicUrl(fileName);
+          uploadedUrls.push(publicUrlData.publicUrl);
+        }
+        finalImageUrl = uploadedUrls.length > 1 ? JSON.stringify(uploadedUrls) : (uploadedUrls[0] || "");
+        setIsUploading(false);
+      }'''
+              s=s[:m.start()]+block+s[m.end():]
+          # Add thumbnail strip immediately after the file input if there is a product image label/preview area.
+          if 'Selected product images' not in s:
+              anchor='        onChange={handleFileChange}\n'
+              idx=s.find(anchor)
+              if idx>=0:
+                  end=idx+len(anchor)
+                  thumb='''
+        {imageFiles.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-3">
+            {imageFiles.map((file, index) => (
+              <div key={`${file.name}-${index}`} className="relative h-20 w-20 rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
+                <img src={URL.createObjectURL(file)} alt={`Product ${index + 1}`} className="h-full w-full object-cover" />
+                <button type="button" onClick={() => handleRemoveSelectedImage(index)} className="absolute top-1 right-1 h-5 w-5 rounded-full bg-black/70 text-white flex items-center justify-center" aria-label={`Remove image ${index + 1}`}><X size={12} /></button>
+                <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] text-center">{index + 1}</span>
+              </div>
+            ))}
+          </div>
+        )}
+'''
+                  s=s[:end]+thumb+s[end:]
+          p.write_text(s)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/app/components/pages/AddEditProduct.tsx
+          git diff --cached --quiet || git commit -m "Add multiple product image upload"
+          git push origin test/all-vendor
