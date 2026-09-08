@@ -31,6 +31,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const [imageUrl, setImageUrl] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [existingImageUrls, setExistingImageUrls] = useState<string[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isImageError, setIsImageError] = useState(false);
@@ -80,15 +81,11 @@ export function AddEditProduct({ onNavigate, product }: Props) {
 
   const parseImageUrls = (value: unknown): string[] => {
     if (!value) return [];
-    if (Array.isArray(value)) {
-      return value.filter((item): item is string => typeof item === "string" && !!item);
-    }
+    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && !!item);
     if (typeof value !== "string") return [];
     try {
       const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) {
-        return parsed.filter((item): item is string => typeof item === "string" && !!item);
-      }
+      if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string" && !!item);
     } catch {}
     return [value];
   };
@@ -126,8 +123,9 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         barcode: product.barcode || ""
       });
 
-      const existingImageUrls = parseImageUrls(product.image_url);
-      setImageUrl(existingImageUrls[0] || "");
+      const urls = parseImageUrls(product.image_url);
+      setExistingImageUrls(urls);
+      setImageUrl(urls[0] || "");
       setImageFile(null);
       setImageFiles([]);
       setIsImageError(false);
@@ -148,6 +146,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         sku: "",
         barcode: ""
       });
+      setExistingImageUrls([]);
       setImageUrl("");
       setImageFile(null);
       setImageFiles([]);
@@ -163,11 +162,11 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     const selected = files.filter(Boolean).slice(0, 5);
     if (!selected.length) return;
     const validTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
-    const invalid = selected.find(file => !validTypes.includes(file.type) || file.size > 5 * 1024 * 1024);
-    if (invalid) {
+    if (selected.some(file => !validTypes.includes(file.type) || file.size > 5 * 1024 * 1024)) {
       alert("Each product image must be JPG, JPEG, PNG, or WEBP and under 5MB.");
       return;
     }
+    setExistingImageUrls([]);
     setImageFiles(selected);
     setImageFile(selected[0]);
     setImageUrl(URL.createObjectURL(selected[0]));
@@ -193,21 +192,18 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     e.preventDefault();
     e.stopPropagation();
     setIsDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length) {
-      validateAndSetImages(Array.from(e.dataTransfer.files));
-    }
+    if (e.dataTransfer.files && e.dataTransfer.files.length) validateAndSetImages(Array.from(e.dataTransfer.files));
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length) {
-      validateAndSetImages(Array.from(e.target.files));
-    }
+    if (e.target.files && e.target.files.length) validateAndSetImages(Array.from(e.target.files));
   };
 
   const handleRemoveImage = () => {
     setImageUrl("");
     setImageFile(null);
     setImageFiles([]);
+    setExistingImageUrls([]);
     setIsImageError(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -226,20 +222,18 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       .select("id, image_url")
       .eq("id", resolverResult.universal_product_id)
       .maybeSingle();
-
     if (universalError) {
       console.warn("Could not load universal product image:", universalError);
       return;
     }
 
-    if (universalProduct?.image_url && !imageFile && imageFiles.length === 0 && !imageUrl) {
+    if (universalProduct?.image_url && !imageFile && imageFiles.length === 0 && existingImageUrls.length === 0 && !imageUrl) {
       const { error: fallbackError } = await supabase
         .from("products")
         .update({ image_url: universalProduct.image_url, updated_at: new Date().toISOString() })
         .eq("id", productId);
-      if (fallbackError) {
-        console.warn("Could not apply universal image fallback:", fallbackError);
-      } else {
+      if (fallbackError) console.warn("Could not apply universal image fallback:", fallbackError);
+      else {
         setImageUrl(universalProduct.image_url);
         setIsImageError(false);
       }
@@ -248,7 +242,6 @@ export function AddEditProduct({ onNavigate, product }: Props) {
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!form.name.trim() || !form.category_id || !form.price || !form.cost_price || !form.mrp || !form.stock) {
       alert("Please fill in all required fields.");
       return;
@@ -279,14 +272,9 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       if (vendorErr || !vendor) throw new Error("Vendor profile missing.");
 
       const editingId = product?.id;
-
       if (!editingId) {
         const { data: existingProd, error: checkErr } = await supabase
-          .from("products")
-          .select("id")
-          .eq("vendor_id", vendor.id)
-          .ilike("name", form.name.trim())
-          .maybeSingle();
+          .from("products").select("id").eq("vendor_id", vendor.id).ilike("name", form.name.trim()).maybeSingle();
         if (checkErr) throw checkErr;
         if (existingProd) {
           alert("Product already exists. Please edit the existing product.");
@@ -295,12 +283,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         }
       } else {
         const { data: conflictingProd, error: checkErr } = await supabase
-          .from("products")
-          .select("id")
-          .eq("vendor_id", vendor.id)
-          .ilike("name", form.name.trim())
-          .neq("id", editingId)
-          .maybeSingle();
+          .from("products").select("id").eq("vendor_id", vendor.id).ilike("name", form.name.trim()).neq("id", editingId).maybeSingle();
         if (checkErr) throw checkErr;
         if (conflictingProd) {
           alert("Product already exists. Please edit the existing product.");
@@ -323,11 +306,12 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         }
         finalImageUrl = uploadedUrls.length > 1 ? JSON.stringify(uploadedUrls) : (uploadedUrls[0] || "");
         setIsUploading(false);
+      } else if (existingImageUrls.length) {
+        finalImageUrl = existingImageUrls.length > 1 ? JSON.stringify(existingImageUrls) : existingImageUrls[0];
       }
 
       const finalWeightString = form.weightValue.trim() ? `${form.weightValue.trim()} ${form.weightUnit}` : null;
       const numericGst = parseFloat(form.gst_slab) || 0;
-
       const productPayload = {
         name: form.name.trim(),
         category_id: selectedCategory.id,
@@ -417,56 +401,24 @@ export function AddEditProduct({ onNavigate, product }: Props) {
               </select>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Wholesale (Cost) *</label>
-                <input type="number" step="0.01" required placeholder="0.00" value={form.cost_price} onChange={e => handleField("cost_price", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Selling Price *</label>
-                <input type="number" step="0.01" required placeholder="0.00" value={form.price} onChange={e => handleField("price", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">MRP *</label>
-                <input type="number" step="0.01" required placeholder="0.00" value={form.mrp} onChange={e => handleField("mrp", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" />
-              </div>
+              <div><label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Wholesale (Cost) *</label><input type="number" step="0.01" required placeholder="0.00" value={form.cost_price} onChange={e => handleField("cost_price", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /></div>
+              <div><label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Selling Price *</label><input type="number" step="0.01" required placeholder="0.00" value={form.price} onChange={e => handleField("price", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /></div>
+              <div><label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">MRP *</label><input type="number" step="0.01" required placeholder="0.00" value={form.mrp} onChange={e => handleField("mrp", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /></div>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">GST Slab *</label>
-              <select value={form.gst_slab} onChange={e => handleField("gst_slab", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">
-                {gstOptions.map(rate => <option key={rate} value={rate}>{rate}% GST slab</option>)}
-              </select>
-            </div>
+            <div><label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">GST Slab *</label><select value={form.gst_slab} onChange={e => handleField("gst_slab", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">{gstOptions.map(rate => <option key={rate} value={rate}>{rate}% GST slab</option>)}</select></div>
           </div>
 
           <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
             <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider border-b border-border pb-1">Logistics / Expiry Attributes</h3>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Batch Number {selectedCategoryName === "Medical" && "*"}</label>
-                <input type="text" placeholder={selectedCategoryName === "Medical" ? "Required batch code" : "Optional batch code"} value={form.batch_number} onChange={e => handleField("batch_number", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Expiry Date {selectedCategoryName === "Medical" && "*"}</label>
-                <input type="date" value={form.expiry_date} onChange={e => handleField("expiry_date", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" />
-              </div>
+              <div><label className="block text-xs font-medium text-muted-foreground mb-1">Batch Number {selectedCategoryName === "Medical" && "*"}</label><input type="text" placeholder={selectedCategoryName === "Medical" ? "Required batch code" : "Optional batch code"} value={form.batch_number} onChange={e => handleField("batch_number", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
+              <div><label className="block text-xs font-medium text-muted-foreground mb-1">Expiry Date {selectedCategoryName === "Medical" && "*"}</label><input type="date" value={form.expiry_date} onChange={e => handleField("expiry_date", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Weight / Volume</label>
-                <div className="flex items-center gap-1">
-                  <input type="number" step="any" placeholder="e.g. 500" value={form.weightValue} onChange={e => handleField("weightValue", e.target.value)} className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" />
-                  <select value={form.weightUnit} onChange={e => handleField("weightUnit", e.target.value)} className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">{unitOptions.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label>
-                <input type="number" required placeholder="0" value={form.stock} onChange={e => handleField("stock", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" />
-              </div>
+              <div><label className="block text-xs font-medium text-muted-foreground mb-1">Weight / Volume</label><div className="flex items-center gap-1"><input type="number" step="any" placeholder="e.g. 500" value={form.weightValue} onChange={e => handleField("weightValue", e.target.value)} className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /><select value={form.weightUnit} onChange={e => handleField("weightUnit", e.target.value)} className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">{unitOptions.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select></div></div>
+              <div><label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label><input type="number" required placeholder="0" value={form.stock} onChange={e => handleField("stock", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-muted-foreground mb-1">Description</label>
-              <textarea rows={2} placeholder="Describe the product..." value={form.description} onChange={e => handleField("description", e.target.value)} className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none" />
-            </div>
+            <div><label className="block text-xs font-medium text-muted-foreground mb-1">Description</label><textarea rows={2} placeholder="Describe the product..." value={form.description} onChange={e => handleField("description", e.target.value)} className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none" /></div>
           </div>
         </div>
 
@@ -482,6 +434,17 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                   <button type="button" onClick={handleRemoveImage} className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 text-white hover:bg-black/80 transition-colors" title="Remove Images"><X className="w-4 h-4" /></button>
                 </div>
 
+                {existingImageUrls.length > 0 && (
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    {existingImageUrls.map((url, index) => (
+                      <div key={`${url}-${index}`} className="relative w-16 h-16 rounded-lg overflow-hidden border border-border bg-muted">
+                        <img src={url} alt={`Product image ${index + 1}`} className="w-full h-full object-cover" />
+                        <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] text-center font-semibold">{index + 1}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {imageFiles.length > 0 && (
                   <div className="flex flex-wrap gap-2 justify-center">
                     {imageFiles.map((file, index) => (
@@ -493,7 +456,8 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                     ))}
                   </div>
                 )}
-                <p className="text-[10px] text-muted-foreground text-center">{imageFiles.length > 1 ? `${imageFiles.length} images selected` : "1 image selected"}. Maximum 5 images.</p>
+                <p className="text-[10px] text-muted-foreground text-center">{existingImageUrls.length > 1 ? `${existingImageUrls.length} images saved` : imageFiles.length > 1 ? `${imageFiles.length} images selected` : "1 image"}. Maximum 5 images.</p>
+                <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full h-9 rounded-lg border border-border text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Add / Replace Images</button>
               </div>
             ) : (
               <div onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors flex flex-col items-center justify-center gap-2 ${isDragActive ? "border-[#10B981] bg-[#10B981]/5" : "border-border hover:border-[#10B981]"}`}>
@@ -514,9 +478,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
           </div>
 
           <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
-            <button type="submit" disabled={isSubmitting || isUploading} className="w-full h-10 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-              {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />{product ? "Updating Product..." : "Saving Product..."}</> : <><Save className="w-4 h-4" />{product ? "Update Product" : "Save Product"}</>}
-            </button>
+            <button type="submit" disabled={isSubmitting || isUploading} className="w-full h-10 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />{product ? "Updating Product..." : "Saving Product..."}</> : <><Save className="w-4 h-4" />{product ? "Update Product" : "Save Product"}</>}</button>
             <button type="button" onClick={() => onNavigate("products")} disabled={isSubmitting} className="w-full h-10 rounded-lg border border-border bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">Cancel</button>
           </div>
         </div>
