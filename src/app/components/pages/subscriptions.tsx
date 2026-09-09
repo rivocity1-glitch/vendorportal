@@ -91,12 +91,30 @@ export default function Subscriptions() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   // Day Counter Calculation
+  const [currentTime, setCurrentTime] = useState<number>(Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 60 * 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const daysRemaining = useMemo(() => {
     if (!subscription?.end_date) return 0;
-    const diff = new Date(subscription.end_date).getTime() - Date.now();
-    const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+
+    const end = new Date(subscription.end_date).getTime();
+    const diff = end - currentTime;
+
+    const days = Math.ceil(
+      diff / (1000 * 60 * 60 * 24)
+    );
+
     return days > 0 ? days : 0;
-  }, [subscription]);
+  }, [subscription, currentTime]);
 
   const triggerToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -249,18 +267,77 @@ export default function Subscriptions() {
     };
   }, [vendorId, syncData]);
 
+  // ==========================================================
+  // SUBSCRIPTION EXPIRY REMINDER
+  // ==========================================================
+  // Shows a popup starting 5 days before an expiring trial/paid
+  // subscription and allows it to appear again every 2 hours.
+  //
+  // Free subscriptions have no expiry and do not show this
+  // reminder.
+  // ==========================================================
   useEffect(() => {
-    if (subscription?.subscription_type === 'trial' && daysRemaining <= 5 && daysRemaining > 0) {
-      const lastSeen = localStorage.getItem('trial_popup_last_seen');
-      const now = Date.now();
-      const threeHours = 1000 * 60 * 60 * 3;
-
-      if (!lastSeen || now - parseInt(lastSeen, 10) > threeHours) {
-        setShowReminder(true);
-        localStorage.setItem('trial_popup_last_seen', now.toString());
-      }
+    if (!subscription?.end_date) {
+      setShowReminder(false);
+      return;
     }
-  }, [subscription, daysRemaining]);
+
+    if (
+      subscription.status !== 'active' ||
+      subscription.plan_name === 'free'
+    ) {
+      setShowReminder(false);
+      return;
+    }
+
+    const subscriptionEndDate =
+      new Date(subscription.end_date).getTime();
+
+    if (!Number.isFinite(subscriptionEndDate)) {
+      setShowReminder(false);
+      return;
+    }
+
+    const vendorReminderKey =
+      `subscription_expiry_popup_${vendorId || subscription.vendor_id}_${subscription.id}_${subscription.end_date}`;
+
+    const TWO_HOURS = 2 * 60 * 60 * 1000;
+    const FIVE_DAYS = 5 * 24 * 60 * 60 * 1000;
+
+    const checkExpiryReminder = () => {
+      const now = Date.now();
+      const remaining = subscriptionEndDate - now;
+
+      if (remaining <= 0 || remaining > FIVE_DAYS) {
+        setShowReminder(false);
+        return;
+      }
+
+      const lastShown = localStorage.getItem(vendorReminderKey);
+      const lastShownTime = lastShown ? Number(lastShown) : 0;
+
+      const canShow =
+        !lastShown ||
+        !Number.isFinite(lastShownTime) ||
+        now - lastShownTime >= TWO_HOURS;
+
+      if (canShow) {
+        setShowReminder(true);
+        localStorage.setItem(vendorReminderKey, String(now));
+      }
+    };
+
+    checkExpiryReminder();
+
+    const reminderInterval = window.setInterval(
+      checkExpiryReminder,
+      60 * 1000
+    );
+
+    return () => {
+      window.clearInterval(reminderInterval);
+    };
+  }, [subscription, vendorId]);
 
   const handleSelectPlan = async (planName: string, price: number) => {
     if (planName === 'free') {
@@ -824,32 +901,82 @@ export default function Subscriptions() {
         </div>
       )}
 
-      {/* STATIC TRIAL EXPIRY REMINDER MODAL */}
-      {showReminder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs">
-          <div className="bg-white border border-gray-200 rounded-xl max-w-sm w-full shadow-xl p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2 text-amber-600">
-                <AlertCircle size={18} className="shrink-0" />
-                <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Trial Expiry Notice</h3>
+      {/* ==========================================================
+          SUBSCRIPTION EXPIRY REMINDER
+      =========================================================== */}
+      {showReminder && subscription?.end_date && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white border border-gray-200 rounded-2xl max-w-md w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 pt-6 pb-4">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center shrink-0">
+                    <AlertCircle size={20} className="text-amber-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-900">
+                      Subscription Ending Soon
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5 uppercase tracking-wider">
+                      RivoCity Vendor Portal
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowReminder(false)}
+                  className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-50 transition-colors"
+                  aria-label="Close reminder"
+                >
+                  <X size={17} />
+                </button>
               </div>
-              <button onClick={() => setShowReminder(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-                <X size={16} />
-              </button>
             </div>
-            
-            <p className="text-xs text-slate-500 font-normal leading-relaxed">
-              Your Rivo Free Trial window is concluding in <span className="font-bold text-slate-900">{daysRemaining} days</span>. 
-              Please verify your workflow tier changes immediately to ensure continuous storefront configuration matching parameters.
-            </p>
 
-            <div className="pt-2">
+            <div className="px-6 pb-5">
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+                <p className="text-sm font-semibold text-slate-800 leading-relaxed">
+                  Subscription ending soon, make payment to continue using RivoCity Vendor Portal.
+                </p>
+                <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                  Your current subscription expires in{' '}
+                  <span className="font-bold text-slate-900">
+                    {daysRemaining} {daysRemaining === 1 ? 'day' : 'days'}
+                  </span>.
+                </p>
+                <p className="text-[11px] text-slate-400 mt-2">
+                  Renew your subscription before the expiry date to continue without interruption.
+                </p>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 bg-slate-50 border-t border-gray-100 flex items-center gap-3">
               <button
                 type="button"
                 onClick={() => setShowReminder(false)}
-                className="w-full h-9 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-3xs transition-colors cursor-pointer"
+                className="flex-1 h-10 bg-white border border-gray-200 hover:bg-gray-50 text-slate-600 text-xs font-bold uppercase tracking-wider rounded-lg transition-colors"
               >
-                Acknowledge Info
+                Remind Me Later
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReminder(false);
+                  const basicPlan = catalog.find(
+                    (plan) => plan.name === 'basic'
+                  );
+                  if (basicPlan) {
+                    const masterSpec = masterPlans.find(
+                      (plan) =>
+                        String(plan.plan_name).toLowerCase() === 'basic'
+                    );
+                    const price = masterSpec?.monthly_price ?? 499;
+                    handleSelectPlan('basic', price);
+                  }
+                }}
+                className="flex-1 h-10 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider rounded-lg shadow-sm transition-colors"
+              >
+                Renew Subscription
               </button>
             </div>
           </div>
