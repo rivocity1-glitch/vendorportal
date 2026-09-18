@@ -158,7 +158,7 @@ export const generateInvoice = async (orderData: OrderData): Promise<Blob> => {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text(
-    'Support Email: rivocityhelp1@gmail.com',
+    'Support Email: support@rivocity.com',
     pageWidth / 2,
     pageHeight - 14,
     { align: 'center' }
