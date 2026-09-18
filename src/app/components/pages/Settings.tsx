@@ -538,7 +538,7 @@ export function Settings({ isDark, onToggleTheme, onNavigate }: SettingsProps) {
           </button>
 
           <a
-            href="mailto:rivo.cityhelp1@gmail.com"
+            href="mailto:rivocity1@gmail.com"
             className="p-4 flex items-center justify-between hover:bg-muted/40 transition-colors text-left block"
           >
             <div className="flex items-center gap-3.5">
@@ -547,7 +547,7 @@ export function Settings({ isDark, onToggleTheme, onNavigate }: SettingsProps) {
               </div>
               <div>
                 <span className="block text-xs font-bold text-foreground">Contact Support</span>
-                <span className="block text-[11px] text-muted-foreground mt-0.5">rivo.cityhelp1@gmail.com</span>
+                <span className="block text-[11px] text-muted-foreground mt-0.5">rivocity1@gmail.com</span>
               </div>
             </div>
             <ChevronRight className="w-4 h-4 text-muted-foreground" />
