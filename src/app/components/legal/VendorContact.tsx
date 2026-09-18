@@ -48,7 +48,7 @@ export const VendorContact: React.FC<VendorContactProps> = ({
   onBack,
   className = "",
 }) => {
-  const supportEmail = "support@rivocity@gmail.com";
+  const supportEmail = "support@rivocity.com";
 
   const [copied, setCopied] = useState(false);
   const [activeForm, setActiveForm] = useState<"feedback" | "problem" | null>(null);
