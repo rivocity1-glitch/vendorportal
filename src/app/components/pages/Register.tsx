@@ -734,12 +734,10 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
         );
       }
 
-      const uniqueSuffix =
-        Math.floor(
-          1000 + Math.random() * 9000
-        );
-
-      const shopCode = `RIVO-${uniqueSuffix}`;
+      const shopCode = `RIVO${Math.random()
+        .toString(36)
+        .slice(2, 4)
+        .toUpperCase()}`;
 
       const {
         data: vendorData,

@@ -283,6 +283,7 @@ export async function updateBankDetails(
     account_number: string | null;
     ifsc_code: string | null;
     upi_id: string | null;
+    qr_code_url: string | null;
   }
 ): Promise<ServiceResponse<VendorProfile>> {
   try {
