@@ -115,13 +115,6 @@ export default function StoreManagement() {
   // LIVE CLOCK
   // ---------------------------------------------------------------------------
 
-  /*
-   * This state intentionally updates every minute.
-   *
-   * The business-hours evaluator depends on the current time. Without this
-   * timer, the page would only recalculate when another piece of React state
-   * changed.
-   */
   const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
 
   useEffect(() => {
@@ -621,9 +614,6 @@ export default function StoreManagement() {
         const countdown =
           formatMinutes(minsLeft);
 
-        /*
-         * Closing Soon begins 90 minutes before closing.
-         */
         if (minsLeft <= 90) {
           return {
             status: 'CLOSING_SOON' as const,
@@ -647,9 +637,6 @@ export default function StoreManagement() {
         };
       }
 
-      /*
-       * Before today's opening time.
-       */
       if (!isOvernight && currentMins < openMins) {
         const minsToOpen =
           openMins - currentMins;
@@ -675,9 +662,6 @@ export default function StoreManagement() {
         };
       }
 
-      /*
-       * Today's scheduled closing time has passed.
-       */
       return {
         status: 'AUTO_CLOSED' as const,
         badgeText: '🔴 Closed (Time Expired)',
@@ -696,16 +680,11 @@ export default function StoreManagement() {
   // ---------------------------------------------------------------------------
 
   const currentEvaluation = useMemo(() => {
-    /*
-     * currentTime is intentionally referenced here so this memo recalculates
-     * every minute.
-     */
     const scheduledEvaluation = evaluateSchedule(
       currentTime,
       schedule
     );
 
-    // Manual mode takes priority over the schedule.
     if (manualOverride) {
       if (storeStatus === 'closed') {
         return {
@@ -757,9 +736,6 @@ export default function StoreManagement() {
       };
     }
 
-    /*
-     * Automatic schedule mode.
-     */
     if (
       scheduledEvaluation.status ===
       'CLOSING_SOON'
@@ -819,10 +795,6 @@ export default function StoreManagement() {
 
     const nowIso = new Date().toISOString();
 
-    /*
-     * Update local state immediately so the UI changes without waiting
-     * for Supabase.
-     */
     setStoreStatus('closed');
 
     updateStoreOperations(vendorId, {
@@ -902,11 +874,6 @@ export default function StoreManagement() {
   const handleResetToAuto = async () => {
     if (!vendorId) return;
 
-    /*
-     * Evaluate the schedule independently from manualOverride.
-     * This prevents a manually opened/closed store from incorrectly becoming
-     * the new automatic state.
-     */
     const scheduledEvaluation =
       evaluateSchedule(
         new Date(),
@@ -1852,6 +1819,7 @@ export default function StoreManagement() {
           )}
         </section>
 
+        {/* ================================================================ */}
         {/* SECTION 3: BUSINESS HOURS */}
         {/* ================================================================ */}
 
@@ -2405,6 +2373,8 @@ export default function StoreManagement() {
             </div>
           </div>
         </section>
+
+      </div>
 
       {/* LOCATION PICKER */}
 
