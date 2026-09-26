@@ -7,6 +7,7 @@ import {
   Building2,
   Loader2,
   CheckCircle,
+  Upload,
   AlertCircle,
   Search,
   X,
@@ -29,7 +30,6 @@ import {
   VendorProfile
 } from '../../../services/vendorService';
 
-import { searchLocation } from '../../../services/geocodingService';
 import { supabase } from '../../../lib/supabase';
 import {
   StoreLocationPicker,
@@ -152,7 +152,8 @@ export default function StoreManagement() {
   // ---------------------------------------------------------------------------
 
   const [isSavingAll, setIsSavingAll] = useState<boolean>(false);
-  const [verifyingAddress, setVerifyingAddress] = useState<boolean>(false);
+  const [uploadingQr, setUploadingQr] = useState<boolean>(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
   // ---------------------------------------------------------------------------
   // MAP PICKER
@@ -218,6 +219,7 @@ export default function StoreManagement() {
   const [accountNumber, setAccountNumber] = useState('');
   const [ifscCode, setIfscCode] = useState('');
   const [upiId, setUpiId] = useState('');
+  const qrFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // ---------------------------------------------------------------------------
   // TOAST HELPER
@@ -439,6 +441,7 @@ export default function StoreManagement() {
       setAccountNumber(profile.account_number || '');
       setIfscCode(profile.ifsc_code || '');
       setUpiId(profile.upi_id || '');
+      setQrCodeUrl(profile.qr_code_url || '');
     },
     []
   );
@@ -1082,104 +1085,6 @@ export default function StoreManagement() {
   };
 
   // ---------------------------------------------------------------------------
-  // MANUAL ADDRESS VERIFICATION
-  // ---------------------------------------------------------------------------
-
-  const handleVerifyManualAddress = async () => {
-    const fullQuery = [
-      addressLine1,
-      addressLine2,
-      city,
-      state,
-      pinCode
-    ]
-      .filter(Boolean)
-      .join(', ');
-
-    if (!fullQuery.trim()) {
-      showToast(
-        'Please enter an address before verifying.',
-        'error'
-      );
-
-      return;
-    }
-
-    setVerifyingAddress(true);
-
-    try {
-      const results =
-        await searchLocation(fullQuery);
-
-      if (
-        results &&
-        results.length > 0
-      ) {
-        const topResult = results[0];
-
-        setLatitude(
-          String(topResult.latitude)
-        );
-
-        setLongitude(
-          String(topResult.longitude)
-        );
-
-        if (topResult.address) {
-          if (
-            topResult.address.city ||
-            topResult.address.town ||
-            topResult.address.village
-          ) {
-            setCity(
-              topResult.address.city ||
-                topResult.address.town ||
-                topResult.address.village ||
-                city
-            );
-          }
-
-          if (topResult.address.state) {
-            setState(
-              topResult.address.state
-            );
-          }
-
-          if (
-            topResult.address.postcode
-          ) {
-            setPinCode(
-              topResult.address.postcode
-            );
-          }
-        }
-
-        showToast(
-          'Store location verified successfully.',
-          'success'
-        );
-      } else {
-        showToast(
-          'Could not verify location coordinates for this address. Try selecting on map.',
-          'error'
-        );
-      }
-    } catch (err) {
-      console.error(
-        'Address verification error:',
-        err
-      );
-
-      showToast(
-        'Address verification error. Please try again or use the map.',
-        'error'
-      );
-    } finally {
-      setVerifyingAddress(false);
-    }
-  };
-
-  // ---------------------------------------------------------------------------
   // SAVE STORE INFO
   // ---------------------------------------------------------------------------
 
@@ -1433,30 +1338,102 @@ export default function StoreManagement() {
   // SAVE BANK DETAILS
   // ---------------------------------------------------------------------------
 
+  const handleQrUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file || !vendorId) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid QR image file.', 'error');
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('QR image must be 5 MB or smaller.', 'error');
+      event.target.value = '';
+      return;
+    }
+
+    setUploadingQr(true);
+
+    try {
+      const extension =
+        file.name.split('.').pop()?.toLowerCase() || 'png';
+      const filePath =
+        `${vendorId}/payment-qr-${Date.now()}.${extension}`;
+
+      const { error: uploadError } =
+        await supabase.storage
+          .from('vendor-QR')
+          .upload(filePath, file, {
+            upsert: true,
+            contentType: file.type
+          });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } =
+        supabase.storage
+          .from('vendor-QR')
+          .getPublicUrl(filePath);
+
+      const publicUrl =
+        publicUrlData?.publicUrl || '';
+
+      if (!publicUrl) {
+        throw new Error('Could not generate the QR image URL.');
+      }
+
+      const { error: profileError } =
+        await supabase
+          .from('vendor_profiles')
+          .update({ qr_code_url: publicUrl })
+          .eq('vendor_id', vendorId);
+
+      if (profileError) throw profileError;
+
+      setQrCodeUrl(publicUrl);
+      showToast('Payment QR uploaded successfully.', 'success');
+    } catch (error: any) {
+      console.error('QR upload error:', error);
+      showToast(
+        error?.message || 'Failed to upload payment QR.',
+        'error'
+      );
+    } finally {
+      setUploadingQr(false);
+      event.target.value = '';
+    }
+  };
+
   const saveBankDetails = async () => {
     if (!vendorId) return;
+
+    if (!qrCodeUrl.trim()) {
+      throw new Error(
+        'Please upload the vendor payment QR code before saving bank details.'
+      );
+    }
 
     const res =
       await updateBankDetails(
         vendorId,
         {
-          account_holder_name:
-            accountHolderName,
-          bank_name:
-            bankName,
-          account_number:
-            accountNumber,
-          ifsc_code:
-            ifscCode,
-          upi_id:
-            upiId
+          account_holder_name: accountHolderName,
+          bank_name: bankName,
+          account_number: accountNumber,
+          ifsc_code: ifscCode,
+          upi_id: upiId,
+          qr_code_url: qrCodeUrl.trim()
         }
       );
 
     if (!res.success) {
       throw new Error(
-        res.error ||
-          'Failed to save bank details.'
+        res.error || 'Failed to save bank details.'
       );
     }
   };
@@ -1828,237 +1805,53 @@ export default function StoreManagement() {
         {/* ================================================================ */}
 
         <section className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs space-y-6">
-
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-900 pb-3">
-
             <div className="flex items-center gap-2">
-
-              <MapPin
-                className="text-emerald-500"
-                size={18}
-              />
-
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                Store Location
-              </h2>
-
+              <MapPin className="text-emerald-500" size={18} />
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Store Location</h2>
             </div>
-
             {isLocationVerified ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-500/20">
-                <Check size={14} />
-                Store Location Verified
+                <Check size={14} /> Store Location Verified
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-3 py-1 rounded-full border border-amber-500/20">
-                <AlertTriangle size={14} />
-                Store location not verified
+                <AlertTriangle size={14} /> Store location not selected
               </span>
             )}
-
           </div>
 
-          <div className="space-y-6">
-
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200/80 dark:border-slate-800">
-
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  📍 Method 1: Find on Map
-                </h3>
-
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Pinpoint your store directly on an interactive map.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setLocationPickerOpen(
-                    true
-                  )
-                }
-                className="h-10 px-4 bg-emerald-500 hover:bg-emerald-600 text-white transition rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs shadow-emerald-500/10 shrink-0"
-              >
-                <MapPin size={16} />
-                Open Map Picker
-              </button>
-
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200/80 dark:border-slate-800">
+            <div className="min-w-0">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">📍 Select Exact Store Location</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Select the physical store pin on the map.
+              </p>
             </div>
-
-            <div className="space-y-4 pt-2">
-
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                ✍️ Method 2: Enter Address Manually
-              </h3>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                    Address Line 1 *
-                  </label>
-
-                  <input
-                    type="text"
-                    value={addressLine1}
-                    onChange={e =>
-                      setAddressLine1(
-                        e.target.value
-                      )
-                    }
-                    placeholder="Shop No., Building Name, Street"
-                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                    Address Line 2 / Landmark
-                  </label>
-
-                  <input
-                    type="text"
-                    value={addressLine2}
-                    onChange={e =>
-                      setAddressLine2(
-                        e.target.value
-                      )
-                    }
-                    placeholder="Near SBI Bank, Opposite Market"
-                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                  />
-                </div>
-
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                    City
-                  </label>
-
-                  <input
-                    type="text"
-                    value={city}
-                    onChange={e =>
-                      setCity(
-                        e.target.value
-                      )
-                    }
-                    placeholder="City / Town"
-                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                    State
-                  </label>
-
-                  <input
-                    type="text"
-                    value={state}
-                    onChange={e =>
-                      setState(
-                        e.target.value
-                      )
-                    }
-                    placeholder="State"
-                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                    PIN Code
-                  </label>
-
-                  <input
-                    type="text"
-                    value={pinCode}
-                    onChange={e =>
-                      setPinCode(
-                        e.target.value
-                      )
-                    }
-                    placeholder="6-digit PIN Code"
-                    className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono"
-                  />
-                </div>
-
-              </div>
-
-              <div className="flex justify-start pt-1">
-
-                <button
-                  type="button"
-                  onClick={
-                    handleVerifyManualAddress
-                  }
-                  disabled={
-                    verifyingAddress
-                  }
-                  className="h-10 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 transition rounded-xl text-xs font-bold flex items-center gap-2 border border-slate-200 dark:border-slate-700"
-                >
-                  {verifyingAddress ? (
-                    <Loader2
-                      size={14}
-                      className="animate-spin text-emerald-500"
-                    />
-                  ) : (
-                    <CheckCircle
-                      size={14}
-                      className="text-emerald-500"
-                    />
-                  )}
-
-                  Verify Address on Map
-                </button>
-
-              </div>
-
-            </div>
-
-            {isLocationVerified && (
-              <div className="bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-4 space-y-1 text-xs">
-
-                <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider mb-2">
-                  <CheckCircle size={14} />
-                  Store Location Verified
-                </div>
-
-                {addressLine1 && (
-                  <div className="text-slate-800 dark:text-slate-200 font-medium">
-                    {addressLine1}
-                  </div>
-                )}
-
-                {addressLine2 && (
-                  <div className="text-slate-600 dark:text-slate-400">
-                    {addressLine2}
-                  </div>
-                )}
-
-                <div className="text-slate-600 dark:text-slate-400 font-medium">
-                  {[
-                    city,
-                    state,
-                    pinCode
-                  ]
-                    .filter(Boolean)
-                    .join(', ')}
-                </div>
-
-              </div>
-            )}
-
+            <button
+              type="button"
+              onClick={() => setLocationPickerOpen(true)}
+              className="h-10 px-4 bg-emerald-500 hover:bg-emerald-600 text-white transition rounded-xl text-xs font-bold flex items-center gap-2 shadow-xs shadow-emerald-500/10 shrink-0"
+            >
+              <MapPin size={16} />
+              {isLocationVerified ? 'Change Location' : 'Open Map Picker'}
+            </button>
           </div>
+
+          {isLocationVerified && (
+            <div className="bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-500/30 rounded-2xl p-4 space-y-1 text-xs">
+              <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider mb-2">
+                <CheckCircle size={14} /> Selected Store Location
+              </div>
+              {addressLine1 && <div className="text-slate-800 dark:text-slate-200 font-medium">{addressLine1}</div>}
+              {addressLine2 && <div className="text-slate-600 dark:text-slate-400">{addressLine2}</div>}
+              <div className="text-slate-600 dark:text-slate-400 font-medium">
+                {[city, state, pinCode].filter(Boolean).join(', ')}
+              </div>
+            </div>
+          )}
         </section>
 
-        {/* ================================================================ */}
         {/* SECTION 3: BUSINESS HOURS */}
         {/* ================================================================ */}
 
@@ -2527,131 +2320,91 @@ export default function StoreManagement() {
         {/* ================================================================ */}
 
         <section className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs space-y-6">
-
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
-
-            <Building2
-              className="text-emerald-500"
-              size={18}
-            />
-
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
-              Bank Details
-            </h2>
-
+            <Building2 className="text-emerald-500" size={18} />
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Bank & Payment Details</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">These details are used by Rivo for vendor settlements.</p>
+            </div>
           </div>
 
-          <div className="space-y-4">
-
+          <div className="space-y-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
               <div className="space-y-1.5">
-
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Account Holder Name
-                </label>
-
-                <input
-                  type="text"
-                  value={
-                    accountHolderName
-                  }
-                  onChange={e =>
-                    setAccountHolderName(
-                      e.target.value
-                    )
-                  }
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Account Holder Name</label>
+                <input type="text" value={accountHolderName} onChange={e => setAccountHolderName(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white" />
               </div>
-
               <div className="space-y-1.5">
-
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Bank Name
-                </label>
-
-                <input
-                  type="text"
-                  value={bankName}
-                  onChange={e =>
-                    setBankName(
-                      e.target.value
-                    )
-                  }
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white"
-                />
-
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Bank Name</label>
+                <input type="text" value={bankName} onChange={e => setBankName(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white" />
               </div>
-
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-
               <div className="space-y-1.5">
-
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  Account Number
-                </label>
-
-                <input
-                  type="text"
-                  value={accountNumber}
-                  onChange={e =>
-                    setAccountNumber(
-                      e.target.value
-                    )
-                  }
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono"
-                />
-
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">Account Number</label>
+                <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono" />
               </div>
-
               <div className="space-y-1.5">
-
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  IFSC Code
-                </label>
-
-                <input
-                  type="text"
-                  value={ifscCode}
-                  onChange={e =>
-                    setIfscCode(
-                      e.target.value
-                    )
-                  }
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono uppercase"
-                />
-
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">IFSC Code</label>
+                <input type="text" value={ifscCode} onChange={e => setIfscCode(e.target.value.toUpperCase())}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono uppercase" />
               </div>
-
               <div className="space-y-1.5">
-
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                  UPI ID
-                </label>
-
-                <input
-                  type="text"
-                  value={upiId}
-                  onChange={e =>
-                    setUpiId(
-                      e.target.value
-                    )
-                  }
-                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono"
-                />
-
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">UPI ID</label>
+                <input type="text" value={upiId} onChange={e => setUpiId(e.target.value)}
+                  className="w-full h-10 px-3 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-sm focus:outline-none focus:border-emerald-500 text-slate-900 dark:text-white font-mono" />
               </div>
-
             </div>
 
+            <div className="rounded-2xl border border-amber-300/60 bg-amber-50/70 dark:border-amber-900/50 dark:bg-amber-950/20 p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">Vendor Payment QR <span className="text-red-500">*</span></p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                    Upload the QR code for the account where Rivo should send your vendor settlement. Admin will use the saved QR when processing your payout.
+                  </p>
+                </div>
+                <div className="shrink-0 px-2.5 py-1 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 text-[10px] font-black uppercase tracking-wider">Required</div>
+              </div>
+
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => qrFileInputRef.current?.click()}
+                  disabled={uploadingQr}
+                  className="h-10 px-4 rounded-xl border border-dashed border-emerald-300 dark:border-emerald-900 bg-white dark:bg-slate-900 text-xs font-bold text-slate-800 dark:text-white hover:bg-emerald-50 dark:hover:bg-slate-800 transition flex items-center justify-center gap-2 disabled:opacity-50 shrink-0"
+                >
+                  {uploadingQr ? <Loader2 size={14} className="animate-spin text-emerald-500" /> : <Upload size={14} className="text-emerald-500" />}
+                  Upload Payment QR
+                </button>
+
+                <input ref={qrFileInputRef} type="file" accept="image/*" onChange={handleQrUpload} className="hidden" />
+
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {qrCodeUrl ? 'QR uploaded and saved.' : 'No payment QR uploaded yet.'}
+                </span>
+              </div>
+
+              {qrCodeUrl && (
+                <div className="mt-4 flex items-center gap-3 rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-white dark:bg-slate-900 p-3">
+                  <div className="w-20 h-20 bg-white rounded-lg border border-slate-200 p-1 flex items-center justify-center shrink-0">
+                    <img src={qrCodeUrl} alt="Vendor payment QR" className="max-w-full max-h-full object-contain" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-emerald-700 dark:text-emerald-300">Payment QR saved</p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      Stored in your vendor profile for settlement processing.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </section>
-
-      </div>
 
       {/* LOCATION PICKER */}
 
