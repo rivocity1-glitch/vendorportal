@@ -38,11 +38,6 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
       return;
     }
 
-    if (!cleanInput.includes("@") && !/^[A-Z0-9]{6}$/i.test(cleanInput)) {
-      setError("Shop Code must be exactly 6 characters.");
-      return;
-    }
-
     setLoading(true);
     try {
       // Clear previous local storage session
@@ -245,17 +240,9 @@ export function Login({ onLogin, onNavigateToRegister }: LoginProps) {
                 <input
                   type="text"
                   value={shopCode}
-                  onChange={(e) =>
-                    setShopCode(
-                      e.target.value
-                        .replace(/\s/g, "")
-                        .toUpperCase()
-                        .slice(0, 6)
-                    )
-                  }
-                  maxLength={6}
+                  onChange={(e) => setShopCode(e.target.value)}
                   disabled={loading}
-                  placeholder="6-character Shop Code or email"
+                  placeholder="e.g. RIVO-1024 or owner@store.com"
                   className="w-full h-10 px-3 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:border-[#2ECC71] focus:ring-2 focus:ring-[#2ECC71]/10 transition disabled:opacity-50"
                 />
               </div>
