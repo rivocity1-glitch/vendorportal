@@ -633,6 +633,32 @@ export function Orders() {
 
       const typedItems = (itemsData || []) as OrderItemRow[];
 
+      const groupedLaneItems = new Map<string, OrderItemRow[]>();
+      typedItems.forEach((item) => {
+        const currentItems = groupedLaneItems.get(item.order_id) || [];
+        currentItems.push(item);
+        groupedLaneItems.set(item.order_id, currentItems);
+      });
+      setTypedItemsCache(groupedLaneItems);
+
+      try {
+        const workers = await getLaneWorkers(currentVendorId);
+        setLaneWorkers(workers);
+
+        const laneTasks = await getLanePickingTasks(
+          currentVendorId,
+          typedItems.map((item) => item.id)
+        );
+
+        const taskMap = new Map<string, LaneTaskRow>();
+        laneTasks.forEach((task) => taskMap.set(task.order_item_id, task));
+        setLaneTasksByItem(taskMap);
+      } catch (laneError) {
+        console.warn("Lane synchronization warning:", laneError);
+        setLaneWorkers([]);
+        setLaneTasksByItem(new Map());
+      }
+
       const productIds = Array.from(
         new Set(
           typedItems
