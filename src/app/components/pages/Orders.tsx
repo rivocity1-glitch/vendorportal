@@ -3682,67 +3682,67 @@ export function Orders() {
                 </p>
 
                 <div className="space-y-1 bg-muted/20 border border-border/40 rounded-xl p-3">
-                  {selectedOrder.items.map(
-                    (item, index) => {
-                      const laneTask = laneTasksByItem.get(item.id);
-                      const laneWorker = laneTask
-                        ? laneWorkers.find((worker) => worker.id === laneTask.worker_id)
-                        : undefined;
+                  {selectedOrder.items.map((item, index) => {
+                    const laneTask = laneTasksByItem.get(item.id);
+                    const laneWorker = laneTask
+                      ? laneWorkers.find((worker) => worker.id === laneTask.worker_id)
+                      : undefined;
 
-                      return (
-                        <div
-                          key={`${selectedOrder.id}-${index}`}
-                          className="py-2 border-b border-border/40 last:border-0"
-                        >
-                          <div className="flex justify-between items-start gap-3">
-                            <div className="min-w-0 flex-1 pr-2">
-                              <p className="text-sm font-medium truncate">{item.name}</p>
-                              <p className="text-xs text-muted-foreground">Qty: {item.qty} × {item.unitPrice}</p>
-                            </div>
-                            <p className="text-sm font-semibold shrink-0">{item.totalPrice}</p>
+                    return (
+                      <div
+                        key={selectedOrder.id + "-" + index}
+                        className="py-2 border-b border-border/40 last:border-0"
+                      >
+                        <div className="flex justify-between items-center gap-3">
+                          <div className="min-w-0 flex-1 pr-2">
+                            <p className="text-sm font-medium truncate">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">Qty: {item.qty} × {item.unitPrice}</p>
                           </div>
-                          <div className="mt-2 rounded-lg border border-border/60 bg-background/60 p-2.5">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Lane Picking</span>
-                              {laneTask?.status === "picked" ? (
-                                <span className="text-[10px] font-bold text-[#065F46] bg-[#D1FAE5] px-2 py-0.5 rounded-full">Picked</span>
-                              ) : laneTask ? (
-                                <span className="text-[10px] font-bold text-[#92400E] bg-[#FEF3C7] px-2 py-0.5 rounded-full">Assigned</span>
-                              ) : (
-                                <span className="text-[10px] font-semibold text-muted-foreground">Not Assigned</span>
-                              )}
-                            </div>
-                            <div className="mt-2 flex items-center gap-2">
-                              <select
-                                value={laneTask?.worker_id || ""}
-                                disabled={assigningLaneItemId === item.id || laneTask?.status === "picked"}
-                                onChange={(event) => {
-                                  const rawItem = typedItemsCache.get(selectedOrder.id)?.find((row) => row.id === item.id);
-                                  if (rawItem && event.target.value) {
-                                    assignLaneWorker(rawItem.id, selectedOrder.id, event.target.value);
-                                  }
-                                }}
-                                className="flex-1 h-8 rounded-md border border-border bg-card px-2 text-xs text-foreground"
-                              >
-                                <option value="">
-                                  {laneWorkers.length ? "Assign worker" : "No workers configured"}
-                                </option>
-                                {laneWorkers.map((worker) => (
-                                  <option key={worker.id} value={worker.id}>{worker.worker_name}</option>
-                                ))}
-                              </select>
-                            </div>
-                            {laneWorker && (
-                              <p className="mt-1.5 text-[10px] text-muted-foreground">
-                                Worker: {laneWorker.worker_name}
-                                {laneTask?.picked_at ? ` · Picked ${formatDate(laneTask.picked_at)}` : ""}
-                              </p>
+                          <p className="text-sm font-semibold">{item.totalPrice}</p>
+                        </div>
+
+                        <div className="mt-2 rounded-lg border border-border/60 bg-background/60 p-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Lane Picking</span>
+                            {laneTask?.status === "picked" ? (
+                              <span className="text-[10px] font-bold text-[#065F46] bg-[#D1FAE5] px-2 py-0.5 rounded-full">Picked</span>
+                            ) : laneTask ? (
+                              <span className="text-[10px] font-bold text-[#92400E] bg-[#FEF3C7] px-2 py-0.5 rounded-full">Assigned</span>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-muted-foreground">Not Assigned</span>
                             )}
                           </div>
+
+                          <div className="mt-2 flex items-center gap-2">
+                            <select
+                              value={laneTask?.worker_id || ""}
+                              disabled={assigningLaneItemId === item.id || laneTask?.status === "picked"}
+                              onChange={(event) => {
+                                if (event.target.value) {
+                                  assignLaneWorker(item.id, selectedOrder.id, event.target.value);
+                                }
+                              }}
+                              className="flex-1 h-8 rounded-md border border-border bg-card px-2 text-xs text-foreground"
+                            >
+                              <option value="">
+                                {laneWorkers.length ? "Assign worker" : "No workers configured"}
+                              </option>
+                              {laneWorkers.map((worker) => (
+                                <option key={worker.id} value={worker.id}>{worker.worker_name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {laneWorker && (
+                            <p className="mt-1.5 text-[10px] text-muted-foreground">
+                              Worker: {laneWorker.worker_name}
+                              {laneTask?.picked_at ? " · Picked " + formatDate(laneTask.picked_at) : ""}
+                            </p>
+                          )}
                         </div>
-                      );
-                    }
-                  )}
+                      </div>
+                    );
+                  })}
 
                   <div className="border-t border-border/60 mt-3 pt-2 space-y-1 text-xs">
                     <div className="flex justify-between text-muted-foreground">
