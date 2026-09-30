@@ -22,6 +22,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
+import { getLaneWorkers, getLanePickingTasks, assignLanePickingTask, LaneWorker, LanePickingTask } from "../../../services/laneWorkerService";
 
 const statusColors: Record<
   string,
@@ -133,6 +134,9 @@ type OrderItemRow = {
   total_price: number;
   product_name?: string | null;
 };
+
+type LaneWorkerRow = LaneWorker;
+type LaneTaskRow = LanePickingTask;
 
 type OrderRow = {
   id: string;
@@ -346,6 +350,11 @@ export function Orders() {
   const [verifierNames, setVerifierNames] = useState<
     Record<string, string>
   >({});
+
+  const [laneWorkers, setLaneWorkers] = useState<LaneWorkerRow[]>([]);
+  const [laneTasksByItem, setLaneTasksByItem] = useState<Map<string, LaneTaskRow>>(new Map());
+  const [typedItemsCache, setTypedItemsCache] = useState<Map<string, OrderItemRow[]>>(new Map());
+  const [assigningLaneItemId, setAssigningLaneItemId] = useState<string | null>(null);
 
   const formatStatusString = (rawStatus: string | null | undefined) => {
     if (!rawStatus) return "Pending";
@@ -1530,6 +1539,37 @@ export function Orders() {
       });
     };
   }, []);
+
+  const assignLaneWorker = async (
+    orderItemId: string,
+    orderId: string,
+    workerId: string
+  ) => {
+    if (!workerId) return;
+    try {
+      setAssigningLaneItemId(orderItemId);
+      const vendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
+      const item = typedItemsCache.get(orderId)?.find((row) => row.id === orderItemId);
+      if (!vendorId || !item) throw new Error("Order item context unavailable.");
+      const task = await assignLanePickingTask({
+        vendorId,
+        orderItemId,
+        workerId,
+        quantity: Number(item.quantity || 0),
+      });
+      setLaneTasksByItem((previous) => {
+        const next = new Map(previous);
+        next.set(orderItemId, task);
+        return next;
+      });
+      await fetchLiveOrders(false);
+    } catch (laneError: any) {
+      console.error("Lane assignment error:", laneError);
+      alert(laneError?.message || "Unable to assign Lane worker.");
+    } finally {
+      setAssigningLaneItemId(null);
+    }
+  };
 
   const triggerActionConfirmation = (
     orderId: string,
