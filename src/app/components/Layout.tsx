@@ -13,7 +13,7 @@ type Page =
   | "dashboard" | "orders" | "invoices" | "products" | "add-product" | "inventory"
   | "offers" | "analytics" | "settlements" | "subscriptions"
   | "reviews" | "notifications"
-  | "store" | "profile" | "settings" | "register";
+  | "store" | "profile" | "settings" | "register" | "lane-picking";
 
 interface LayoutProps {
   currentPage: Page;
