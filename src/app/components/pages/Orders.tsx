@@ -1290,6 +1290,7 @@ export function Orders() {
     let settlementsChannel: any = null;
     let ridersChannel: any = null;
     let assignmentsChannel: any = null;
+    let laneTaskChannel: any = null;
 
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let refreshInProgress = false;
@@ -1485,6 +1486,22 @@ export function Orders() {
             ),
           "rider_vendor_assignments"
         );
+
+        laneTaskChannel = subscribeSafely(
+          supabase
+            .channel(`vendor-lane-tasks-${currentVendorId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "order_item_picking_tasks",
+                filter: `vendor_id=eq.${currentVendorId}`,
+              },
+              () => scheduleOrdersRefresh()
+            ),
+          "order_item_picking_tasks"
+        );
       } catch (err) {
         console.error("Realtime setup error:", err);
       }
@@ -1507,6 +1524,7 @@ export function Orders() {
         settlementsChannel,
         ridersChannel,
         assignmentsChannel,
+        laneTaskChannel,
       ].forEach((channel) => {
         if (channel) supabase.removeChannel(channel);
       });
