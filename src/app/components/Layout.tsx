@@ -292,6 +292,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
     store: "Store Management",
     profile: "Profile",
     settings: "Settings",
+    "lane-picking": "RivoCity Picker",
   };
 
   const getInitials = () => {
