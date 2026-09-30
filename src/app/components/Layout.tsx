@@ -48,7 +48,7 @@ const navItems = [
   { id: "store", label: "Store Management", icon: Store, visible: true },
   { id: "profile", label: "Profile", icon: User, visible: true },
   { id: "settings", label: "Settings", icon: Settings, visible: true },
-  { id: "lane-picking", label: "RivoCity Lane", icon: Zap, visible: true },
+  { id: "lane-picking", label: "RivoCity Picker", icon: Zap, visible: true },
 ] as const;
 
 export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleTheme, children, vendorMeta }: LayoutProps) {
