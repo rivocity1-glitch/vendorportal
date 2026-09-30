@@ -1591,7 +1591,7 @@ export function Orders() {
       await fetchLiveOrders(false);
     } catch (laneError: any) {
       console.error("Lane assignment error:", laneError);
-      alert(laneError?.message || "Unable to assign Lane worker.");
+      alert(laneError?.message || "Unable to assign Picker worker.");
     } finally {
       setAssigningLaneItemId(null);
     }
@@ -3769,7 +3769,7 @@ export function Orders() {
 
                         <div className="mt-2 rounded-lg border border-border/60 bg-background/60 p-2.5">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Lane Picking</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Picker Picking</span>
                             {laneTask?.status === "picked" ? (
                               <span className="text-[10px] font-bold text-[#065F46] bg-[#D1FAE5] px-2 py-0.5 rounded-full">Picked</span>
                             ) : laneTask ? (
