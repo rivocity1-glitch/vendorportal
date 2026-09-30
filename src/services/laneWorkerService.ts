@@ -15,9 +15,7 @@ export async function removeLaneWorker(workerId:string,vendorId:string){
  if(we)throw we;
  const{error}=await supabase.from("vendor_workers").update({status:"inactive",updated_at:new Date().toISOString()}).eq("id",workerId).eq("vendor_id",vendorId);
  if(error)throw error;
- if(worker?.auth_user_id){
-  await supabase.from("picker_profiles").update({availability_status:"available",updated_at:new Date().toISOString()}).eq("auth_user_id",worker.auth_user_id).eq("application_status","approved");
- }
+
 }
 export async function getLanePickingTasks(vendorId:string,orderItemIds:string[]):Promise<LanePickingTask[]>{if(!orderItemIds.length)return[];const{data,error}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").eq("vendor_id",vendorId).in("order_item_id",orderItemIds);if(error)throw error;return(data||[]) as LanePickingTask[];}
 export async function assignLanePickingTask(args:{vendorId:string;orderItemId:string;workerId:string;quantity:number}):Promise<LanePickingTask>{
