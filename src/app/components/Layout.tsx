@@ -48,6 +48,7 @@ const navItems = [
   { id: "store", label: "Store Management", icon: Store, visible: true },
   { id: "profile", label: "Profile", icon: User, visible: true },
   { id: "settings", label: "Settings", icon: Settings, visible: true },
+  { id: "lane", label: "RivoCity Lane", icon: Zap, visible: true, externalUrl: "https://github.com/rivocity1-glitch/rivocity-lane" },
 ] as const;
 
 export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleTheme, children, vendorMeta }: LayoutProps) {
@@ -406,7 +407,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
               return (
                 <button
                   key={item.id}
-                  onClick={() => { onNavigate(item.id as Page); setSidebarOpen(false); }}
+                  onClick={() => { if ("externalUrl" in item && item.externalUrl) { window.open(item.externalUrl, "_blank", "noopener,noreferrer"); } else { onNavigate(item.id as Page); } setSidebarOpen(false); }}
                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg mb-0.5 text-sm transition-all group ${
                     isActive
                       ? "bg-[#10B981] text-white shadow-md shadow-[#10B981]/20"
