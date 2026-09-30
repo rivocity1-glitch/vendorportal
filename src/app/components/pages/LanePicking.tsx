@@ -1,53 +1,39 @@
 import React,{useEffect,useState}from"react";
-import{ClipboardCheck,RefreshCw,User,CheckCircle,Clock}from"lucide-react";
+import{CheckCircle,MapPin,RefreshCw,UserPlus,UserMinus,Package}from"lucide-react";
 import{supabase}from"../../../lib/supabase";
-import{getLaneWorkers,getLanePickingTasks,assignLanePickingTask,LaneWorker,LanePickingTask}from"../../../services/laneWorkerService";
+import{getLaneWorkers,getLanePickingTasks,assignLanePickingTask,removeLaneWorker,getPickerCandidates,getPickerRequests,requestPicker,LaneWorker,LanePickingTask,PickerCandidate,PickerVendorRequest}from"../../../services/laneWorkerService";
 
 type Item={id:string;order_id:string;product_name:string|null;quantity:number};
 type Order={id:string;order_number:string;order_status:string};
 
 export default function LanePicking(){
- const[orders,setOrders]=useState<Order[]>([]);
- const[items,setItems]=useState<Item[]>([]);
- const[workers,setWorkers]=useState<LaneWorker[]>([]);
- const[tasks,setTasks]=useState<Map<string,LanePickingTask>>(new Map());
- const[loading,setLoading]=useState(true);
- const[busy,setBusy]=useState<string|null>(null);
- const[error,setError]=useState<string|null>(null);
-
- const load=async()=>{
-  setLoading(true);setError(null);
-  try{
-   const{data:auth}=await supabase.auth.getUser();if(!auth.user)throw new Error("Vendor session not found.");
-   const{data:vendor,error:ve}=await supabase.from("vendors").select("id").eq("auth_user_id",auth.user.id).maybeSingle();if(ve)throw ve;if(!vendor)throw new Error("Vendor profile not found.");
-   const{data:o,error:oe}=await supabase.from("orders").select("id,order_number,order_status").eq("vendor_id",vendor.id).order("updated_at",{ascending:false});if(oe)throw oe;
-   const orderRows=(o||[]) as Order[];setOrders(orderRows);
-   const ids=orderRows.map(x=>x.id);
-   const{data:i,error:ie}=ids.length?await supabase.from("order_items").select("id,order_id,product_name,quantity").in("order_id",ids):{data:[],error:null};
-   if(ie)throw ie;setItems((i||[]) as Item[]);
-   const ws=await getLaneWorkers(vendor.id);setWorkers(ws);
-   const ts=await getLanePickingTasks(vendor.id,(i||[]).map((x:any)=>x.id));
-   const map=new Map<string,LanePickingTask>();ts.forEach(t=>map.set(t.order_item_id,t));setTasks(map);
-  }catch(e:any){console.error(e);setError(e.message||"Unable to load Picker.");}finally{setLoading(false)}
- };
- useEffect(()=>{load();},[]);
- const assign=async(item:Item,workerId:string)=>{
-  if(!workerId)return;setBusy(item.id);setError(null);
-  try{
-   const{data:auth}=await supabase.auth.getUser();if(!auth.user)throw new Error("Vendor session not found.");
-   const{data:v}=await supabase.from("vendors").select("id").eq("auth_user_id",auth.user.id).maybeSingle();if(!v)throw new Error("Vendor profile not found.");
-   const task=await assignLanePickingTask({vendorId:v.id,orderItemId:item.id,workerId,quantity:item.quantity});
-   setTasks(prev=>new Map(prev).set(item.id,task));
-  }catch(e:any){setError(e.message||"Unable to assign worker.")}finally{setBusy(null)}
- };
-
- const pending=items.filter(i=>orders.find(o=>o.id===i.order_id)?.order_status!=="Cancelled");
-
- return <div className="p-4 lg:p-6 space-y-5 bg-background text-foreground min-h-screen">
-  <div className="flex items-center justify-between gap-3"><div><h1 className="text-xl font-bold">RivoCity Picker Picking</h1><p className="text-sm text-muted-foreground mt-1">Assign order items to store workers and see picking progress.</p></div><button onClick={load} disabled={loading} className="h-9 px-3 rounded-lg border border-border bg-card text-sm font-semibold flex items-center gap-2"><RefreshCw className={loading?"w-4 h-4 animate-spin":"w-4 h-4"}/>Refresh</button></div>
+ const[workers,setWorkers]=useState<LaneWorker[]>([]);const[candidates,setCandidates]=useState<PickerCandidate[]>([]);const[requests,setRequests]=useState<PickerVendorRequest[]>([]);
+ const[orders,setOrders]=useState<Order[]>([]);const[items,setItems]=useState<Item[]>([]);const[tasks,setTasks]=useState<Map<string,LanePickingTask>>(new Map());
+ const[loading,setLoading]=useState(true);const[busy,setBusy]=useState<string|null>(null);const[error,setError]=useState<string|null>(null);
+ const load=async()=>{setLoading(true);setError(null);try{const{data:a}=await supabase.auth.getUser();if(!a.user)throw new Error("Vendor session not found.");const{data:v,error:ve}=await supabase.from("vendors").select("id").eq("auth_user_id",a.user.id).maybeSingle();if(ve)throw ve;if(!v)throw new Error("Vendor profile not found.");const ws=await getLaneWorkers(v.id);setWorkers(ws);setCandidates(await getPickerCandidates(v.id));setRequests(await getPickerRequests(v.id));const{data:o,error:oe}=await supabase.from("orders").select("id,order_number,order_status").eq("vendor_id",v.id).order("updated_at",{ascending:false});if(oe)throw oe;setOrders((o||[]) as Order[]);const ids=(o||[]).map((x:any)=>x.id);const{data:i,error:ie}=ids.length?await supabase.from("order_items").select("id,order_id,product_name,quantity").in("order_id",ids):{data:[],error:null};if(ie)throw ie;setItems((i||[]) as Item[]);const ts=await getLanePickingTasks(v.id,(i||[]).map((x:any)=>x.id));const map=new Map<string,LanePickingTask>();ts.forEach(t=>map.set(t.order_item_id,t));setTasks(map);}catch(e:any){console.error(e);setError(e.message||"Unable to load Picker.");}finally{setLoading(false)}};
+ useEffect(()=>{load()},[]);
+ const request=async(pickerId:string)=>{setBusy(pickerId);try{const{data:a}=await supabase.auth.getUser();if(!a.user)throw new Error("Vendor session not found.");const{data:v}=await supabase.from("vendors").select("id").eq("auth_user_id",a.user.id).maybeSingle();if(!v)throw new Error("Vendor profile not found.");await requestPicker(v.id,pickerId);await load()}catch(e:any){setError(e.message||"Unable to request Picker.")}finally{setBusy(null)}};
+ const remove=async(workerId:string)=>{if(!confirm("Remove this Picker from your store?"))return;setBusy(workerId);try{const{data:a}=await supabase.auth.getUser();if(!a.user)throw new Error("Vendor session not found.");const{data:v}=await supabase.from("vendors").select("id").eq("auth_user_id",a.user.id).maybeSingle();if(!v)throw new Error("Vendor profile not found.");await removeLaneWorker(workerId,v.id);await load()}catch(e:any){setError(e.message||"Unable to remove Picker.")}finally{setBusy(null)}};
+ const assign=async(item:Item,workerId:string)=>{if(!workerId)return;setBusy(item.id);try{const{data:a}=await supabase.auth.getUser();if(!a.user)throw new Error("Vendor session not found.");const{data:v}=await supabase.from("vendors").select("id").eq("auth_user_id",a.user.id).maybeSingle();if(!v)throw new Error("Vendor profile not found.");const t=await assignLanePickingTask({vendorId:v.id,orderItemId:item.id,workerId,quantity:item.quantity});setTasks(prev=>new Map(prev).set(item.id,t))}catch(e:any){setError(e.message||"Unable to assign Picker.")}finally{setBusy(null)}};
+ const pendingRequests=new Set(requests.filter(r=>r.status==="pending").map(r=>r.picker_id));
+ const pickable=items.filter(i=>{const s=orders.find(o=>o.id===i.order_id)?.order_status?.toLowerCase();return !["cancelled","delivered","picked_up","out_for_delivery"].includes(s||"")});
+ return <div className="p-4 lg:p-6 space-y-6 bg-background text-foreground min-h-screen">
+  <div className="flex items-center justify-between"><div><h1 className="text-xl font-bold">RivoCity Picker</h1><p className="text-sm text-muted-foreground mt-1">Recruit a nearby Picker, then assign order items to them.</p></div><button onClick={load} className="h-9 px-3 rounded-lg border border-border bg-card text-sm font-semibold flex items-center gap-2"><RefreshCw className="w-4 h-4"/>Refresh</button></div>
   {error&&<div className="rounded-xl border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm">{error}</div>}
-  {loading?<div className="py-16 flex justify-center text-muted-foreground"><RefreshCw className="animate-spin"/></div>:workers.length===0?<div className="bg-card border border-border rounded-xl p-6"><p className="font-semibold">No Picker workers configured.</p><p className="text-sm text-muted-foreground mt-1">Create the worker profile in Supabase first, then assign order items here.</p></div>:
-  <div className="space-y-3">{pending.map(item=>{const order=orders.find(o=>o.id===item.order_id);const task=tasks.get(item.id);const worker=task?workers.find(w=>w.id===task.worker_id):undefined;return <div key={item.id} className="bg-card border border-border rounded-xl p-4"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold text-emerald-700">Order {order?.order_number||"—"}</p><h2 className="font-semibold mt-1">{item.product_name||"Product Item"}</h2><p className="text-sm text-muted-foreground mt-1">Quantity: {item.quantity}</p></div>{task?.status==="picked"?<span className="text-xs font-bold text-emerald-700 flex items-center gap-1"><CheckCircle className="w-4 h-4"/>Picked</span>:task?<span className="text-xs font-bold text-amber-700 flex items-center gap-1"><Clock className="w-4 h-4"/>Assigned</span>:<span className="text-xs text-muted-foreground">Not assigned</span>}</div><div className="mt-3 flex items-center gap-2"><User className="w-4 h-4 text-muted-foreground"/><select value={task?.worker_id||""} disabled={busy===item.id||task?.status==="picked"} onChange={e=>assign(item,e.target.value)} className="flex-1 h-9 rounded-lg border border-border bg-card px-2 text-sm"><option value="">Assign worker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.worker_name}</option>)}</select></div>{worker&&<p className="mt-2 text-xs text-muted-foreground">Assigned to {worker.worker_name}{task?.picked_at?" · Picked "+new Date(task.picked_at).toLocaleString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}):""}</p>}</div>})}</div>}
-  <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex gap-3"><ClipboardCheck className="w-5 h-5 text-emerald-700 mt-0.5"/><div><p className="font-semibold text-emerald-900">How Lane works</p><p className="text-sm text-emerald-800 mt-1">Vendor assigns an item → worker sees it in RivoCity Picker → worker marks it picked → this page updates from Supabase.</p></div></div>
+  {loading?<div className="py-16 flex justify-center"><RefreshCw className="animate-spin"/></div>:<>
+   <section className="bg-card border border-border rounded-xl p-4">
+    <div className="flex items-center justify-between"><div><h2 className="font-bold">My Picker</h2><p className="text-xs text-muted-foreground mt-1">Approved Pickers near your store.</p></div><span className="text-xs font-bold text-emerald-600">{workers.length} active</span></div>
+    {workers.length===0?<p className="text-sm text-muted-foreground mt-4">No Picker assigned yet. Request one below.</p>:<div className="space-y-2 mt-4">{workers.map(w=><div key={w.id} className="flex items-center justify-between border border-border rounded-lg p-3"><div><p className="font-semibold">{w.worker_name}</p><p className="text-xs text-muted-foreground">Active Picker</p></div><button onClick={()=>remove(w.id)} disabled={busy===w.id} className="text-xs font-bold text-red-600 flex items-center gap-1"><UserMinus className="w-4 h-4"/>Remove</button></div>)}</div>}
+   </section>
+   <section className="bg-card border border-border rounded-xl p-4">
+    <div><h2 className="font-bold">Nearby available Pickers</h2><p className="text-xs text-muted-foreground mt-1">Location is used to sort available approved Pickers closest to your store.</p></div>
+    {candidates.length===0?<p className="text-sm text-muted-foreground mt-4">No approved available Pickers found.</p>:<div className="space-y-2 mt-4">{candidates.map(p=><div key={p.id} className="flex items-center justify-between border border-border rounded-lg p-3 gap-3"><div className="min-w-0"><p className="font-semibold truncate">{p.full_name}</p><p className="text-xs text-muted-foreground flex items-center gap-1"><MapPin className="w-3 h-3"/>{p.distanceKm===null?"Distance unavailable":p.distanceKm.toFixed(1)+" km"}{p.locality?" · "+p.locality:""}</p></div>{pendingRequests.has(p.id)?<span className="text-xs font-bold text-amber-600">Requested</span>:<button onClick={()=>request(p.id)} disabled={busy===p.id} className="shrink-0 rounded-lg bg-emerald-600 text-white px-3 py-2 text-xs font-bold flex items-center gap-1"><UserPlus className="w-4 h-4"/>{busy===p.id?"Sending":"Request"}</button>}</div>)}</div>}
+   {requests.filter(r=>r.status!=="pending").length>0&&<div className="mt-4 border-t border-border pt-3"><p className="text-xs font-bold text-muted-foreground uppercase">Recent requests</p>{requests.slice(0,5).map(r=><div key={r.id} className="text-xs flex justify-between mt-2"><span>{r.status}</span><span className="text-muted-foreground">{new Date(r.requested_at).toLocaleString()}</span></div>)}</div>}
+   </section>
+   <section className="space-y-3">
+    <div><h2 className="font-bold">Assign order items</h2><p className="text-xs text-muted-foreground mt-1">Only orders that have not reached pickup/delivery are shown.</p></div>
+    {pickable.length===0?<div className="bg-card border border-border rounded-xl p-6 text-sm text-muted-foreground">No pickable order items right now.</div>:pickable.map(item=>{const order=orders.find(o=>o.id===item.order_id);const task=tasks.get(item.id);return <div key={item.id} className="bg-card border border-border rounded-xl p-4"><div className="flex items-start gap-3"><Package className="w-5 h-5 text-emerald-600 mt-0.5"/><div className="flex-1"><p className="text-xs font-bold text-muted-foreground">Order {order?.order_number||"—"}</p><p className="font-semibold mt-1">{item.product_name||"Product"}</p><p className="text-xs text-muted-foreground">Quantity {item.quantity}</p></div>{task?.status==="picked"&&<CheckCircle className="w-5 h-5 text-emerald-600"/>}</div><div className="mt-3"><select value={task?.worker_id||""} onChange={e=>assign(item,e.target.value)} disabled={busy===item.id||workers.length===0} className="w-full border border-border rounded-lg px-3 py-2.5 bg-background text-sm"><option value="">Assign Picker…</option>{workers.map(w=><option key={w.id} value={w.id}>{w.worker_name}</option>)}</select></div></div>})}
+   </section>
+  </>}
  </div>
 }
