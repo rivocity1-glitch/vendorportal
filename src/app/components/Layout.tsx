@@ -13,7 +13,7 @@ type Page =
   | "dashboard" | "orders" | "invoices" | "products" | "add-product" | "inventory"
   | "offers" | "analytics" | "settlements" | "subscriptions"
   | "reviews" | "notifications"
-  | "store" | "profile" | "settings" | "register" | "lane-picking" | "store-layout";
+  | "store" | "profile" | "settings" | "register";
 
 interface LayoutProps {
   currentPage: Page;
@@ -48,8 +48,6 @@ const navItems = [
   { id: "store", label: "Store Management", icon: Store, visible: true },
   { id: "profile", label: "Profile", icon: User, visible: true },
   { id: "settings", label: "Settings", icon: Settings, visible: true },
-  { id: "lane-picking", label: "RivoCity Picker", icon: Zap, visible: true },
-  { id: "store-layout", label: "Store Layout", icon: Boxes, visible: true },
 ] as const;
 
 export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleTheme, children, vendorMeta }: LayoutProps) {
@@ -293,7 +291,6 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
     store: "Store Management",
     profile: "Profile",
     settings: "Settings",
-    "lane-picking": "RivoCity Picker",
   };
 
   const getInitials = () => {
