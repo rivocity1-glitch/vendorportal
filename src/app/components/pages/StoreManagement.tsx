@@ -17,7 +17,12 @@ import {
   Calendar,
   Power,
   XCircle,
-  CheckCircle2
+  CheckCircle2,
+  Wallet,
+  Users,
+  Boxes,
+  Navigation,
+  CalendarDays
 } from 'lucide-react';
 
 import {
@@ -1481,6 +1486,38 @@ export default function StoreManagement() {
         </div>
       )}
 
+      {/* FEATURE NAVIGATION */}
+      <div className="sticky top-0 z-30 -mx-1 px-1 pt-1 pb-2 bg-background/95 backdrop-blur">
+        <div className="rounded-2xl border border-border bg-card p-2 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: "store-info", label: "Store Details", icon: Store },
+              { id: "store-location", label: "Location", icon: Navigation },
+              { id: "store-hours", label: "Hours", icon: CalendarDays },
+              { id: "store-documents", label: "Documents", icon: FileText },
+              { id: "store-bank", label: "Bank & Payments", icon: Wallet },
+              { id: "store-picker", label: "Picker", icon: Users },
+              { id: "store-lanes", label: "Lanes & Racks", icon: Boxes },
+            ].map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() =>
+                  document.getElementById(id)?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  })
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-2 text-[11px] font-bold text-foreground hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950/30 transition-colors"
+              >
+                <Icon className="h-3.5 w-3.5 text-emerald-500" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* HEADER */}
       <div className="pb-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
         <div>
@@ -1524,7 +1561,7 @@ export default function StoreManagement() {
               size={18}
             />
 
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+            <h2 id="store-info" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">
               Store Information
             </h2>
           </div>
@@ -1777,7 +1814,7 @@ export default function StoreManagement() {
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-900 pb-3">
             <div className="flex items-center gap-2">
               <MapPin className="text-emerald-500" size={18} />
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">Store Location</h2>
+              <h2 id="store-location" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">Store Location</h2>
             </div>
             {isLocationVerified ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-500/20">
@@ -1834,7 +1871,7 @@ export default function StoreManagement() {
               size={18}
             />
 
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+            <h2 id="store-hours" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">
               Business Hours
             </h2>
 
@@ -2173,7 +2210,7 @@ export default function StoreManagement() {
               size={18}
             />
 
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+            <h2 id="store-documents" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">
               Business Documents
             </h2>
 
@@ -2293,7 +2330,7 @@ export default function StoreManagement() {
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
             <Building2 className="text-emerald-500" size={18} />
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">Bank & Payment Details</h2>
+              <h2 id="store-bank" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">Bank & Payment Details</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">These details are used by Rivo for vendor settlements.</p>
             </div>
           </div>
@@ -2380,10 +2417,10 @@ export default function StoreManagement() {
 
       {/* RIVOCITY PICKER & OPTIONAL STORE LAYOUT */}
 
-      <section className="space-y-4">
+      <section id="store-lanes" className="space-y-4 scroll-mt-24">
         <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs">
           <div>
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">RivoCity Picker & Store Operations</h2>
+            <h2 id="store-picker" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">RivoCity Picker & Store Operations</h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
               Picker management, optional lanes/racks, product locations and helper requests. None of these are required to add products.
             </p>
