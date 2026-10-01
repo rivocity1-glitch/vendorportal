@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Boxes, Plus, RefreshCw, Trash2, UserPlus, MapPin, Package, LifeBuoy } from "lucide-react";
+import { Boxes, Plus, RefreshCw, Trash2, UserPlus, MapPin, Package } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
 type Lane = { id: string; lane_name: string; lane_code: string | null; status: string };
@@ -133,7 +133,7 @@ export default function StoreLayout() {
           <p className="text-xs text-muted-foreground mt-1">Only create lanes if your store uses them.</p>
           <div className="grid grid-cols-2 gap-2 mt-3"><input value={laneName} onChange={e=>setLaneName(e.target.value)} placeholder="Lane A" className="h-10 rounded-lg border px-3 bg-background"/><input value={laneCode} onChange={e=>setLaneCode(e.target.value)} placeholder="Optional code" className="h-10 rounded-lg border px-3 bg-background"/></div>
           <button disabled={busy} onClick={createLane} className="mt-3 h-10 px-4 rounded-lg bg-emerald-600 text-white text-sm font-bold flex items-center gap-2"><Plus className="w-4 h-4"/>Add Lane</button>
-          <div className="mt-4 space-y-2">{lanes.map(l=><div key={l.id} className="border rounded-lg p-3 flex justify-between"><div><b>{l.lane_name}</b>{l.lane_code&&<span className="text-xs text-muted-foreground ml-2">{l.lane_code}</span>}</div><span className="text-xs text-emerald-600 font-bold">{l.status}</span></div>)}</div>
+          <div className="mt-4 space-y-2">{lanes.map(l=>{const assigned=assignments.find(a=>a.lane_id===l.id);return <div key={l.id} className="border rounded-lg p-3 flex justify-between gap-3"><div><b>{l.lane_name}</b>{l.lane_code&&<span className="text-xs text-muted-foreground ml-2">{l.lane_code}</span>}{assigned&&<p className="text-xs text-emerald-700 mt-1">Picker: {workerById.get(assigned.worker_id)?.worker_name||"Assigned Picker"}</p>}</div><span className="text-xs text-emerald-600 font-bold">{l.status}</span></div>})}</div><div className="mt-4 border-t pt-4"><p className="text-xs font-bold">Need a Picker/helper?</p><p className="text-xs text-muted-foreground mt-1">Send a request to Rivo Admin. Admin can assign an approved Picker to your store and lane.</p><div className="flex gap-2 mt-3"><select value={helperLaneId} onChange={e=>setHelperLaneId(e.target.value)} className="flex-1 h-10 rounded-lg border px-3 bg-background"><option value="">Store-wide</option>{lanes.map(l=><option key={l.id} value={l.id}>{l.lane_name}</option>)}</select><button disabled={busy} onClick={requestHelper} className="h-10 px-4 rounded-lg bg-emerald-600 text-white font-bold">Request Helper</button></div></div>
         </section>
 
         <section className="rounded-xl border bg-card p-4">
@@ -165,11 +165,7 @@ export default function StoreLayout() {
           <div className="mt-4 space-y-2">{assignments.map(a=><div key={a.id} className="border rounded-lg p-3 flex justify-between items-center"><div><b>{workerById.get(a.worker_id)?.worker_name||"Picker"}</b><span className="text-xs text-muted-foreground ml-2">{laneById.get(a.lane_id)?.lane_name||"Lane"}</span></div><button onClick={()=>removeAssignment(a.id)} className="text-xs text-red-600 font-bold">Unassign</button></div>)}</div>
         </section>
 
-        <section className="rounded-xl border bg-card p-4">
-          <h2 className="font-bold flex items-center gap-2"><LifeBuoy className="w-4 h-4"/>Request Helper</h2>
-          <p className="text-sm text-muted-foreground mt-1">Optional support request sent to the existing Admin Support queue.</p>
-          <div className="flex gap-2 mt-4"><select value={helperLaneId} onChange={e=>setHelperLaneId(e.target.value)} className="flex-1 h-10 rounded-lg border px-3 bg-background"><option value="">Store-wide</option>{lanes.map(l=><option key={l.id} value={l.id}>{l.lane_name}</option>)}</select><button disabled={busy} onClick={requestHelper} className="h-10 px-4 rounded-lg bg-emerald-600 text-white font-bold">Request Helper</button></div>
-        </section>
+        
       </div>
     </div>
   );
