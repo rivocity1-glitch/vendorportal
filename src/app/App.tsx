@@ -20,6 +20,7 @@ import { supabase } from "../lib/supabase";
 import Subscriptions from "./components/pages/subscriptions";
 import SmartImport from "./components/pages/SmartImport";
 import LanePicking from "./components/pages/LanePicking";
+import StoreLayout from "./components/pages/StoreLayout";
 import { FloatingSupport } from "./components/FloatingSupport";
 
 // Legal & Info Page Imports
@@ -57,7 +58,8 @@ type Page =
   | "liability"
   | "contact"
   | "about"
-  | "lane-picking";
+  | "lane-picking"
+  | "store-layout";
 
 interface VendorMetaState {
   store_name: string;
@@ -258,6 +260,8 @@ export default function App() {
         return <Profile />;
       case "lane-picking":
         return <LanePicking />;
+      case "store-layout":
+        return <StoreLayout />;
       case "settings":
         return (
           <Settings
