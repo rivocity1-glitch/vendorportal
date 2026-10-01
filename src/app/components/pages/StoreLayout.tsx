@@ -8,6 +8,7 @@ type Worker = { id: string; worker_name: string };
 type Product = { id: string; name: string; stock: number; low_stock_threshold: number | null };
 type Location = { id: string; product_id: string; lane_id: string; rack_id: string | null; location_note: string | null };
 type Assignment = { id: string; lane_id: string; worker_id: string; status: string };
+type HelperRequest = { id:string; title:string; description:string; status:string; created_at:string };
 
 export default function StoreLayout() {
   const [vendorId, setVendorId] = useState<string | null>(null);
@@ -17,6 +18,7 @@ export default function StoreLayout() {
   const [products, setProducts] = useState<Product[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [helperRequests, setHelperRequests] = useState<HelperRequest[]>([]);
   const [laneName, setLaneName] = useState("");
   const [laneCode, setLaneCode] = useState("");
   const [rackName, setRackName] = useState("");
@@ -41,21 +43,23 @@ export default function StoreLayout() {
     if (!vendor) throw new Error("Vendor profile not found.");
     setVendorId(vendor.id);
 
-    const [l, r, w, p, loc, a] = await Promise.all([
+    const [l, r, w, p, loc, a, h] = await Promise.all([
       supabase.from("vendor_lanes").select("id,lane_name,lane_code,status").eq("vendor_id", vendor.id).order("lane_name"),
       supabase.from("vendor_racks").select("id,lane_id,rack_name,rack_code,status").eq("vendor_id", vendor.id).order("rack_name"),
       supabase.from("vendor_workers").select("id,worker_name").eq("vendor_id", vendor.id).eq("status", "active").order("worker_name"),
       supabase.from("products").select("id,name,stock,low_stock_threshold").eq("vendor_id", vendor.id).order("name"),
       supabase.from("product_storage_locations").select("id,product_id,lane_id,rack_id,location_note").eq("vendor_id", vendor.id),
       supabase.from("vendor_lane_picker_assignments").select("id,lane_id,worker_id,status").eq("vendor_id", vendor.id).eq("status", "active"),
+      supabase.from("vendor_support_tickets").select("id,title,description,status,created_at").eq("vendor_id", vendor.id).eq("issue_type", "picker_helper").order("created_at", { ascending: false }).limit(5),
     ]);
-    for (const result of [l,r,w,p,loc,a]) if (result.error) throw result.error;
+    for (const result of [l,r,w,p,loc,a,h]) if (result.error) throw result.error;
     setLanes((l.data || []) as Lane[]);
     setRacks((r.data || []) as Rack[]);
     setWorkers((w.data || []) as Worker[]);
     setProducts((p.data || []) as Product[]);
     setLocations((loc.data || []) as Location[]);
     setAssignments((a.data || []) as Assignment[]);
+    setHelperRequests((h.data || []) as HelperRequest[]);
   };
 
   useEffect(() => { load().catch(e => setError(e.message || "Unable to load store operations.")); }, []);
@@ -133,7 +137,7 @@ export default function StoreLayout() {
           <p className="text-xs text-muted-foreground mt-1">Only create lanes if your store uses them.</p>
           <div className="grid grid-cols-2 gap-2 mt-3"><input value={laneName} onChange={e=>setLaneName(e.target.value)} placeholder="Lane A" className="h-10 rounded-lg border px-3 bg-background"/><input value={laneCode} onChange={e=>setLaneCode(e.target.value)} placeholder="Optional code" className="h-10 rounded-lg border px-3 bg-background"/></div>
           <button disabled={busy} onClick={createLane} className="mt-3 h-10 px-4 rounded-lg bg-emerald-600 text-white text-sm font-bold flex items-center gap-2"><Plus className="w-4 h-4"/>Add Lane</button>
-          <div className="mt-4 space-y-2">{lanes.map(l=>{const assigned=assignments.find(a=>a.lane_id===l.id);return <div key={l.id} className="border rounded-lg p-3 flex justify-between gap-3"><div><b>{l.lane_name}</b>{l.lane_code&&<span className="text-xs text-muted-foreground ml-2">{l.lane_code}</span>}{assigned&&<p className="text-xs text-emerald-700 mt-1">Picker: {workerById.get(assigned.worker_id)?.worker_name||"Assigned Picker"}</p>}</div><span className="text-xs text-emerald-600 font-bold">{l.status}</span></div>})}</div><div className="mt-4 border-t pt-4"><p className="text-xs font-bold">Need a Picker/helper?</p><p className="text-xs text-muted-foreground mt-1">Send a request to Rivo Admin. Admin can assign an approved Picker to your store and lane.</p><div className="flex gap-2 mt-3"><select value={helperLaneId} onChange={e=>setHelperLaneId(e.target.value)} className="flex-1 h-10 rounded-lg border px-3 bg-background"><option value="">Store-wide</option>{lanes.map(l=><option key={l.id} value={l.id}>{l.lane_name}</option>)}</select><button disabled={busy} onClick={requestHelper} className="h-10 px-4 rounded-lg bg-emerald-600 text-white font-bold">Request Helper</button></div></div>
+          <div className="mt-4 space-y-2">{lanes.map(l=>{const assigned=assignments.find(a=>a.lane_id===l.id);return <div key={l.id} className="border rounded-lg p-3 flex justify-between gap-3"><div><b>{l.lane_name}</b>{l.lane_code&&<span className="text-xs text-muted-foreground ml-2">{l.lane_code}</span>}{assigned&&<p className="text-xs text-emerald-700 mt-1">Picker: {workerById.get(assigned.worker_id)?.worker_name||"Assigned Picker"}</p>}</div><span className="text-xs text-emerald-600 font-bold">{l.status}</span></div>})}</div><div className="mt-4 border-t pt-4"><p className="text-xs font-bold">Need a Picker/helper?</p><p className="text-xs text-muted-foreground mt-1">Send a request to Rivo Admin. Admin can assign an approved Picker to your store and lane.</p><div className="mt-3 space-y-2">{helperRequests.map(r=><div key={r.id} className="rounded-lg border bg-muted/20 px-3 py-2"><div className="flex justify-between gap-2"><span className="text-xs font-semibold">{r.title}</span><span className="text-[10px] font-bold text-emerald-700">{r.status}</span></div><p className="text-[10px] text-muted-foreground mt-1">{r.description}</p></div>)}</div><div className="flex gap-2 mt-3"><select value={helperLaneId} onChange={e=>setHelperLaneId(e.target.value)} className="flex-1 h-10 rounded-lg border px-3 bg-background"><option value="">Store-wide</option>{lanes.map(l=><option key={l.id} value={l.id}>{l.lane_name}</option>)}</select><button disabled={busy} onClick={requestHelper} className="h-10 px-4 rounded-lg bg-emerald-600 text-white font-bold">Request Helper</button></div></div>
         </section>
 
         <section className="rounded-xl border bg-card p-4">
