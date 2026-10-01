@@ -13,7 +13,7 @@ type Page =
   | "dashboard" | "orders" | "invoices" | "products" | "add-product" | "inventory"
   | "offers" | "analytics" | "settlements" | "subscriptions"
   | "reviews" | "notifications"
-  | "store" | "profile" | "settings" | "register" | "lane-picking";
+  | "store" | "profile" | "settings" | "register" | "lane-picking" | "store-layout";
 
 interface LayoutProps {
   currentPage: Page;
@@ -49,6 +49,7 @@ const navItems = [
   { id: "profile", label: "Profile", icon: User, visible: true },
   { id: "settings", label: "Settings", icon: Settings, visible: true },
   { id: "lane-picking", label: "RivoCity Picker", icon: Zap, visible: true },
+  { id: "store-layout", label: "Store Layout", icon: Boxes, visible: true },
 ] as const;
 
 export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleTheme, children, vendorMeta }: LayoutProps) {
