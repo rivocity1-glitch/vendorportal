@@ -31,6 +31,8 @@ import {
 } from '../../../services/vendorService';
 
 import { supabase } from '../../../lib/supabase';
+import StoreLayout from "./StoreLayout";
+import LanePicking from "./LanePicking";
 import {
   StoreLocationPicker,
   ConfirmLocationPayload
@@ -2375,6 +2377,21 @@ export default function StoreManagement() {
         </section>
 
       </div>
+
+      {/* RIVOCITY PICKER & OPTIONAL STORE LAYOUT */}
+
+      <section className="space-y-4">
+        <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white">RivoCity Picker & Store Operations</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Picker management, optional lanes/racks, product locations and helper requests. None of these are required to add products.
+            </p>
+          </div>
+        </div>
+        <LanePicking />
+        <StoreLayout />
+      </section>
 
       {/* LOCATION PICKER */}
 
