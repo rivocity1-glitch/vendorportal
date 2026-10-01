@@ -1,7 +1,7 @@
 import { supabase } from "../lib/supabase";
 
 export interface LaneWorker { id:string; worker_name:string; status:string; auth_user_id:string; }
-export interface LanePickingTask { id:string; order_item_id:string; vendor_id:string; worker_id:string; quantity:number; status:string; assigned_at:string; picked_at:string|null; }
+export interface LanePickingTask { id:string; order_item_id:string; vendor_id:string; worker_id:string; quantity:number; status:string; assigned_at:string; picked_at:string|null; basket_id:string|null; basket_code:string|null; }
 export interface PickerCandidate { id:string; full_name:string; city:string; locality:string|null; latitude:number|null; longitude:number|null; availability_status:string; application_status:string; distanceKm:number|null; }
 export interface PickerVendorRequest { id:string; picker_id:string; vendor_id:string; status:string; requested_at:string; responded_at:string|null; }
 
@@ -17,7 +17,7 @@ export async function removeLaneWorker(workerId:string,vendorId:string){
  if(error)throw error;
 
 }
-export async function getLanePickingTasks(vendorId:string,orderItemIds:string[]):Promise<LanePickingTask[]>{if(!orderItemIds.length)return[];const{data,error}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").eq("vendor_id",vendorId).in("order_item_id",orderItemIds);if(error)throw error;return(data||[]) as LanePickingTask[];}
+export async function getLanePickingTasks(vendorId:string,orderItemIds:string[]):Promise<LanePickingTask[]>{if(!orderItemIds.length)return[];const{data,error}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at,basket_id,picker_baskets(basket_code)").eq("vendor_id",vendorId).in("order_item_id",orderItemIds);if(error)throw error;return(data||[]) as LanePickingTask[];}
 export async function assignLanePickingTask(args:{vendorId:string;orderItemId:string;workerId:string;quantity:number}):Promise<LanePickingTask>{
  const{data:existing,error:existingError}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").eq("vendor_id",args.vendorId).eq("order_item_id",args.orderItemId).maybeSingle();if(existingError)throw existingError;
  if(existing){const{data,error}=await supabase.from("order_item_picking_tasks").update({worker_id:args.workerId,quantity:args.quantity,status:existing.status==="picked"?"picked":"assigned",updated_at:new Date().toISOString()}).eq("id",existing.id).eq("vendor_id",args.vendorId).select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").single();if(error)throw error;return data as LanePickingTask;}
