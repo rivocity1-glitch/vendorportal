@@ -20,8 +20,9 @@ import {
   X,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
+import StoreLayout from "./StoreLayout";
 
-type TabType = "inventory" | "batches" | "history" | "analytics";
+type TabType = "inventory" | "batches" | "history" | "analytics" | "locations";
 type FilterType = "all" | "low" | "out" | "expired" | "7days" | "30days" | "dead";
 
 type InventoryItem = {
@@ -598,6 +599,7 @@ export function Inventory() {
       <div className="flex flex-wrap gap-2 border-b pb-3">
         {([
           ["inventory", "Products & Stock", Package],
+          ["locations", "Locations & Lanes", Boxes],
           ["batches", "Batches", Layers],
           ["history", "Audit History", History],
           ["analytics", "Analytics", BarChart3],
@@ -922,6 +924,8 @@ export function Inventory() {
           </div>
         </>
       )}
+
+      {activeTab === "locations" && <StoreLayout />}
 
       {activeTab === "batches" && (
         <div className="rounded-xl border bg-card overflow-hidden">
