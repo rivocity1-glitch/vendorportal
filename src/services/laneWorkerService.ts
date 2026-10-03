@@ -1,6 +1,6 @@
 import { supabase } from "../lib/supabase";
 
-export interface LaneWorker { id:string; worker_name:string; status:string; auth_user_id:string; }
+export interface LaneWorker { id:string; worker_name:string; status:string; auth_user_id:string; is_owner?:boolean; }
 export interface LanePickingTask { id:string; order_item_id:string; vendor_id:string; worker_id:string; quantity:number; status:string; assigned_at:string; picked_at:string|null; basket_id:string|null; basket_code:string|null; }
 export interface PickerCandidate { id:string; full_name:string; city:string; locality:string|null; latitude:number|null; longitude:number|null; availability_status:string; application_status:string; distanceKm:number|null; }
 export interface PickerVendorRequest { id:string; picker_id:string; vendor_id:string; status:string; requested_at:string; responded_at:string|null; }
@@ -9,7 +9,42 @@ export async function getCurrentVendorId():Promise<string|null>{
  const{data:authData,error:authError}=await supabase.auth.getUser();if(authError||!authData.user)return null;
  const{data,error}=await supabase.from("vendors").select("id").eq("auth_user_id",authData.user.id).maybeSingle();if(error)throw error;return data?.id??null;
 }
-export async function getLaneWorkers(vendorId:string):Promise<LaneWorker[]>{const{data,error}=await supabase.from("vendor_workers").select("id,worker_name,status,auth_user_id").eq("vendor_id",vendorId).eq("status","active").order("worker_name");if(error)throw error;return(data||[]) as LaneWorker[];}
+export async function getLaneWorkers(vendorId:string):Promise<LaneWorker[]>{
+ const{data:vendor,error:vendorError}=await supabase.from("vendors").select("auth_user_id,owner_name").eq("id",vendorId).maybeSingle();
+ if(vendorError)throw vendorError;
+
+ const{data,error}=await supabase.from("vendor_workers").select("id,worker_name,status,auth_user_id").eq("vendor_id",vendorId).eq("status","active").order("worker_name");
+ if(error)throw error;
+
+ const workers=(data||[]) as LaneWorker[];
+ const ownerAuthUserId=vendor?.auth_user_id||null;
+
+ // Small owner-operated shops do not need to recruit a separate Picker.
+ // Represent the vendor owner as the shop's active worker using the existing
+ // vendor_workers structure so item picking can use the same task flow.
+ if(ownerAuthUserId && !workers.some(worker=>worker.auth_user_id===ownerAuthUserId)){
+   const{data:ownerWorker,error:ownerError}=await supabase.from("vendor_workers").insert({
+     vendor_id:vendorId,
+     auth_user_id:ownerAuthUserId,
+     worker_name:vendor?.owner_name||"Store Owner",
+     status:"active"
+   }).select("id,worker_name,status,auth_user_id").single();
+
+   if(!ownerError&&ownerWorker){
+     workers.push({...ownerWorker,is_owner:true} as LaneWorker);
+   }else if(ownerError){
+     // Do not break the entire Orders page if owner-worker provisioning is
+     // blocked by an existing RLS rule; the normal workers remain usable.
+     console.warn("Owner worker provisioning warning:",ownerError);
+   }
+ }else{
+   for(const worker of workers){
+     if(worker.auth_user_id===ownerAuthUserId) worker.is_owner=true;
+   }
+ }
+
+ return workers.sort((a,b)=>a.worker_name.localeCompare(b.worker_name)) as LaneWorker[];
+}
 export async function removeLaneWorker(workerId:string,vendorId:string){
  const{data:worker,error:we}=await supabase.from("vendor_workers").select("auth_user_id").eq("id",workerId).eq("vendor_id",vendorId).maybeSingle();
  if(we)throw we;
