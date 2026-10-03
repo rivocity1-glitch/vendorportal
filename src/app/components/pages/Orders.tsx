@@ -1597,6 +1597,33 @@ export function Orders() {
     }
   };
 
+  const markLaneTaskPicked = async (orderItemId: string, orderId: string, taskId: string) => {
+    try {
+      setAssigningLaneItemId(orderItemId);
+      const vendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
+      if (!vendorId) throw new Error("Order vendor context unavailable.");
+
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from("order_item_picking_tasks")
+        .update({
+          status: "picked",
+          picked_at: now,
+          updated_at: now,
+        })
+        .eq("id", taskId)
+        .eq("vendor_id", vendorId);
+
+      if (error) throw error;
+      await fetchLiveOrders(false);
+    } catch (error: any) {
+      console.error("Picker completion error:", error);
+      alert(error?.message || "Unable to mark item as picked.");
+    } finally {
+      setAssigningLaneItemId(null);
+    }
+  };
+
   const triggerActionConfirmation = (
     orderId: string,
     action: string
@@ -3769,7 +3796,7 @@ export function Orders() {
 
                         <div className="mt-2 rounded-lg border border-border/60 bg-background/60 p-2.5">
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Picker Picking</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Picking</span>
                             {laneTask?.status === "picked" ? (
                               <span className="text-[10px] font-bold text-[#065F46] bg-[#D1FAE5] px-2 py-0.5 rounded-full">Picked</span>
                             ) : laneTask ? (
