@@ -1991,7 +1991,7 @@ export function Orders() {
           await supabase
             .from("order_items")
             .select(
-              "product_id, quantity"
+              "id, product_id, quantity"
             )
             .eq(
               "order_id",
