@@ -22,24 +22,54 @@ export async function getLaneWorkers(vendorId:string):Promise<LaneWorker[]>{
  // Small owner-operated shops do not need to recruit a separate Picker.
  // Represent the vendor owner as the shop's active worker using the existing
  // vendor_workers structure so item picking can use the same task flow.
- if(ownerAuthUserId && !workers.some(worker=>worker.auth_user_id===ownerAuthUserId)){
-   const{data:ownerWorker,error:ownerError}=await supabase.from("vendor_workers").insert({
-     vendor_id:vendorId,
-     auth_user_id:ownerAuthUserId,
-     worker_name:vendor?.owner_name||"Store Owner",
-     status:"active"
-   }).select("id,worker_name,status,auth_user_id").single();
+ if(ownerAuthUserId){
+   const activeOwner=workers.find(worker=>worker.auth_user_id===ownerAuthUserId);
+   if(activeOwner){
+     activeOwner.is_owner=true;
+   }else{
+     // Reuse an existing inactive owner worker before creating a new record.
+     const{data:existingOwner,error:existingOwnerError}=await supabase
+       .from("vendor_workers")
+       .select("id,worker_name,status,auth_user_id")
+       .eq("vendor_id",vendorId)
+       .eq("auth_user_id",ownerAuthUserId)
+       .maybeSingle();
 
-   if(!ownerError&&ownerWorker){
-     workers.push({...ownerWorker,is_owner:true} as LaneWorker);
-   }else if(ownerError){
-     // Do not break the entire Orders page if owner-worker provisioning is
-     // blocked by an existing RLS rule; the normal workers remain usable.
-     console.warn("Owner worker provisioning warning:",ownerError);
-   }
- }else{
-   for(const worker of workers){
-     if(worker.auth_user_id===ownerAuthUserId) worker.is_owner=true;
+     if(existingOwnerError)throw existingOwnerError;
+
+     if(existingOwner){
+       const{data:reactivatedOwner,error:reactivateError}=await supabase
+         .from("vendor_workers")
+         .update({
+           worker_name:vendor?.owner_name||existingOwner.worker_name||"Store Owner",
+           status:"active",
+           updated_at:new Date().toISOString()
+         })
+         .eq("id",existingOwner.id)
+         .eq("vendor_id",vendorId)
+         .select("id,worker_name,status,auth_user_id")
+         .single();
+
+       if(!reactivateError&&reactivatedOwner){
+         workers.push({...reactivatedOwner,is_owner:true} as LaneWorker);
+       }else if(reactivateError){
+         console.warn("Owner worker reactivation warning:",reactivateError);
+       }
+     }else{
+       const{data:ownerWorker,error:ownerError}=await supabase.from("vendor_workers").insert({
+         vendor_id:vendorId,
+         auth_user_id:ownerAuthUserId,
+         worker_name:vendor?.owner_name||"Store Owner",
+         status:"active"
+       }).select("id,worker_name,status,auth_user_id").single();
+
+       if(!ownerError&&ownerWorker){
+         workers.push({...ownerWorker,is_owner:true} as LaneWorker);
+       }else if(ownerError){
+         // Do not break the Orders page if owner provisioning is blocked by RLS.
+         console.warn("Owner worker provisioning warning:",ownerError);
+       }
+     }
    }
  }
 
