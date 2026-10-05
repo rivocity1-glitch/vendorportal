@@ -1566,6 +1566,15 @@ export function Orders() {
     };
   }, []);
 
+  const isOrderFullyPicked = (orderId: string) => {
+    const items = typedItemsCache.get(orderId) || [];
+    if (items.length === 0) return false;
+
+    return items.every((item) => {
+      return laneTasksByItem.get(item.id)?.status === "picked";
+    });
+  };
+
   const assignLaneWorker = async (
     orderItemId: string,
     orderId: string,
@@ -2092,6 +2101,26 @@ export function Orders() {
           throw new Error("Store owner Picker is not available. Please refresh Store Management and try again.");
         }
 
+        // Accepted is the customer-visible confirmation stage.
+        // Picking starts immediately after acceptance, so the order moves to
+        // Preparing while the owner or an assigned Picker collects the items.
+        const { error: acceptedUpdateError } = await supabase
+          .from("orders")
+          .update({ order_status: "accepted" })
+          .eq("id", orderId);
+
+        if (acceptedUpdateError) throw acceptedUpdateError;
+
+        const { error: acceptedTrackingError } = await supabase
+          .from("order_tracking")
+          .insert({
+            order_id: orderId,
+            status: "accepted",
+            remarks: "Order accepted by vendor",
+          });
+
+        if (acceptedTrackingError) throw acceptedTrackingError;
+
         for (const item of items || []) {
           const existingTask = await getLanePickingTasks(currentVendorId, [item.id]);
           if (existingTask.length > 0) continue;
@@ -2104,9 +2133,9 @@ export function Orders() {
           });
         }
 
-        nextDbStatus = "accepted";
+        nextDbStatus = "preparing";
         trackingRemarks =
-          "Order accepted by vendor; owner self-pick task created";
+          "Picking started; owner self-pick task created";
       }
 
       /* -------------------------------------------------------
@@ -2218,6 +2247,52 @@ export function Orders() {
       else if (
         action === "Mark Packed"
       ) {
+        // Packing is only allowed after every ordered item has a completed
+        // picking task. Lanes, racks and baskets are not prerequisites.
+        const { data: orderItems, error: orderItemsError } =
+          await supabase
+            .from("order_items")
+            .select("id, quantity")
+            .eq("order_id", orderId);
+
+        if (orderItemsError) throw orderItemsError;
+
+        const itemIds = (orderItems || []).map((item) => item.id);
+
+        if (itemIds.length === 0) {
+          throw new Error("This order has no items to pack.");
+        }
+
+        const currentVendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
+        if (!currentVendorId) {
+          throw new Error("Order vendor context unavailable.");
+        }
+
+        const { data: pickingTasks, error: pickingTasksError } =
+          await supabase
+            .from("order_item_picking_tasks")
+            .select("order_item_id, status")
+            .eq("vendor_id", currentVendorId)
+            .in("order_item_id", itemIds);
+
+        if (pickingTasksError) throw pickingTasksError;
+
+        const pickedItemIds = new Set(
+          (pickingTasks || [])
+            .filter((task) => task.status === "picked")
+            .map((task) => task.order_item_id)
+        );
+
+        const unpickedCount = itemIds.filter((itemId) => !pickedItemIds.has(itemId)).length;
+
+        if (unpickedCount > 0) {
+          alert(
+            `${unpickedCount} item${unpickedCount === 1 ? "" : "s"} still need to be picked before packing.`
+          );
+          setActionLoading(null);
+          return;
+        }
+
         const { data: orderData, error: orderError } =
           await supabase
             .from("orders")
@@ -3156,6 +3231,9 @@ export function Orders() {
                             const isBtnLoading =
                               actionLoading ===
                               `${order.id}-${a.label}`;
+                            const canPack =
+                              a.label !== "Mark Packed" ||
+                              isOrderFullyPicked(order.id);
 
                             return (
                               <button
@@ -3163,8 +3241,8 @@ export function Orders() {
                                   a.label
                                 }
                                 disabled={
-                                  actionLoading !==
-                                  null
+                                  actionLoading !== null ||
+                                  !canPack
                                 }
                                 onClick={() =>
                                   triggerActionConfirmation(
@@ -3172,13 +3250,20 @@ export function Orders() {
                                     a.label
                                   )
                                 }
+                                title={
+                                  a.label === "Mark Packed" && !canPack
+                                    ? "Pick all items before packing"
+                                    : undefined
+                                }
                                 className={`text-xs px-2 py-1 rounded-md font-medium flex items-center gap-1 transition-colors disabled:opacity-40 ${a.color}`}
                               >
                                 {isBtnLoading && (
                                   <Loader2 className="w-3 h-3 animate-spin" />
                                 )}
 
-                                {a.label}
+                                {a.label === "Mark Packed" && !canPack
+                                  ? "Waiting for picking"
+                                  : a.label}
                               </button>
                             );
                           }
