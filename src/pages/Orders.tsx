@@ -1583,38 +1583,67 @@ export function Orders() {
     workerId: string
   ) => {
     if (!workerId) return;
+
     try {
       setAssigningLaneItemId(orderItemId);
-      const vendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
-      if (!vendorId) throw new Error("Order vendor context unavailable.");
 
-      let item = typedItemsCache.get(orderId)?.find((row) => row.id === orderItemId);
+      const currentOrder =
+        selectedOrder?.id === orderId
+          ? selectedOrder
+          : ordersList.find((order) => order.id === orderId);
 
-      if (!item) {
-        const { data: itemRow, error: itemError } = await supabase
-          .from("order_items")
-          .select("id, order_id, product_id, quantity, unit_price, total_price, product_name")
-          .eq("id", orderItemId)
-          .eq("order_id", orderId)
-          .maybeSingle();
+      const vendorId = currentOrder?.vendorId;
 
-        if (itemError) throw itemError;
-        item = itemRow as OrderItemRow | null;
+      if (!vendorId) {
+        throw new Error("Order vendor context unavailable.");
       }
 
-      if (!item) throw new Error("Order item not found.");
+      // Prefer the item already rendered in Order Details. This avoids a
+      // race where the async orders refresh has not populated typedItemsCache.
+      const displayItem = currentOrder?.items.find(
+        (item) => item.id === orderItemId
+      );
+
+      let quantity = Number(displayItem?.qty || 0);
+
+      if (!displayItem) {
+        const cachedItem = typedItemsCache
+          .get(orderId)
+          ?.find((item) => item.id === orderItemId);
+
+        if (cachedItem) {
+          quantity = Number(cachedItem.quantity || 0);
+        } else {
+          const { data: itemRow, error: itemError } = await supabase
+            .from("order_items")
+            .select("id, order_id, product_id, quantity, unit_price, total_price, product_name")
+            .eq("id", orderItemId)
+            .eq("order_id", orderId)
+            .maybeSingle();
+
+          if (itemError) throw itemError;
+
+          if (!itemRow) {
+            throw new Error("Order item not found.");
+          }
+
+          quantity = Number(itemRow.quantity || 0);
+        }
+      }
 
       const task = await assignLanePickingTask({
         vendorId,
         orderItemId,
         workerId,
-        quantity: Number(item.quantity || 0),
+        quantity,
       });
+
       setLaneTasksByItem((previous) => {
         const next = new Map(previous);
         next.set(orderItemId, task);
         return next;
       });
+
       await fetchLiveOrders(false);
     } catch (laneError: any) {
       console.error("Lane assignment error:", laneError);
