@@ -2080,9 +2080,33 @@ export function Orders() {
           }
         }
 
+        const currentVendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
+        if (!currentVendorId) {
+          throw new Error("Order vendor context unavailable.");
+        }
+
+        const ownerWorkers = await getLaneWorkers(currentVendorId);
+        const ownerWorker = ownerWorkers.find((worker) => worker.is_owner);
+
+        if (!ownerWorker) {
+          throw new Error("Store owner Picker is not available. Please refresh Store Management and try again.");
+        }
+
+        for (const item of items || []) {
+          const existingTask = await getLanePickingTasks(currentVendorId, [item.id]);
+          if (existingTask.length > 0) continue;
+
+          await assignLanePickingTask({
+            vendorId: currentVendorId,
+            orderItemId: item.id,
+            workerId: ownerWorker.id,
+            quantity: Number(item.quantity || 0),
+          });
+        }
+
         nextDbStatus = "accepted";
         trackingRemarks =
-          "Order accepted by vendor";
+          "Order accepted by vendor; owner self-pick task created";
       }
 
       /* -------------------------------------------------------
