@@ -3927,12 +3927,33 @@ export function Orders() {
                               className="flex-1 h-8 rounded-md border border-border bg-card px-2 text-xs text-foreground"
                             >
                               <option value="">
-                                {laneWorkers.length ? "Assign worker" : "No workers configured"}
+                                {laneWorkers.length ? "Assign Picker / self-pick" : "No Picker configured"}
                               </option>
                               {laneWorkers.map((worker) => (
-                                <option key={worker.id} value={worker.id}>{worker.worker_name}</option>
+                                <option key={worker.id} value={worker.id}>
+                                  {worker.worker_name}{worker.is_owner ? " (Owner — self-pick)" : ""}
+                                </option>
                               ))}
                             </select>
+
+                            {laneTask &&
+                              laneTask.status !== "picked" &&
+                              laneWorker?.is_owner && (
+                                <button
+                                  type="button"
+                                  disabled={assigningLaneItemId === item.id}
+                                  onClick={() =>
+                                    markLaneTaskPicked(
+                                      item.id,
+                                      selectedOrder.id,
+                                      laneTask.id
+                                    )
+                                  }
+                                  className="h-8 px-2.5 rounded-md bg-[#10B981] hover:bg-[#059669] text-white text-[10px] font-bold disabled:opacity-50 whitespace-nowrap"
+                                >
+                                  {assigningLaneItemId === item.id ? "Picking…" : "Mark Picked"}
+                                </button>
+                              )}
                           </div>
 
                           {laneWorker && (
