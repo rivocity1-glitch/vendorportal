@@ -1576,82 +1576,6 @@ export function Orders() {
     });
   };
 
-  const assignLaneWorker = async (
-    orderItemId: string,
-    orderId: string,
-    workerId: string
-  ) => {
-    if (!workerId) return;
-
-    try {
-      setAssigningLaneItemId(orderItemId);
-
-      const currentOrder =
-        selectedOrder?.id === orderId
-          ? selectedOrder
-          : ordersList.find((order) => order.id === orderId);
-
-      const vendorId = currentOrder?.vendorId;
-
-      if (!vendorId) {
-        throw new Error("Order vendor context unavailable.");
-      }
-
-      // Prefer the item already rendered in Order Details. This avoids a
-      // race where the async orders refresh has not populated typedItemsCache.
-      const displayItem = currentOrder?.items.find(
-        (item) => item.id === orderItemId
-      );
-
-      let quantity = Number(displayItem?.qty || 0);
-
-      if (!displayItem) {
-        const cachedItem = typedItemsCache
-          .get(orderId)
-          ?.find((item) => item.id === orderItemId);
-
-        if (cachedItem) {
-          quantity = Number(cachedItem.quantity || 0);
-        } else {
-          const { data: itemRow, error: itemError } = await supabase
-            .from("order_items")
-            .select("id, order_id, product_id, quantity, unit_price, total_price, product_name")
-            .eq("id", orderItemId)
-            .eq("order_id", orderId)
-            .maybeSingle();
-
-          if (itemError) throw itemError;
-
-          if (!itemRow) {
-            throw new Error("Order item not found.");
-          }
-
-          quantity = Number(itemRow.quantity || 0);
-        }
-      }
-
-      const task = await assignLanePickingTask({
-        vendorId,
-        orderItemId,
-        workerId,
-        quantity,
-      });
-
-      setLaneTasksByItem((previous) => {
-        const next = new Map(previous);
-        next.set(orderItemId, task);
-        return next;
-      });
-
-      await fetchLiveOrders(false);
-    } catch (laneError: any) {
-      console.error("Lane assignment error:", laneError);
-      alert(laneError?.message || "Unable to assign Picker worker.");
-    } finally {
-      setAssigningLaneItemId(null);
-    }
-  };
-
   const triggerActionConfirmation = (
     orderId: string,
     action: string
@@ -2113,16 +2037,9 @@ export function Orders() {
           throw new Error("Order vendor context unavailable.");
         }
 
-        const ownerWorkers = await getLaneWorkers(currentVendorId);
-        const ownerWorker = ownerWorkers.find((worker) => worker.is_owner);
-
-        if (!ownerWorker) {
-          throw new Error("Store owner Picker is not available. Please refresh Store Management and try again.");
-        }
-
-        // Accepted is the customer-visible confirmation stage.
-        // Picking starts immediately after acceptance, so the order moves to
-        // Preparing while the owner or an assigned Picker collects the items.
+        // Accept the order only. The database creates one shared
+        // picking task per order item; the Vendor Portal never assigns
+        // individual products to specific Pickers.
         const { error: acceptedUpdateError } = await supabase
           .from("orders")
           .update({ order_status: "accepted" })
@@ -2135,26 +2052,14 @@ export function Orders() {
           .insert({
             order_id: orderId,
             status: "accepted",
-            remarks: "Order accepted by vendor",
+            remarks: "Order accepted by vendor; items released to shared Picker pool",
           });
 
         if (acceptedTrackingError) throw acceptedTrackingError;
 
-        for (const item of items || []) {
-          const existingTask = await getLanePickingTasks(currentVendorId, [item.id]);
-          if (existingTask.length > 0) continue;
-
-          await assignLanePickingTask({
-            vendorId: currentVendorId,
-            orderItemId: item.id,
-            workerId: ownerWorker.id,
-            quantity: Number(item.quantity || 0),
-          });
-        }
-
-        nextDbStatus = "preparing";
+        nextDbStatus = "accepted";
         trackingRemarks =
-          "Picking started; owner self-pick task created";
+          "Order accepted; picking tasks released to shared Picker pool";
       }
 
       /* -------------------------------------------------------
