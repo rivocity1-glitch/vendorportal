@@ -88,16 +88,6 @@ export async function ensureOrderPickingTasks(vendorId:string, orderId:string):P
  if(itemError)throw itemError;
  if(!items?.length)return[];
  const existing=await getLanePickingTasks(vendorId,items.map((item:any)=>item.id));
- const existingByItem=new Map(existing.map(task=>[task.order_item_id,task]));
- const missing=items.filter((item:any)=>!existingByItem.has(item.id));
- if(missing.length){
-  const now=new Date().toISOString();
-  const{data:created,error:createError}=await supabase.from("order_item_picking_tasks").insert(missing.map((item:any)=>({vendor_id:vendorId,order_item_id:item.id,worker_id:(existing[0]?.worker_id||null),quantity:Number(item.quantity||0),status:"assigned",assigned_at:now,updated_at:now}))).select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at");
-  // Shared pool tasks cannot have a real worker owner. Existing schema requires worker_id,
-  // so task creation is intentionally delegated to the database trigger/RPC when possible.
-  if(createError)throw createError;
-  return [...existing,...((created||[]).map((x:any)=>({...x,basket_id:null,basket_code:null})) as LanePickingTask[])];
- }
  return existing;
 }
 
