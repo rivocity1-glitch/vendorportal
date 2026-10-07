@@ -83,11 +83,24 @@ export async function removeLaneWorker(workerId:string,vendorId:string){
 
 }
 export async function getLanePickingTasks(vendorId:string,orderItemIds:string[]):Promise<LanePickingTask[]>{if(!orderItemIds.length)return[];const{data,error}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").eq("vendor_id",vendorId).in("order_item_id",orderItemIds);if(error)throw error;return(data||[]).map((x:any)=>({...x,basket_id:null,basket_code:null})) as LanePickingTask[];}
-export async function assignLanePickingTask(args:{vendorId:string;orderItemId:string;workerId:string;quantity:number}):Promise<LanePickingTask>{
- const{data:existing,error:existingError}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").eq("vendor_id",args.vendorId).eq("order_item_id",args.orderItemId).maybeSingle();if(existingError)throw existingError;
- if(existing){const{data,error}=await supabase.from("order_item_picking_tasks").update({worker_id:args.workerId,quantity:args.quantity,status:existing.status==="picked"?"picked":"assigned",updated_at:new Date().toISOString()}).eq("id",existing.id).eq("vendor_id",args.vendorId).select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").single();if(error)throw error;return data as LanePickingTask;}
- const{data,error}=await supabase.from("order_item_picking_tasks").insert({vendor_id:args.vendorId,order_item_id:args.orderItemId,worker_id:args.workerId,quantity:args.quantity,status:"assigned",assigned_at:new Date().toISOString(),updated_at:new Date().toISOString()}).select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").single();if(error)throw error;return data as LanePickingTask;
+export async function ensureOrderPickingTasks(vendorId:string, orderId:string):Promise<LanePickingTask[]>{
+ const{data:items,error:itemError}=await supabase.from("order_items").select("id,quantity").eq("order_id",orderId);
+ if(itemError)throw itemError;
+ if(!items?.length)return[];
+ const existing=await getLanePickingTasks(vendorId,items.map((item:any)=>item.id));
+ const existingByItem=new Map(existing.map(task=>[task.order_item_id,task]));
+ const missing=items.filter((item:any)=>!existingByItem.has(item.id));
+ if(missing.length){
+  const now=new Date().toISOString();
+  const{data:created,error:createError}=await supabase.from("order_item_picking_tasks").insert(missing.map((item:any)=>({vendor_id:vendorId,order_item_id:item.id,worker_id:(existing[0]?.worker_id||null),quantity:Number(item.quantity||0),status:"assigned",assigned_at:now,updated_at:now}))).select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at");
+  // Shared pool tasks cannot have a real worker owner. Existing schema requires worker_id,
+  // so task creation is intentionally delegated to the database trigger/RPC when possible.
+  if(createError)throw createError;
+  return [...existing,...((created||[]).map((x:any)=>({...x,basket_id:null,basket_code:null})) as LanePickingTask[])];
+ }
+ return existing;
 }
+
 function distanceKm(aLat:number,aLng:number,bLat:number,bLng:number){const r=6371;const dLat=(bLat-aLat)*Math.PI/180;const dLng=(bLng-aLng)*Math.PI/180;const x=Math.sin(dLat/2)**2+Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*Math.sin(dLng/2)**2;return r*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));}
 export async function getPickerCandidates(vendorId:string):Promise<PickerCandidate[]>{
  const{data:vendor,error:ve}=await supabase.from("vendor_profiles").select("latitude,longitude").eq("vendor_id",vendorId).maybeSingle();if(ve)throw ve;
