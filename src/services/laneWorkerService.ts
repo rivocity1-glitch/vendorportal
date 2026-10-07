@@ -83,13 +83,6 @@ export async function removeLaneWorker(workerId:string,vendorId:string){
 
 }
 export async function getLanePickingTasks(vendorId:string,orderItemIds:string[]):Promise<LanePickingTask[]>{if(!orderItemIds.length)return[];const{data,error}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").eq("vendor_id",vendorId).in("order_item_id",orderItemIds);if(error)throw error;return(data||[]).map((x:any)=>({...x,basket_id:null,basket_code:null})) as LanePickingTask[];}
-export async function ensureOrderPickingTasks(vendorId:string, orderId:string):Promise<LanePickingTask[]>{
- const{data:items,error:itemError}=await supabase.from("order_items").select("id,quantity").eq("order_id",orderId);
- if(itemError)throw itemError;
- if(!items?.length)return[];
- const existing=await getLanePickingTasks(vendorId,items.map((item:any)=>item.id));
- return existing;
-}
 
 function distanceKm(aLat:number,aLng:number,bLat:number,bLng:number){const r=6371;const dLat=(bLat-aLat)*Math.PI/180;const dLng=(bLng-aLng)*Math.PI/180;const x=Math.sin(dLat/2)**2+Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*Math.sin(dLng/2)**2;return r*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));}
 export async function getPickerCandidates(vendorId:string):Promise<PickerCandidate[]>{
