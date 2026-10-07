@@ -355,7 +355,6 @@ export function Orders() {
   const [laneWorkers, setLaneWorkers] = useState<LaneWorkerRow[]>([]);
   const [laneTasksByItem, setLaneTasksByItem] = useState<Map<string, LaneTaskRow>>(new Map());
   const [typedItemsCache, setTypedItemsCache] = useState<Map<string, OrderItemRow[]>>(new Map());
-  const [assigningLaneItemId, setAssigningLaneItemId] = useState<string | null>(null);
 
   const formatStatusString = (rawStatus: string | null | undefined) => {
     if (!rawStatus) return "Pending";
