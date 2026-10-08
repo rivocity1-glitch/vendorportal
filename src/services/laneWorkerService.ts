@@ -1,7 +1,7 @@
 import { supabase } from "../lib/supabase";
 
 export interface LaneWorker { id:string; worker_name:string; status:string; auth_user_id:string; is_owner?:boolean; }
-export interface LanePickingTask { id:string; order_item_id:string; vendor_id:string; worker_id:string; quantity:number; status:string; assigned_at:string; picked_at:string|null; basket_id:string|null; basket_code:string|null; }
+export interface LanePickingTask { id:string; order_item_id:string; vendor_id:string; worker_id:string|null; quantity:number; status:string; assigned_at:string; picked_at:string|null; }
 export interface PickerCandidate { id:string; full_name:string; city:string; locality:string|null; latitude:number|null; longitude:number|null; availability_status:string; application_status:string; distanceKm:number|null; }
 export interface PickerVendorRequest { id:string; picker_id:string; vendor_id:string; status:string; requested_at:string; responded_at:string|null; }
 
@@ -12,49 +12,25 @@ export async function getCurrentVendorId():Promise<string|null>{
 export async function getLaneWorkers(vendorId:string):Promise<LaneWorker[]>{
  const{data:vendor,error:vendorError}=await supabase.from("vendors").select("auth_user_id,owner_name").eq("id",vendorId).maybeSingle();
  if(vendorError)throw vendorError;
-
  const{data,error}=await supabase.from("vendor_workers").select("id,worker_name,status,auth_user_id").eq("vendor_id",vendorId).eq("status","active").order("worker_name");
  if(error)throw error;
-
  const workers=(data||[]) as LaneWorker[];
  const ownerAuthUserId=vendor?.auth_user_id||null;
-
- // Small owner-operated shops do not need to recruit a separate Picker.
- // Represent the vendor owner as the shop's active worker using the existing
- // vendor_workers structure so item picking can use the same task flow.
  if(ownerAuthUserId){
    const activeOwner=workers.find(worker=>worker.auth_user_id===ownerAuthUserId);
    if(activeOwner){
      activeOwner.is_owner=true;
    }else{
-     // Reuse an existing inactive owner worker before creating a new record.
-     const{data:existingOwner,error:existingOwnerError}=await supabase
-       .from("vendor_workers")
-       .select("id,worker_name,status,auth_user_id")
-       .eq("vendor_id",vendorId)
-       .eq("auth_user_id",ownerAuthUserId)
-       .maybeSingle();
-
+     const{data:existingOwner,error:existingOwnerError}=await supabase.from("vendor_workers").select("id,worker_name,status,auth_user_id").eq("vendor_id",vendorId).eq("auth_user_id",ownerAuthUserId).maybeSingle();
      if(existingOwnerError)throw existingOwnerError;
-
      if(existingOwner){
-       const{data:reactivatedOwner,error:reactivateError}=await supabase
-         .from("vendor_workers")
-         .update({
-           worker_name:vendor?.owner_name||existingOwner.worker_name||"Store Owner",
-           status:"active",
-           updated_at:new Date().toISOString()
-         })
-         .eq("id",existingOwner.id)
-         .eq("vendor_id",vendorId)
-         .select("id,worker_name,status,auth_user_id")
-         .single();
-
-       if(!reactivateError&&reactivatedOwner){
-         workers.push({...reactivatedOwner,is_owner:true} as LaneWorker);
-       }else if(reactivateError){
-         console.warn("Owner worker reactivation warning:",reactivateError);
-       }
+       const{data:reactivatedOwner,error:reactivateError}=await supabase.from("vendor_workers").update({
+         worker_name:vendor?.owner_name||existingOwner.worker_name||"Store Owner",
+         status:"active",
+         updated_at:new Date().toISOString()
+       }).eq("id",existingOwner.id).eq("vendor_id",vendorId).select("id,worker_name,status,auth_user_id").single();
+       if(!reactivateError&&reactivatedOwner)workers.push({...reactivatedOwner,is_owner:true} as LaneWorker);
+       else if(reactivateError)console.warn("Owner worker reactivation warning:",reactivateError);
      }else{
        const{data:ownerWorker,error:ownerError}=await supabase.from("vendor_workers").insert({
          vendor_id:vendorId,
@@ -62,17 +38,11 @@ export async function getLaneWorkers(vendorId:string):Promise<LaneWorker[]>{
          worker_name:vendor?.owner_name||"Store Owner",
          status:"active"
        }).select("id,worker_name,status,auth_user_id").single();
-
-       if(!ownerError&&ownerWorker){
-         workers.push({...ownerWorker,is_owner:true} as LaneWorker);
-       }else if(ownerError){
-         // Do not break the Orders page if owner provisioning is blocked by RLS.
-         console.warn("Owner worker provisioning warning:",ownerError);
-       }
+       if(!ownerError&&ownerWorker)workers.push({...ownerWorker,is_owner:true} as LaneWorker);
+       else if(ownerError)console.warn("Owner worker provisioning warning:",ownerError);
      }
    }
  }
-
  return workers.sort((a,b)=>a.worker_name.localeCompare(b.worker_name)) as LaneWorker[];
 }
 export async function removeLaneWorker(workerId:string,vendorId:string){
@@ -80,9 +50,13 @@ export async function removeLaneWorker(workerId:string,vendorId:string){
  if(we)throw we;
  const{error}=await supabase.from("vendor_workers").update({status:"inactive",updated_at:new Date().toISOString()}).eq("id",workerId).eq("vendor_id",vendorId);
  if(error)throw error;
-
 }
-export async function getLanePickingTasks(vendorId:string,orderItemIds:string[]):Promise<LanePickingTask[]>{if(!orderItemIds.length)return[];const{data,error}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").eq("vendor_id",vendorId).in("order_item_id",orderItemIds);if(error)throw error;return(data||[]).map((x:any)=>({...x,basket_id:null,basket_code:null})) as LanePickingTask[];}
+export async function getLanePickingTasks(vendorId:string,orderItemIds:string[]):Promise<LanePickingTask[]>{
+ if(!orderItemIds.length)return[];
+ const{data,error}=await supabase.from("order_item_picking_tasks").select("id,order_item_id,vendor_id,worker_id,quantity,status,assigned_at,picked_at").eq("vendor_id",vendorId).in("order_item_id",orderItemIds);
+ if(error)throw error;
+ return(data||[]) as LanePickingTask[];
+}
 
 function distanceKm(aLat:number,aLng:number,bLat:number,bLng:number){const r=6371;const dLat=(bLat-aLat)*Math.PI/180;const dLng=(bLng-aLng)*Math.PI/180;const x=Math.sin(dLat/2)**2+Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*Math.sin(dLng/2)**2;return r*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));}
 export async function getPickerCandidates(vendorId:string):Promise<PickerCandidate[]>{
