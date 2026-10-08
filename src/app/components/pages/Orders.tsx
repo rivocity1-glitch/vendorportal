@@ -163,6 +163,8 @@ type OrderRow = {
   collected_by_rider: string | null;
   created_at: string;
   updated_at: string;
+  picker_worker_id: string | null;
+  picker_claimed_at: string | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
   cancelled_at: string | null;
@@ -259,6 +261,8 @@ type DisplayOrder = {
   updatedAt: string;
   vendorId: string;
   riderId: string | null;
+  pickerWorkerId: string | null;
+  pickerClaimedAt: string | null;
   date: string;
   address: {
     name: string;
@@ -977,6 +981,12 @@ export function Orders() {
             riderId:
               parentOrder.rider_id,
 
+            pickerWorkerId:
+              parentOrder.picker_worker_id || null,
+
+            pickerClaimedAt:
+              parentOrder.picker_claimed_at || null,
+
             date: parentOrder.created_at
               ? new Date(
                   parentOrder.created_at
@@ -1575,32 +1585,49 @@ export function Orders() {
     });
   };
 
-  const assignLaneWorker = async (
-    orderItemId: string,
-    orderId: string,
-    workerId: string
-  ) => {
-    if (!workerId) return;
+  const selfPickOrder = async (orderId: string) => {
     try {
-      setAssigningLaneItemId(orderItemId);
-      const vendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
-      const item = typedItemsCache.get(orderId)?.find((row) => row.id === orderItemId);
-      if (!vendorId || !item) throw new Error("Order item context unavailable.");
-      const task = await assignLanePickingTask({
-        vendorId,
-        orderItemId,
-        workerId,
-        quantity: Number(item.quantity || 0),
-      });
-      setLaneTasksByItem((previous) => {
-        const next = new Map(previous);
-        next.set(orderItemId, task);
-        return next;
-      });
+      setAssigningLaneItemId(orderId);
+      const order = ordersList.find((row) => row.id === orderId);
+      if (!order) throw new Error("Order context unavailable.");
+
+      const ownerWorkers = await getLaneWorkers(order.vendorId);
+      const ownerWorker = ownerWorkers.find((worker) => worker.is_owner);
+      if (!ownerWorker) {
+        throw new Error("Store owner worker is not available.");
+      }
+
+      const { data: claimed, error: claimError } = await supabase.rpc(
+        "claim_picker_order",
+        {
+          p_order_id: orderId,
+          p_worker_id: ownerWorker.id,
+        }
+      );
+
+      if (claimError) throw claimError;
+      if (claimed !== true) {
+        throw new Error("This order is already claimed by another Picker.");
+      }
+
+      const { error: taskError } = await supabase
+        .from("order_item_picking_tasks")
+        .update({
+          worker_id: ownerWorker.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("vendor_id", order.vendorId)
+        .in(
+          "order_item_id",
+          (typedItemsCache.get(orderId) || []).map((item) => item.id)
+        )
+        .eq("status", "assigned");
+
+      if (taskError) throw taskError;
       await fetchLiveOrders(false);
-    } catch (laneError: any) {
-      console.error("Lane assignment error:", laneError);
-      alert(laneError?.message || "Unable to assign Picker worker.");
+    } catch (error: any) {
+      console.error("Owner self-pick error:", error);
+      alert(error?.message || "Unable to claim order for self-pick.");
     } finally {
       setAssigningLaneItemId(null);
     }
@@ -1617,16 +1644,18 @@ export function Orders() {
         .from("order_item_picking_tasks")
         .update({
           status: "picked",
+          worker_id: laneWorkers.find((worker) => worker.is_owner)?.id || null,
           picked_at: now,
           updated_at: now,
         })
         .eq("id", taskId)
-        .eq("vendor_id", vendorId);
+        .eq("vendor_id", vendorId)
+        .eq("status", "assigned");
 
       if (error) throw error;
       await fetchLiveOrders(false);
     } catch (error: any) {
-      console.error("Picker completion error:", error);
+      console.error("Owner pick completion error:", error);
       alert(error?.message || "Unable to mark item as picked.");
     } finally {
       setAssigningLaneItemId(null);
@@ -2094,16 +2123,9 @@ export function Orders() {
           throw new Error("Order vendor context unavailable.");
         }
 
-        const ownerWorkers = await getLaneWorkers(currentVendorId);
-        const ownerWorker = ownerWorkers.find((worker) => worker.is_owner);
-
-        if (!ownerWorker) {
-          throw new Error("Store owner Picker is not available. Please refresh Store Management and try again.");
-        }
-
         // Accepted is the customer-visible confirmation stage.
-        // Picking starts immediately after acceptance, so the order moves to
-        // Preparing while the owner or an assigned Picker collects the items.
+        // Picking tasks are created by the database trigger. The order remains
+        // available for an external Picker until someone claims it.
         const { error: acceptedUpdateError } = await supabase
           .from("orders")
           .update({ order_status: "accepted" })
@@ -2121,21 +2143,8 @@ export function Orders() {
 
         if (acceptedTrackingError) throw acceptedTrackingError;
 
-        for (const item of items || []) {
-          const existingTask = await getLanePickingTasks(currentVendorId, [item.id]);
-          if (existingTask.length > 0) continue;
-
-          await assignLanePickingTask({
-            vendorId: currentVendorId,
-            orderItemId: item.id,
-            workerId: ownerWorker.id,
-            quantity: Number(item.quantity || 0),
-          });
-        }
-
-        nextDbStatus = "preparing";
-        trackingRemarks =
-          "Picking started; owner self-pick task created";
+        nextDbStatus = "accepted";
+        trackingRemarks = "Order accepted by vendor; waiting for Picker claim";
       }
 
       /* -------------------------------------------------------
@@ -3884,6 +3893,30 @@ export function Orders() {
                 </p>
 
                 <div className="space-y-1 bg-muted/20 border border-border/40 rounded-xl p-3">
+                  <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Order Picking</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {selectedOrder.pickerWorkerId
+                            ? "This order has one Picker/worker. All items stay with that worker."
+                            : "No Picker has claimed this order yet."}
+                        </p>
+                      </div>
+                      {!selectedOrder.pickerWorkerId &&
+                        (selectedOrder.orderStatus === "Accepted" || selectedOrder.orderStatus === "Preparing") && (
+                          <button
+                            type="button"
+                            disabled={assigningLaneItemId === selectedOrder.id}
+                            onClick={() => selfPickOrder(selectedOrder.id)}
+                            className="shrink-0 rounded-lg bg-[#10B981] hover:bg-[#059669] px-3 py-2 text-[10px] font-black text-white disabled:opacity-50"
+                          >
+                            {assigningLaneItemId === selectedOrder.id ? "Claiming…" : "Self-pick Order"}
+                          </button>
+                        )}
+                    </div>
+                  </div>
+
                   {selectedOrder.items.map((item, index) => {
                     const laneTask = laneTasksByItem.get(item.id);
                     const laneWorker = laneTask
@@ -3907,53 +3940,12 @@ export function Orders() {
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Picking</span>
                             {laneTask?.status === "picked" ? (
-                              <span className="text-[10px] font-bold text-[#065F46] bg-[#D1FAE5] px-2 py-0.5 rounded-full">Picked</span>
+                              <span className="text-[10px] font-bold text-emerald-700">Picked</span>
                             ) : laneTask ? (
-                              <span className="text-[10px] font-bold text-[#92400E] bg-[#FEF3C7] px-2 py-0.5 rounded-full">Assigned</span>
+                              <span className="text-[10px] font-bold text-amber-700">Waiting to pick</span>
                             ) : (
-                              <span className="text-[10px] font-semibold text-muted-foreground">Not Assigned</span>
+                              <span className="text-[10px] font-semibold text-muted-foreground">Task not created</span>
                             )}
-                          </div>
-
-                          <div className="mt-2 flex items-center gap-2">
-                            <select
-                              value={laneTask?.worker_id || ""}
-                              disabled={assigningLaneItemId === item.id || laneTask?.status === "picked"}
-                              onChange={(event) => {
-                                if (event.target.value) {
-                                  assignLaneWorker(item.id, selectedOrder.id, event.target.value);
-                                }
-                              }}
-                              className="flex-1 h-8 rounded-md border border-border bg-card px-2 text-xs text-foreground"
-                            >
-                              <option value="">
-                                {laneWorkers.length ? "Assign Picker / self-pick" : "No Picker configured"}
-                              </option>
-                              {laneWorkers.map((worker) => (
-                                <option key={worker.id} value={worker.id}>
-                                  {worker.worker_name}{worker.is_owner ? " (Owner — self-pick)" : ""}
-                                </option>
-                              ))}
-                            </select>
-
-                            {laneTask &&
-                              laneTask.status !== "picked" &&
-                              laneWorker?.is_owner && (
-                                <button
-                                  type="button"
-                                  disabled={assigningLaneItemId === item.id}
-                                  onClick={() =>
-                                    markLaneTaskPicked(
-                                      item.id,
-                                      selectedOrder.id,
-                                      laneTask.id
-                                    )
-                                  }
-                                  className="h-8 px-2.5 rounded-md bg-[#10B981] hover:bg-[#059669] text-white text-[10px] font-bold disabled:opacity-50 whitespace-nowrap"
-                                >
-                                  {assigningLaneItemId === item.id ? "Picking…" : "Mark Picked"}
-                                </button>
-                              )}
                           </div>
 
                           {laneWorker && (
@@ -3962,6 +3954,20 @@ export function Orders() {
                               {laneTask?.picked_at ? " · Picked " + formatDate(laneTask.picked_at) : ""}
                             </p>
                           )}
+
+                          {laneTask &&
+                            laneTask.status !== "picked" &&
+                            laneWorker?.is_owner &&
+                            selectedOrder.pickerWorkerId === laneWorker.id && (
+                              <button
+                                type="button"
+                                disabled={assigningLaneItemId === item.id}
+                                onClick={() => markLaneTaskPicked(item.id, selectedOrder.id, laneTask.id)}
+                                className="mt-2 h-8 w-full rounded-md bg-[#10B981] hover:bg-[#059669] text-white text-[10px] font-bold disabled:opacity-50"
+                              >
+                                {assigningLaneItemId === item.id ? "Picking…" : "Owner Mark Picked"}
+                              </button>
+                            )}
                         </div>
                       </div>
                     );
