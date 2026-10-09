@@ -1027,37 +1027,29 @@ export default function StoreManagement() {
   const handleLocationConfirm = (
     location: ConfirmLocationPayload
   ) => {
-    setAddressLine1(
-      location.addressLine1 ||
-        location.formattedAddress
+    // Keep the address preview readable: the first line already contains
+    // the locality when reverse geocoding supplies it, so avoid repeating it.
+    const normalized = (value: string) =>
+      value.trim().replace(/\\s+/g, " ").replace(/,+/g, ",").replace(/^,|,$/g, "").trim();
+    const cityValue = normalized(location.city || "");
+    const line1Value = normalized(location.addressLine1 || location.formattedAddress || "");
+    const line1Parts = line1Value.split(",").map(normalized).filter(Boolean);
+    const deduplicatedLine1 = line1Parts.filter((part, index, parts) =>
+      parts.findIndex((candidate) => candidate.toLowerCase() === part.toLowerCase()) === index
     );
+    const nextLine1 = deduplicatedLine1.join(", ");
+    const nextLine2 = normalized(addressLine2 || "");
+    setAddressLine1(nextLine1);
 
-    if (location.city) {
-      setCity(location.city);
-    }
-
-    if (location.state) {
-      setState(location.state);
-    }
-
-    if (location.pinCode) {
-      setPinCode(location.pinCode);
-    }
-
-    setLatitude(
-      String(location.latitude)
-    );
-
-    setLongitude(
-      String(location.longitude)
-    );
-
+    // City can be present as a trailing component of a geocoder address line.
+    // Keep it in the dedicated city field and omit duplicates in the preview.
+    if (cityValue) setCity(cityValue);
+    if (location.state) setState(location.state);
+    if (location.pinCode) setPinCode(location.pinCode);
+    setLatitude(String(location.latitude));
+    setLongitude(String(location.longitude));
     setLocationPickerOpen(false);
-
-    showToast(
-      'Store location selected from map.',
-      'success'
-    );
+    showToast('Store location selected from map.', 'success');
   };
 
   // ---------------------------------------------------------------------------
@@ -1858,11 +1850,17 @@ export default function StoreManagement() {
               <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider mb-2">
                 <CheckCircle size={14} /> Selected Store Location
               </div>
-              {addressLine1 && <div className="text-slate-800 dark:text-slate-200 font-medium">{addressLine1}</div>}
-              {addressLine2 && <div className="text-slate-600 dark:text-slate-400">{addressLine2}</div>}
-              <div className="text-slate-600 dark:text-slate-400 font-medium">
-                {[city, state, pinCode].filter(Boolean).join(', ')}
-              </div>
+              {(() => {
+                const normalizePart = (value: string) => value.trim().replace(/\\s+/g, " ").replace(/^,|,$/g, "").trim();
+                const parts = [addressLine1, addressLine2, city, state, pinCode]
+                  .flatMap(value => value.split(","))
+                  .map(normalizePart)
+                  .filter(Boolean);
+                const uniqueParts = parts.filter((part, index) =>
+                  parts.findIndex(candidate => candidate.toLowerCase() === part.toLowerCase()) === index
+                );
+                return <div className="text-slate-800 dark:text-slate-200 font-medium">{uniqueParts.join(", ")}</div>;
+              })()}
             </div>
           )}
         </section>
