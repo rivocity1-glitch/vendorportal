@@ -485,11 +485,13 @@ export default function StoreManagement() {
           );
         }
 
-        const shopName = vendorRes.data.shop_name;
+        const canonicalStoreName =
+          profileRes.data.store_name?.trim() || vendorRes.data.shop_name || '';
 
+        // Use the same canonical name displayed in the portal header.
         populateProfileData(
-          profileRes.data,
-          shopName
+          { ...profileRes.data, store_name: canonicalStoreName },
+          canonicalStoreName
         );
 
         profileChannel = supabase
@@ -506,7 +508,7 @@ export default function StoreManagement() {
               if (payload.new) {
                 populateProfileData(
                   payload.new as VendorProfile,
-                  shopName
+                  payload.new.store_name?.trim() || canonicalStoreName
                 );
               }
             }
