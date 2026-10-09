@@ -1124,12 +1124,19 @@ export default function StoreManagement() {
       throw vendorError;
     }
 
+    const canonicalStoreName = storeName.trim();
+    const { error: vendorNameError } = await supabase
+      .from('vendors')
+      .update({ shop_name: canonicalStoreName, updated_at: new Date().toISOString() })
+      .eq('id', vendorId);
+    if (vendorNameError) throw vendorNameError;
+
     const res =
       await updateVendorProfile(
         vendorId,
         {
           store_name:
-            storeName.trim(),
+            canonicalStoreName,
           tagline:
             tagline.trim(),
           avatar_url:
