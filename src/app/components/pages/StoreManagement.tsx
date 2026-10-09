@@ -1851,15 +1851,27 @@ export default function StoreManagement() {
                 <CheckCircle size={14} /> Selected Store Location
               </div>
               {(() => {
-                const normalizePart = (value: string) => value.trim().replace(/\\s+/g, " ").replace(/^,|,$/g, "").trim();
-                const parts = [addressLine1, addressLine2, city, state, pinCode]
-                  .flatMap(value => value.split(","))
-                  .map(normalizePart)
-                  .filter(Boolean);
-                const uniqueParts = parts.filter((part, index) =>
-                  parts.findIndex(candidate => candidate.toLowerCase() === part.toLowerCase()) === index
+                const normalizePart = (value: string) =>
+                  value.trim().replace(/\s+/g, " ").replace(/^,|,$/g, "").trim();
+                const line1Parts = addressLine1.split(",").map(normalizePart).filter(Boolean);
+                const line2Parts = addressLine2.split(",").map(normalizePart).filter(Boolean);
+                const existingLocalities = [...line1Parts, ...line2Parts].map(part => part.toLocaleLowerCase());
+                const cityPart = normalizePart(city);
+                const remainingParts = [
+                  ...line1Parts,
+                  ...line2Parts,
+                  ...(cityPart && !existingLocalities.includes(cityPart.toLocaleLowerCase()) ? [cityPart] : []),
+                  normalizePart(state),
+                  normalizePart(pinCode),
+                ].filter(Boolean);
+                const uniqueParts = remainingParts.filter((part, index, parts) =>
+                  parts.findIndex(candidate => candidate.toLocaleLowerCase() === part.toLocaleLowerCase()) === index
                 );
-                return <div className="text-slate-800 dark:text-slate-200 font-medium">{uniqueParts.join(", ")}</div>;
+                return (
+                  <div className="text-slate-800 dark:text-slate-200 font-medium">
+                    {uniqueParts.join(", ")}
+                  </div>
+                );
               })()}
             </div>
           )}
