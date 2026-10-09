@@ -313,7 +313,7 @@ export function Profile() {
 
       const validatedState: ProfileState = {
         vendor_id: vendorCore.id,
-        store_name: vendorCore.shop_name || "",
+        store_name: profileExtended?.store_name?.trim() || vendorCore.shop_name || "",
         owner_name: vendorCore.owner_name || "",
         email_address:
           vendorCore.email || auth.user.email || "",
