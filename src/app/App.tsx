@@ -115,8 +115,8 @@ export default function App() {
       const cleanStatus = profile.status?.toLowerCase();
 
       if (cleanStatus === "approved") {
-        // Keep one canonical display name: prefer vendor_profiles.store_name,
-        // while keeping vendors.shop_name synchronized with that value.
+        // Canonical store identity: vendor_profiles.store_name is the display name
+        // shown by Store Management and Profile; keep vendors.shop_name synchronized.
         const { data: extendedProfile, error: extendedProfileError } = await supabase
           .from("vendor_profiles")
           .select("store_name")
