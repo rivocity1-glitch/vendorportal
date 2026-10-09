@@ -1,7 +1,7 @@
 import React,{useEffect,useState}from"react";
 import{CheckCircle,MapPin,RefreshCw,UserPlus,UserMinus,Package,LifeBuoy,Wifi,WifiOff}from"lucide-react";
 import{supabase}from"../../../lib/supabase";
-import{getLaneWorkers,getLanePickingTasks,getPickerCandidates,getPickerRequests,requestPicker,LaneWorker,LanePickingTask,PickerCandidate,PickerVendorRequest}from"../../../services/laneWorkerService";
+import{getLaneWorkers,getLanePickingTasks,getPickerCandidates,getPickerRequests,requestPicker,removeLaneWorker,LaneWorker,LanePickingTask,PickerCandidate,PickerVendorRequest}from"../../../services/laneWorkerService";
 
 type Item={id:string;order_id:string;product_id:string;product_name:string|null;quantity:number};
 type ProductLocation={product_id:string;lane_id:string;rack_id:string|null;lane_name:string|null;rack_name:string|null};
