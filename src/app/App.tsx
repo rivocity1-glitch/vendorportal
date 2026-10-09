@@ -104,7 +104,7 @@ export default function App() {
 
       const { data: profile, error: profileError } = await supabase
         .from("vendors")
-        .select("status, shop_name, shop_code")
+        .select("id, status, shop_name, shop_code")
         .eq("auth_user_id", session.user.id)
         .maybeSingle();
 
@@ -115,8 +115,31 @@ export default function App() {
       const cleanStatus = profile.status?.toLowerCase();
 
       if (cleanStatus === "approved") {
+        // Keep one canonical display name: prefer vendor_profiles.store_name,
+        // while keeping vendors.shop_name synchronized with that value.
+        const { data: extendedProfile, error: extendedProfileError } = await supabase
+          .from("vendor_profiles")
+          .select("store_name")
+          .eq("vendor_id", profile.id)
+          .maybeSingle();
+
+        if (extendedProfileError) {
+          console.warn("Could not fetch canonical store name:", extendedProfileError);
+        }
+
+        const canonicalStoreName =
+          extendedProfile?.store_name?.trim() || profile.shop_name || "Unnamed Storefront";
+
+        if (profile.shop_name !== canonicalStoreName) {
+          const { error: syncError } = await supabase
+            .from("vendors")
+            .update({ shop_name: canonicalStoreName, updated_at: new Date().toISOString() })
+            .eq("id", profile.id);
+          if (syncError) console.warn("Could not synchronize vendor display name:", syncError);
+        }
+
         setActiveVendor({
-          store_name: profile.shop_name || "Unnamed Storefront",
+          store_name: canonicalStoreName,
           shop_code: profile.shop_code || "SHOP-UNKNOWN",
         });
         setIsLoggedIn(true);
