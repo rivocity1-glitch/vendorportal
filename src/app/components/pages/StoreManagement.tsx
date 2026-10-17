@@ -38,7 +38,6 @@ import {
 import { supabase } from '../../../lib/supabase';
 import StoreLayout from "./StoreLayout";
 import LanePicking from "./LanePicking";
-import LaneRackSetup from "./LaneRackSetup";
 import {
   StoreLocationPicker,
   ConfirmLocationPayload
@@ -2446,7 +2445,6 @@ export default function StoreManagement() {
             </p>
           </div>
         </div>
-        <LaneRackSetup />
         <LanePicking />
         <StoreLayout />
       </section>
