@@ -441,11 +441,11 @@ export function Settlements() {
         
         <button
           onClick={handleRequestSettlement}
-          disabled={actionLoading || hasPendingRequest || !isAfterDailyCutoff || metrics.pendingSettlement <= 0}
+          disabled={actionLoading || !isAfterDailyCutoff}
           className="bg-[#10B981] hover:bg-[#059669] text-white disabled:bg-muted disabled:text-muted-foreground/60 px-5 py-2.5 rounded-xl font-bold text-sm shadow-sm transition flex items-center gap-2 justify-center disabled:cursor-not-allowed"
         >
           {actionLoading && <Loader2 size={16} className="animate-spin" />}
-          {hasPendingRequest ? 'Awaiting Payout Processing' : 'Prepare Daily Settlement'}
+          Prepare Daily Settlement
         </button>
       </div>
 
