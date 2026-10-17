@@ -46,7 +46,7 @@ export default function LaneRackSetup() {
         supabase.from("vendor_lanes").select("id,lane_name,description").eq("vendor_id", vendor.id).order("lane_name"),
         supabase.from("vendor_racks").select("id,lane_id,rack_name").eq("vendor_id", vendor.id).order("rack_name"),
         getLaneWorkers(vendor.id),
-        supabase.from("products").select("id,name,product_name").eq("vendor_id", vendor.id).order("name"),
+        supabase.from("products").select("id,name").eq("vendor_id", vendor.id).order("name"),
         supabase.from("product_storage_locations").select("product_id,lane_id,rack_id").eq("vendor_id", vendor.id),
         supabase.from("vendor_lane_picker_assignments").select("lane_id,worker_id").eq("vendor_id", vendor.id)
       ]);
