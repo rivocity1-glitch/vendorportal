@@ -212,28 +212,21 @@ export function Settlements() {
   // --- DAILY SETTLEMENT CUTOFF ---
   // Use a fixed UTC+05:30 offset so the 9:00 PM cutoff is always India time,
   // regardless of the device/browser timezone.
-  const getLatestSettlementCutoff = (reference = new Date()) => {
+  const getTodaySettlementCutoff = (reference = new Date()) => {
     const indiaOffsetMs = 5.5 * 60 * 60 * 1000;
     const indiaNow = new Date(reference.getTime() + indiaOffsetMs);
-    const cutoffDay = new Date(Date.UTC(
+    const cutoffTodayInIndia = new Date(Date.UTC(
       indiaNow.getUTCFullYear(),
       indiaNow.getUTCMonth(),
       indiaNow.getUTCDate(),
       21, 0, 0, 0
     ));
-
-    if (indiaNow.getUTCHours() < 21) {
-      cutoffDay.setUTCDate(cutoffDay.getUTCDate() - 1);
-    }
-
-    return new Date(cutoffDay.getTime() - indiaOffsetMs);
+    return new Date(cutoffTodayInIndia.getTime() - indiaOffsetMs);
   };
 
-  const latestCutoff = getLatestSettlementCutoff();
-  const previousCutoff = new Date(latestCutoff.getTime() - 24 * 60 * 60 * 1000);
-  const nextCutoff = new Date(latestCutoff.getTime() + 24 * 60 * 60 * 1000);
+  const todayCutoff = getTodaySettlementCutoff();
   const nowForCutoff = new Date();
-  const isAfterDailyCutoff = nowForCutoff.getTime() >= latestCutoff.getTime();
+  const isAfterDailyCutoff = nowForCutoff.getTime() >= todayCutoff.getTime();
 
   // --- ACTIONS ---
   const handleRequestSettlement = async () => {
@@ -242,7 +235,7 @@ export function Settlements() {
     setActionLoading(true);
     try {
       const now = new Date();
-      const cutoff = getLatestSettlementCutoff(now);
+      const cutoff = getTodaySettlementCutoff(now);
 
       // Daily batch closes at 9:00 PM IST. Orders delivered after that cutoff
       // remain unsettled and roll into the next daily batch.
