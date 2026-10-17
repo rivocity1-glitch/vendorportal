@@ -160,6 +160,7 @@ export default function StoreManagement() {
   // ---------------------------------------------------------------------------
 
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [operationsView, setOperationsView] = useState<"picker" | "layout">("picker");
 
   // ---------------------------------------------------------------------------
   // SECTION 1: STORE INFO
@@ -2445,8 +2446,23 @@ export default function StoreManagement() {
             </p>
           </div>
         </div>
-        <LanePicking />
-        <StoreLayout />
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setOperationsView("picker")}
+            className={`h-10 rounded-xl px-4 text-sm font-bold transition ${operationsView === "picker" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"}`}
+          >
+            Picker
+          </button>
+          <button
+            type="button"
+            onClick={() => setOperationsView("layout")}
+            className={`h-10 rounded-xl px-4 text-sm font-bold transition ${operationsView === "layout" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"}`}
+          >
+            Lanes &amp; Racks
+          </button>
+        </div>
+        {operationsView === "picker" ? <LanePicking /> : <StoreLayout />}
       </section>
 
       {/* LOCATION PICKER */}
