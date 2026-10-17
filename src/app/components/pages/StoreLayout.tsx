@@ -25,6 +25,8 @@ export default function StoreLayout() {
   const [rackCode, setRackCode] = useState("");
   const [rackLaneId, setRackLaneId] = useState("");
   const [productId, setProductId] = useState("");
+  const [editingLocationId, setEditingLocationId] = useState("");
+  const [workerScope, setWorkerScope] = useState<"store" | "lane">("store");
   const [productLaneId, setProductLaneId] = useState("");
   const [productRackId, setProductRackId] = useState("");
   const [workerLaneId, setWorkerLaneId] = useState("");
@@ -85,16 +87,40 @@ export default function StoreLayout() {
 
   const assignProduct = () => run(async () => {
     if (!vendorId || !productId || !productLaneId) throw new Error("Select a product and lane.");
-    const { error } = await supabase.from("product_storage_locations").insert({ vendor_id: vendorId, product_id: productId, lane_id: productLaneId, rack_id: productRackId || null });
-    if (error) throw error;
-    setProductId(""); setProductLaneId(""); setProductRackId(""); setMessage("Product location saved.");
+    if (productRackId && !racks.some(r => r.id === productRackId && r.lane_id === productLaneId)) throw new Error("The selected rack does not belong to the selected lane.");
+    const values = { lane_id: productLaneId, rack_id: productRackId || null };
+    if (editingLocationId) {
+      const { error } = await supabase.from("product_storage_locations").update(values).eq("id", editingLocationId).eq("vendor_id", vendorId).eq("product_id", productId);
+      if (error) throw error;
+      setMessage("Product location updated.");
+    } else {
+      const existing = locations.find(loc => loc.product_id === productId);
+      if (existing) {
+        const { error } = await supabase.from("product_storage_locations").update(values).eq("id", existing.id).eq("vendor_id", vendorId);
+        if (error) throw error;
+        setMessage("Existing product location updated.");
+      } else {
+        const { error } = await supabase.from("product_storage_locations").insert({ vendor_id: vendorId, product_id: productId, ...values });
+        if (error) throw error;
+        setMessage("Product location saved.");
+      }
+    }
+    setEditingLocationId(""); setProductId(""); setProductLaneId(""); setProductRackId("");
   });
 
   const assignWorker = () => run(async () => {
-    if (!vendorId || !workerLaneId || !workerId) throw new Error("Select a lane and Picker.");
-    const { error } = await supabase.from("vendor_lane_picker_assignments").insert({ vendor_id: vendorId, lane_id: workerLaneId, worker_id: workerId, status: "active" });
-    if (error) throw error;
-    setMessage("Picker assigned to lane.");
+    if (!vendorId || !workerId) throw new Error("Select a Picker.");
+    if (workerScope === "store") {
+      const { error } = await supabase.from("vendor_lane_picker_assignments").update({ status: "inactive", unassigned_at: new Date().toISOString() }).eq("vendor_id", vendorId).eq("worker_id", workerId).eq("status", "active");
+      if (error) throw error;
+      setMessage("Picker is assigned store-wide.");
+    } else {
+      if (!workerLaneId) throw new Error("Select a lane for this Picker.");
+      if (assignments.some(a => a.worker_id === workerId && a.lane_id === workerLaneId)) throw new Error("This Picker is already assigned to that lane.");
+      const { error } = await supabase.from("vendor_lane_picker_assignments").insert({ vendor_id: vendorId, lane_id: workerLaneId, worker_id: workerId, status: "active" });
+      if (error) throw error;
+      setMessage("Picker assigned to lane.");
+    }
   });
 
   const requestHelper = () => run(async () => {
@@ -124,6 +150,7 @@ export default function StoreLayout() {
   });
 
   const rackOptions = useMemo(() => racks.filter(r => !productLaneId || r.lane_id === productLaneId), [racks, productLaneId]);
+  const productLocationOptions = useMemo(() => locations.filter(loc => !productId || loc.product_id === productId), [locations, productId]);
   const productById = useMemo(() => new Map(products.map(p => [p.id, p])), [products]);
   const laneById = useMemo(() => new Map(lanes.map(l => [l.id, l])), [lanes]);
   const rackById = useMemo(() => new Map(racks.map(r => [r.id, r])), [racks]);
@@ -151,21 +178,21 @@ export default function StoreLayout() {
       <section className="rounded-xl border bg-card p-4">
         <div><h2 className="font-bold flex items-center gap-2"><Package className="w-4 h-4"/>Optional Product Locations</h2><p className="text-xs text-muted-foreground mt-1">Product creation does not require a lane or rack. Configure locations only when useful.</p></div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mt-4">
-          <select value={productId} onChange={e=>setProductId(e.target.value)} className="h-10 rounded-lg border px-3 bg-background"><option value="">Product</option>{products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <select value={productId} onChange={e=>{setProductId(e.target.value);setEditingLocationId("");setProductLaneId("");setProductRackId("")}} className="h-10 rounded-lg border px-3 bg-background"><option value="">Product</option>{products.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <select value={editingLocationId} onChange={e=>{const id=e.target.value;setEditingLocationId(id);const loc=locations.find(x=>x.id===id);if(loc){setProductId(loc.product_id);setProductLaneId(loc.lane_id);setProductRackId(loc.rack_id||"")}}} className="h-10 rounded-lg border px-3 bg-background"><option value="">New / update existing location</option>{productLocationOptions.map(loc=><option key={loc.id} value={loc.id}>{laneById.get(loc.lane_id)?.lane_name||"Lane"}{loc.rack_id?` / ${rackById.get(loc.rack_id)?.rack_name||"Rack"}`:" / no rack"}</option>)}</select>
           <select value={productLaneId} onChange={e=>{setProductLaneId(e.target.value);setProductRackId("")}} className="h-10 rounded-lg border px-3 bg-background"><option value="">Lane</option>{lanes.map(l=><option key={l.id} value={l.id}>{l.lane_name}</option>)}</select>
-          <select value={productRackId} onChange={e=>setProductRackId(e.target.value)} className="h-10 rounded-lg border px-3 bg-background"><option value="">Rack (optional)</option>{rackOptions.map(r=><option key={r.id} value={r.id}>{r.rack_name}</option>)}</select>
-          <button disabled={busy} onClick={assignProduct} className="h-10 rounded-lg bg-emerald-600 text-white font-bold flex items-center justify-center gap-2"><Plus className="w-4 h-4"/>Assign Location</button>
-        </div>
+          <select value={productRackId} onChange={e=>setProductRackId(e.target.value)} className="h-10 rounded-lg border px-3 bg-background"><option value="">No rack</option>{rackOptions.map(r=><option key={r.id} value={r.id}>{r.rack_name}</option>)}</select>
+        </div><button disabled={busy} onClick={assignProduct} className="mt-2 h-10 w-full rounded-lg bg-emerald-600 text-white font-bold flex items-center justify-center gap-2"><Plus className="w-4 h-4"/>{editingLocationId?"Update Location":"Save Location"}</button>
         <div className="overflow-x-auto mt-4"><table className="w-full text-sm"><thead className="bg-muted/50"><tr><th className="p-3 text-left">Product</th><th className="p-3 text-right">Stock</th><th className="p-3 text-left">Lane</th><th className="p-3 text-left">Rack</th><th className="p-3 text-left">Status</th><th className="p-3"></th></tr></thead><tbody className="divide-y">{locations.map(loc=>{const p=productById.get(loc.product_id);const low=!!p&&(p.stock<=0||p.stock<=(p.low_stock_threshold??5));return <tr key={loc.id}><td className="p-3 font-semibold">{p?.name||"Product"}</td><td className="p-3 text-right">{p?.stock??0}</td><td className="p-3">{laneById.get(loc.lane_id)?.lane_name||"—"}</td><td className="p-3">{loc.rack_id?(rackById.get(loc.rack_id)?.rack_name||"—"):"—"}</td><td className="p-3"><span className={low?"px-2 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-bold":"px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold"}>{low?(p?.stock??0)<=0?"OUT":"LOW":"IN STOCK"}</span></td><td className="p-3 text-right"><button onClick={()=>removeLocation(loc.id)} className="text-red-600"><Trash2 className="w-4 h-4"/></button></td></tr>})}</tbody></table></div>
         {locations.length===0&&<div className="p-8 text-center text-sm text-muted-foreground">No optional product locations configured.</div>}
       </section>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <section className="rounded-xl border bg-card p-4">
-          <h2 className="font-bold flex items-center gap-2"><UserPlus className="w-4 h-4"/>Assign Picker to Lane</h2>
-          <p className="text-xs text-muted-foreground mt-1">Optional. Picker can work without a lane assignment.</p>
-          <div className="grid grid-cols-2 gap-2 mt-4"><select value={workerLaneId} onChange={e=>setWorkerLaneId(e.target.value)} className="h-10 rounded-lg border px-3 bg-background"><option value="">Lane</option>{lanes.map(l=><option key={l.id} value={l.id}>{l.lane_name}</option>)}</select><select value={workerId} onChange={e=>setWorkerId(e.target.value)} className="h-10 rounded-lg border px-3 bg-background"><option value="">Picker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.worker_name}</option>)}</select></div>
-          <button disabled={busy} onClick={assignWorker} className="mt-3 h-10 px-4 rounded-lg bg-emerald-600 text-white text-sm font-bold">Assign to Lane</button>
+          <h2 className="font-bold flex items-center gap-2"><UserPlus className="w-4 h-4"/>Assign Picker</h2>
+          <p className="text-xs text-muted-foreground mt-1">Choose whether a Picker works store-wide or only in one lane.</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-4"><select value={workerScope} onChange={e=>setWorkerScope(e.target.value as "store" | "lane")} className="h-10 rounded-lg border px-3 bg-background"><option value="store">Store-wide</option><option value="lane">Specific lane</option></select><select value={workerLaneId} disabled={workerScope==="store"} onChange={e=>setWorkerLaneId(e.target.value)} className="h-10 rounded-lg border px-3 bg-background disabled:opacity-50"><option value="">Lane</option>{lanes.map(l=><option key={l.id} value={l.id}>{l.lane_name}</option>)}</select><select value={workerId} onChange={e=>setWorkerId(e.target.value)} className="h-10 rounded-lg border px-3 bg-background"><option value="">Picker</option>{workers.map(w=><option key={w.id} value={w.id}>{w.worker_name}</option>)}</select></div>
+          <button disabled={busy} onClick={assignWorker} className="mt-3 h-10 px-4 rounded-lg bg-emerald-600 text-white text-sm font-bold">Save Assignment</button>
           <div className="mt-4 space-y-2">{assignments.map(a=><div key={a.id} className="border rounded-lg p-3 flex justify-between items-center"><div><b>{workerById.get(a.worker_id)?.worker_name||"Picker"}</b><span className="text-xs text-muted-foreground ml-2">{laneById.get(a.lane_id)?.lane_name||"Lane"}</span></div><button onClick={()=>removeAssignment(a.id)} className="text-xs text-red-600 font-bold">Unassign</button></div>)}</div>
         </section>
 
