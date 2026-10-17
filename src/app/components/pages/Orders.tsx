@@ -22,6 +22,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
+import { getLaneWorkers, getLanePickingTasks, LaneWorker, LanePickingTask } from "../../../services/laneWorkerService";
 
 const statusColors: Record<
   string,
@@ -134,6 +135,9 @@ type OrderItemRow = {
   product_name?: string | null;
 };
 
+type LaneWorkerRow = LaneWorker;
+type LaneTaskRow = LanePickingTask;
+
 type OrderRow = {
   id: string;
   order_number: string;
@@ -159,6 +163,8 @@ type OrderRow = {
   collected_by_rider: string | null;
   created_at: string;
   updated_at: string;
+  picker_worker_id: string | null;
+  picker_claimed_at: string | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
   cancelled_at: string | null;
@@ -255,6 +261,8 @@ type DisplayOrder = {
   updatedAt: string;
   vendorId: string;
   riderId: string | null;
+  pickerWorkerId: string | null;
+  pickerClaimedAt: string | null;
   date: string;
   address: {
     name: string;
@@ -346,6 +354,11 @@ export function Orders() {
   const [verifierNames, setVerifierNames] = useState<
     Record<string, string>
   >({});
+
+  const [laneWorkers, setLaneWorkers] = useState<LaneWorkerRow[]>([]);
+  const [laneTasksByItem, setLaneTasksByItem] = useState<Map<string, LaneTaskRow>>(new Map());
+  const [typedItemsCache, setTypedItemsCache] = useState<Map<string, OrderItemRow[]>>(new Map());
+  const [assigningLaneItemId, setAssigningLaneItemId] = useState<string | null>(null);
 
   const formatStatusString = (rawStatus: string | null | undefined) => {
     if (!rawStatus) return "Pending";
@@ -623,6 +636,32 @@ export function Orders() {
       if (itemsError) throw itemsError;
 
       const typedItems = (itemsData || []) as OrderItemRow[];
+
+      const groupedLaneItems = new Map<string, OrderItemRow[]>();
+      typedItems.forEach((item) => {
+        const currentItems = groupedLaneItems.get(item.order_id) || [];
+        currentItems.push(item);
+        groupedLaneItems.set(item.order_id, currentItems);
+      });
+      setTypedItemsCache(groupedLaneItems);
+
+      try {
+        const workers = await getLaneWorkers(currentVendorId);
+        setLaneWorkers(workers);
+
+        const laneTasks = await getLanePickingTasks(
+          currentVendorId,
+          typedItems.map((item) => item.id)
+        );
+
+        const taskMap = new Map<string, LaneTaskRow>();
+        laneTasks.forEach((task) => taskMap.set(task.order_item_id, task));
+        setLaneTasksByItem(taskMap);
+      } catch (laneError) {
+        console.warn("Lane synchronization warning:", laneError);
+        setLaneWorkers([]);
+        setLaneTasksByItem(new Map());
+      }
 
       const productIds = Array.from(
         new Set(
@@ -941,6 +980,12 @@ export function Orders() {
 
             riderId:
               parentOrder.rider_id,
+
+            pickerWorkerId:
+              parentOrder.picker_worker_id || null,
+
+            pickerClaimedAt:
+              parentOrder.picker_claimed_at || null,
 
             date: parentOrder.created_at
               ? new Date(
@@ -1290,6 +1335,7 @@ export function Orders() {
     let settlementsChannel: any = null;
     let ridersChannel: any = null;
     let assignmentsChannel: any = null;
+    let laneTaskChannel: any = null;
 
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let refreshInProgress = false;
@@ -1485,6 +1531,22 @@ export function Orders() {
             ),
           "rider_vendor_assignments"
         );
+
+        laneTaskChannel = subscribeSafely(
+          supabase
+            .channel(`vendor-lane-tasks-${currentVendorId}`)
+            .on(
+              "postgres_changes",
+              {
+                event: "*",
+                schema: "public",
+                table: "order_item_picking_tasks",
+                filter: `vendor_id=eq.${currentVendorId}`,
+              },
+              () => scheduleOrdersRefresh()
+            ),
+          "order_item_picking_tasks"
+        );
       } catch (err) {
         console.error("Realtime setup error:", err);
       }
@@ -1507,11 +1569,98 @@ export function Orders() {
         settlementsChannel,
         ridersChannel,
         assignmentsChannel,
+        laneTaskChannel,
       ].forEach((channel) => {
         if (channel) supabase.removeChannel(channel);
       });
     };
   }, []);
+
+  const isOrderFullyPicked = (orderId: string) => {
+    const items = typedItemsCache.get(orderId) || [];
+    if (items.length === 0) return false;
+
+    return items.every((item) => {
+      return laneTasksByItem.get(item.id)?.status === "picked";
+    });
+  };
+
+  const selfPickOrder = async (orderId: string) => {
+    try {
+      setAssigningLaneItemId(orderId);
+      const order = ordersList.find((row) => row.id === orderId);
+      if (!order) throw new Error("Order context unavailable.");
+
+      const ownerWorkers = await getLaneWorkers(order.vendorId);
+      const ownerWorker = ownerWorkers.find((worker) => worker.is_owner);
+      if (!ownerWorker) {
+        throw new Error("Store owner worker is not available.");
+      }
+
+      const { data: claimed, error: claimError } = await supabase.rpc(
+        "claim_picker_order",
+        {
+          p_order_id: orderId,
+          p_worker_id: ownerWorker.id,
+        }
+      );
+
+      if (claimError) throw claimError;
+      if (claimed !== true) {
+        throw new Error("This order is already claimed by another Picker.");
+      }
+
+      const { error: taskError } = await supabase
+        .from("order_item_picking_tasks")
+        .update({
+          worker_id: ownerWorker.id,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("vendor_id", order.vendorId)
+        .in(
+          "order_item_id",
+          (typedItemsCache.get(orderId) || []).map((item) => item.id)
+        )
+        .eq("status", "assigned");
+
+      if (taskError) throw taskError;
+      await fetchLiveOrders(false);
+    } catch (error: any) {
+      console.error("Owner self-pick error:", error);
+      alert(error?.message || "Unable to claim order for self-pick.");
+    } finally {
+      setAssigningLaneItemId(null);
+    }
+  };
+
+  const markLaneTaskPicked = async (orderItemId: string, orderId: string, taskId: string) => {
+    try {
+      setAssigningLaneItemId(orderItemId);
+      const vendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
+      if (!vendorId) throw new Error("Order vendor context unavailable.");
+
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from("order_item_picking_tasks")
+        .update({
+          status: "picked",
+          worker_id: laneWorkers.find((worker) => worker.is_owner)?.id || null,
+          picked_at: now,
+          updated_at: now,
+        })
+        .eq("id", taskId)
+        .eq("vendor_id", vendorId)
+        .eq("status", "assigned");
+
+      if (error) throw error;
+      await fetchLiveOrders(false);
+    } catch (error: any) {
+      console.error("Owner pick completion error:", error);
+      alert(error?.message || "Unable to mark item as picked.");
+    } finally {
+      setAssigningLaneItemId(null);
+    }
+  };
 
   const triggerActionConfirmation = (
     orderId: string,
@@ -1880,7 +2029,7 @@ export function Orders() {
           await supabase
             .from("order_items")
             .select(
-              "product_id, quantity"
+              "id, product_id, quantity"
             )
             .eq(
               "order_id",
@@ -1969,9 +2118,33 @@ export function Orders() {
           }
         }
 
+        const currentVendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
+        if (!currentVendorId) {
+          throw new Error("Order vendor context unavailable.");
+        }
+
+        // Accepted is the customer-visible confirmation stage.
+        // Picking tasks are created by the database trigger. The order remains
+        // available for an external Picker until someone claims it.
+        const { error: acceptedUpdateError } = await supabase
+          .from("orders")
+          .update({ order_status: "accepted" })
+          .eq("id", orderId);
+
+        if (acceptedUpdateError) throw acceptedUpdateError;
+
+        const { error: acceptedTrackingError } = await supabase
+          .from("order_tracking")
+          .insert({
+            order_id: orderId,
+            status: "accepted",
+            remarks: "Order accepted by vendor",
+          });
+
+        if (acceptedTrackingError) throw acceptedTrackingError;
+
         nextDbStatus = "accepted";
-        trackingRemarks =
-          "Order accepted by vendor";
+        trackingRemarks = "Order accepted by vendor; waiting for Picker claim";
       }
 
       /* -------------------------------------------------------
@@ -2083,6 +2256,52 @@ export function Orders() {
       else if (
         action === "Mark Packed"
       ) {
+        // Packing is only allowed after every ordered item has a completed
+        // picking task. Lanes, racks and baskets are not prerequisites.
+        const { data: orderItems, error: orderItemsError } =
+          await supabase
+            .from("order_items")
+            .select("id, quantity")
+            .eq("order_id", orderId);
+
+        if (orderItemsError) throw orderItemsError;
+
+        const itemIds = (orderItems || []).map((item) => item.id);
+
+        if (itemIds.length === 0) {
+          throw new Error("This order has no items to pack.");
+        }
+
+        const currentVendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
+        if (!currentVendorId) {
+          throw new Error("Order vendor context unavailable.");
+        }
+
+        const { data: pickingTasks, error: pickingTasksError } =
+          await supabase
+            .from("order_item_picking_tasks")
+            .select("order_item_id, status")
+            .eq("vendor_id", currentVendorId)
+            .in("order_item_id", itemIds);
+
+        if (pickingTasksError) throw pickingTasksError;
+
+        const pickedItemIds = new Set(
+          (pickingTasks || [])
+            .filter((task) => task.status === "picked")
+            .map((task) => task.order_item_id)
+        );
+
+        const unpickedCount = itemIds.filter((itemId) => !pickedItemIds.has(itemId)).length;
+
+        if (unpickedCount > 0) {
+          alert(
+            `${unpickedCount} item${unpickedCount === 1 ? "" : "s"} still need to be picked before packing.`
+          );
+          setActionLoading(null);
+          return;
+        }
+
         const { data: orderData, error: orderError } =
           await supabase
             .from("orders")
@@ -3021,6 +3240,9 @@ export function Orders() {
                             const isBtnLoading =
                               actionLoading ===
                               `${order.id}-${a.label}`;
+                            const canPack =
+                              a.label !== "Mark Packed" ||
+                              isOrderFullyPicked(order.id);
 
                             return (
                               <button
@@ -3028,8 +3250,8 @@ export function Orders() {
                                   a.label
                                 }
                                 disabled={
-                                  actionLoading !==
-                                  null
+                                  actionLoading !== null ||
+                                  !canPack
                                 }
                                 onClick={() =>
                                   triggerActionConfirmation(
@@ -3037,13 +3259,20 @@ export function Orders() {
                                     a.label
                                   )
                                 }
+                                title={
+                                  a.label === "Mark Packed" && !canPack
+                                    ? "Pick all items before packing"
+                                    : undefined
+                                }
                                 className={`text-xs px-2 py-1 rounded-md font-medium flex items-center gap-1 transition-colors disabled:opacity-40 ${a.color}`}
                               >
                                 {isBtnLoading && (
                                   <Loader2 className="w-3 h-3 animate-spin" />
                                 )}
 
-                                {a.label}
+                                {a.label === "Mark Packed" && !canPack
+                                  ? "Waiting for picking"
+                                  : a.label}
                               </button>
                             );
                           }
@@ -3664,33 +3893,85 @@ export function Orders() {
                 </p>
 
                 <div className="space-y-1 bg-muted/20 border border-border/40 rounded-xl p-3">
-                  {selectedOrder.items.map(
-                    (item, index) => (
-                      <div
-                        key={
-                          `${selectedOrder.id}-${index}`
-                        }
-                        className="flex justify-between items-center py-2 border-b border-border/40 last:border-0"
-                      >
-                        <div className="min-w-0 flex-1 pr-2">
-                          <p className="text-sm font-medium truncate">
-                            {item.name}
-                          </p>
-
-                          <p className="text-xs text-muted-foreground">
-                            Qty:{" "}
-                            {item.qty}{" "}
-                            ×{" "}
-                            {item.unitPrice}
-                          </p>
-                        </div>
-
-                        <p className="text-sm font-semibold">
-                          {item.totalPrice}
+                  <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-wide text-emerald-700">Order Picking</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {selectedOrder.pickerWorkerId
+                            ? "This order has one Picker/worker. All items stay with that worker."
+                            : "No Picker has claimed this order yet."}
                         </p>
                       </div>
-                    )
-                  )}
+                      {!selectedOrder.pickerWorkerId &&
+                        (selectedOrder.orderStatus === "Accepted" || selectedOrder.orderStatus === "Preparing") && (
+                          <button
+                            type="button"
+                            disabled={assigningLaneItemId === selectedOrder.id}
+                            onClick={() => selfPickOrder(selectedOrder.id)}
+                            className="shrink-0 rounded-lg bg-[#10B981] hover:bg-[#059669] px-3 py-2 text-[10px] font-black text-white disabled:opacity-50"
+                          >
+                            {assigningLaneItemId === selectedOrder.id ? "Claiming…" : "Self-pick Order"}
+                          </button>
+                        )}
+                    </div>
+                  </div>
+
+                  {selectedOrder.items.map((item, index) => {
+                    const laneTask = laneTasksByItem.get(item.id);
+                    const laneWorker = laneTask
+                      ? laneWorkers.find((worker) => worker.id === laneTask.worker_id)
+                      : undefined;
+
+                    return (
+                      <div
+                        key={selectedOrder.id + "-" + index}
+                        className="py-2 border-b border-border/40 last:border-0"
+                      >
+                        <div className="flex justify-between items-center gap-3">
+                          <div className="min-w-0 flex-1 pr-2">
+                            <p className="text-sm font-medium truncate">{item.name}</p>
+                            <p className="text-xs text-muted-foreground">Qty: {item.qty} × {item.unitPrice}</p>
+                          </div>
+                          <p className="text-sm font-semibold">{item.totalPrice}</p>
+                        </div>
+
+                        <div className="mt-2 rounded-lg border border-border/60 bg-background/60 p-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Picking</span>
+                            {laneTask?.status === "picked" ? (
+                              <span className="text-[10px] font-bold text-emerald-700">Picked</span>
+                            ) : laneTask ? (
+                              <span className="text-[10px] font-bold text-amber-700">Waiting to pick</span>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-muted-foreground">Task not created</span>
+                            )}
+                          </div>
+
+                          {laneWorker && (
+                            <p className="mt-1.5 text-[10px] text-muted-foreground">
+                              Worker: {laneWorker.worker_name}
+                              {laneTask?.picked_at ? " · Picked " + formatDate(laneTask.picked_at) : ""}
+                            </p>
+                          )}
+
+                          {laneTask &&
+                            laneTask.status !== "picked" &&
+                            laneWorker?.is_owner &&
+                            selectedOrder.pickerWorkerId === laneWorker.id && (
+                              <button
+                                type="button"
+                                disabled={assigningLaneItemId === item.id}
+                                onClick={() => markLaneTaskPicked(item.id, selectedOrder.id, laneTask.id)}
+                                className="mt-2 h-8 w-full rounded-md bg-[#10B981] hover:bg-[#059669] text-white text-[10px] font-bold disabled:opacity-50"
+                              >
+                                {assigningLaneItemId === item.id ? "Picking…" : "Owner Mark Picked"}
+                              </button>
+                            )}
+                        </div>
+                      </div>
+                    );
+                  })}
 
                   <div className="border-t border-border/60 mt-3 pt-2 space-y-1 text-xs">
                     <div className="flex justify-between text-muted-foreground">

@@ -17,7 +17,12 @@ import {
   Calendar,
   Power,
   XCircle,
-  CheckCircle2
+  CheckCircle2,
+  Wallet,
+  Users,
+  Boxes,
+  Navigation,
+  CalendarDays
 } from 'lucide-react';
 
 import {
@@ -31,6 +36,9 @@ import {
 } from '../../../services/vendorService';
 
 import { supabase } from '../../../lib/supabase';
+import StoreLayout from "./StoreLayout";
+import LanePicking from "./LanePicking";
+import LaneRackSetup from "./LaneRackSetup";
 import {
   StoreLocationPicker,
   ConfirmLocationPayload
@@ -478,11 +486,13 @@ export default function StoreManagement() {
           );
         }
 
-        const shopName = vendorRes.data.shop_name;
+        const canonicalStoreName =
+          profileRes.data.store_name?.trim() || vendorRes.data.shop_name || '';
 
+        // Use the same canonical name displayed in the portal header.
         populateProfileData(
-          profileRes.data,
-          shopName
+          { ...profileRes.data, store_name: canonicalStoreName },
+          canonicalStoreName
         );
 
         profileChannel = supabase
@@ -499,7 +509,7 @@ export default function StoreManagement() {
               if (payload.new) {
                 populateProfileData(
                   payload.new as VendorProfile,
-                  shopName
+                  payload.new.store_name?.trim() || canonicalStoreName
                 );
               }
             }
@@ -1018,37 +1028,29 @@ export default function StoreManagement() {
   const handleLocationConfirm = (
     location: ConfirmLocationPayload
   ) => {
-    setAddressLine1(
-      location.addressLine1 ||
-        location.formattedAddress
+    // Keep the address preview readable: the first line already contains
+    // the locality when reverse geocoding supplies it, so avoid repeating it.
+    const normalized = (value: string) =>
+      value.trim().replace(/\\s+/g, " ").replace(/,+/g, ",").replace(/^,|,$/g, "").trim();
+    const cityValue = normalized(location.city || "");
+    const line1Value = normalized(location.addressLine1 || location.formattedAddress || "");
+    const line1Parts = line1Value.split(",").map(normalized).filter(Boolean);
+    const deduplicatedLine1 = line1Parts.filter((part, index, parts) =>
+      parts.findIndex((candidate) => candidate.toLowerCase() === part.toLowerCase()) === index
     );
+    const nextLine1 = deduplicatedLine1.join(", ");
+    const nextLine2 = normalized(addressLine2 || "");
+    setAddressLine1(nextLine1);
 
-    if (location.city) {
-      setCity(location.city);
-    }
-
-    if (location.state) {
-      setState(location.state);
-    }
-
-    if (location.pinCode) {
-      setPinCode(location.pinCode);
-    }
-
-    setLatitude(
-      String(location.latitude)
-    );
-
-    setLongitude(
-      String(location.longitude)
-    );
-
+    // City can be present as a trailing component of a geocoder address line.
+    // Keep it in the dedicated city field and omit duplicates in the preview.
+    if (cityValue) setCity(cityValue);
+    if (location.state) setState(location.state);
+    if (location.pinCode) setPinCode(location.pinCode);
+    setLatitude(String(location.latitude));
+    setLongitude(String(location.longitude));
     setLocationPickerOpen(false);
-
-    showToast(
-      'Store location selected from map.',
-      'success'
-    );
+    showToast('Store location selected from map.', 'success');
   };
 
   // ---------------------------------------------------------------------------
@@ -1117,12 +1119,19 @@ export default function StoreManagement() {
       throw vendorError;
     }
 
+    const canonicalStoreName = storeName.trim();
+    const { error: vendorNameError } = await supabase
+      .from('vendors')
+      .update({ shop_name: canonicalStoreName, updated_at: new Date().toISOString() })
+      .eq('id', vendorId);
+    if (vendorNameError) throw vendorNameError;
+
     const res =
       await updateVendorProfile(
         vendorId,
         {
           store_name:
-            storeName.trim(),
+            canonicalStoreName,
           tagline:
             tagline.trim(),
           avatar_url:
@@ -1479,6 +1488,38 @@ export default function StoreManagement() {
         </div>
       )}
 
+      {/* FEATURE NAVIGATION */}
+      <div className="sticky top-0 z-30 -mx-1 px-1 pt-1 pb-2 bg-background/95 backdrop-blur">
+        <div className="rounded-2xl border border-border bg-card p-2 shadow-sm">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: "store-info", label: "Store Details", icon: Store },
+              { id: "store-location", label: "Location", icon: Navigation },
+              { id: "store-hours", label: "Hours", icon: CalendarDays },
+              { id: "store-documents", label: "Documents", icon: FileText },
+              { id: "store-bank", label: "Bank & Payments", icon: Wallet },
+              { id: "store-picker", label: "Picker", icon: Users },
+              { id: "store-lanes", label: "Lanes & Racks", icon: Boxes },
+            ].map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() =>
+                  document.getElementById(id)?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  })
+                }
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-3 py-2 text-[11px] font-bold text-foreground hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 dark:hover:bg-emerald-950/30 transition-colors"
+              >
+                <Icon className="h-3.5 w-3.5 text-emerald-500" />
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* HEADER */}
       <div className="pb-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
         <div>
@@ -1522,7 +1563,7 @@ export default function StoreManagement() {
               size={18}
             />
 
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+            <h2 id="store-info" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">
               Store Information
             </h2>
           </div>
@@ -1775,7 +1816,7 @@ export default function StoreManagement() {
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-900 pb-3">
             <div className="flex items-center gap-2">
               <MapPin className="text-emerald-500" size={18} />
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">Store Location</h2>
+              <h2 id="store-location" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">Store Location</h2>
             </div>
             {isLocationVerified ? (
               <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-500/20">
@@ -1810,11 +1851,29 @@ export default function StoreManagement() {
               <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider mb-2">
                 <CheckCircle size={14} /> Selected Store Location
               </div>
-              {addressLine1 && <div className="text-slate-800 dark:text-slate-200 font-medium">{addressLine1}</div>}
-              {addressLine2 && <div className="text-slate-600 dark:text-slate-400">{addressLine2}</div>}
-              <div className="text-slate-600 dark:text-slate-400 font-medium">
-                {[city, state, pinCode].filter(Boolean).join(', ')}
-              </div>
+              {(() => {
+                const normalizePart = (value: string) =>
+                  value.trim().replace(/\s+/g, " ").replace(/^,|,$/g, "").trim();
+                const line1Parts = addressLine1.split(",").map(normalizePart).filter(Boolean);
+                const line2Parts = addressLine2.split(",").map(normalizePart).filter(Boolean);
+                const existingLocalities = [...line1Parts, ...line2Parts].map(part => part.toLocaleLowerCase());
+                const cityPart = normalizePart(city);
+                const remainingParts = [
+                  ...line1Parts,
+                  ...line2Parts,
+                  ...(cityPart && !existingLocalities.includes(cityPart.toLocaleLowerCase()) ? [cityPart] : []),
+                  normalizePart(state),
+                  normalizePart(pinCode),
+                ].filter(Boolean);
+                const uniqueParts = remainingParts.filter((part, index, parts) =>
+                  parts.findIndex(candidate => candidate.toLocaleLowerCase() === part.toLocaleLowerCase()) === index
+                );
+                return (
+                  <div className="text-slate-800 dark:text-slate-200 font-medium">
+                    {uniqueParts.join(", ")}
+                  </div>
+                );
+              })()}
             </div>
           )}
         </section>
@@ -1832,7 +1891,7 @@ export default function StoreManagement() {
               size={18}
             />
 
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+            <h2 id="store-hours" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">
               Business Hours
             </h2>
 
@@ -2171,7 +2230,7 @@ export default function StoreManagement() {
               size={18}
             />
 
-            <h2 className="text-base font-bold text-slate-900 dark:text-white">
+            <h2 id="store-documents" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">
               Business Documents
             </h2>
 
@@ -2291,7 +2350,7 @@ export default function StoreManagement() {
           <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-900 pb-3">
             <Building2 className="text-emerald-500" size={18} />
             <div>
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">Bank & Payment Details</h2>
+              <h2 id="store-bank" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">Bank & Payment Details</h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">These details are used by Rivo for vendor settlements.</p>
             </div>
           </div>
@@ -2375,6 +2434,22 @@ export default function StoreManagement() {
         </section>
 
       </div>
+
+      {/* RIVOCITY PICKER & OPTIONAL STORE LAYOUT */}
+
+      <section id="store-lanes" className="space-y-4 scroll-mt-24">
+        <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-900 rounded-2xl p-6 shadow-xs">
+          <div>
+            <h2 id="store-picker" className="scroll-mt-24 text-base font-bold text-slate-900 dark:text-white">RivoCity Picker & Store Operations</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+              Picker management, optional lanes/racks, product locations and helper requests. None of these are required to add products.
+            </p>
+          </div>
+        </div>
+        <LaneRackSetup />
+        <LanePicking />
+        <StoreLayout />
+      </section>
 
       {/* LOCATION PICKER */}
 

@@ -20,6 +20,8 @@ interface Order {
   vendor_earning: number | null;
   settled_vendor: boolean | null;
   order_status?: string | null;
+  delivered_at?: string | null;
+  created_at?: string | null;
 }
 
 interface VendorSettlement {
@@ -109,10 +111,10 @@ export function Settlements() {
       const resolvedVendorId = vendor.id;
       setCurrentVendorId(resolvedVendorId);
 
-      // 1. Fetch delivered orders for metrics calculation
+      // Delivered-order timestamps drive the daily settlement cutoff (9:00 PM India time).
       const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
-        .select('id, vendor_earning, settled_vendor, order_status')
+        .select('id, vendor_earning, settled_vendor, order_status, delivered_at, created_at')
         .eq('vendor_id', resolvedVendorId)
         .eq('order_status', 'delivered');
 
@@ -207,124 +209,106 @@ export function Settlements() {
     return settlements.some(s => s.status === 'REQUESTED');
   }, [settlements]);
 
+  // --- DAILY SETTLEMENT CUTOFF ---
+  // Use a fixed UTC+05:30 offset so the 9:00 PM cutoff is always India time,
+  // regardless of the device/browser timezone.
+  const getTodaySettlementCutoff = (reference = new Date()) => {
+    const indiaOffsetMs = 5.5 * 60 * 60 * 1000;
+    const indiaNow = new Date(reference.getTime() + indiaOffsetMs);
+    const cutoffTodayInIndia = new Date(Date.UTC(
+      indiaNow.getUTCFullYear(),
+      indiaNow.getUTCMonth(),
+      indiaNow.getUTCDate(),
+      21, 0, 0, 0
+    ));
+    return new Date(cutoffTodayInIndia.getTime() - indiaOffsetMs);
+  };
+
+  const todayCutoff = getTodaySettlementCutoff();
+  const nowForCutoff = new Date();
+  const isAfterDailyCutoff = nowForCutoff.getTime() >= todayCutoff.getTime();
+
   // --- ACTIONS ---
   const handleRequestSettlement = async () => {
     if (!currentVendorId) return;
 
     setActionLoading(true);
     try {
-      // 1. Fetch active subscription data
-      const { data: subscription, error: subError } = await supabase
-        .from('subscriptions')
-        .select('plan_name, monthly_settlement_request_limit')
-        .eq('vendor_id', currentVendorId)
-        .eq('status', 'active')
-        .maybeSingle();
-
-      if (subError) throw subError;
-
-      const planName = subscription?.plan_name || 'Free';
-      const limit = subscription?.monthly_settlement_request_limit ?? 3;
-
-      // 2. Count current calendar month usage requests
       const now = new Date();
-      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-      const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+      const cutoff = getTodaySettlementCutoff(now);
 
-      const { count: requestsThisMonth, error: countError } = await supabase
-        .from('vendor_settlements')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', currentVendorId)
-        .in('status', ['REQUESTED', 'PAID'])
-        .gte('created_at', firstDayOfMonth)
-        .lte('created_at', lastDayOfMonth);
-
-      if (countError) throw countError;
-
-      const currentCount = requestsThisMonth || 0;
-
-      // 3. Validation limit threshold check
-      if (currentCount >= limit) {
-        showToast(
-          `Settlement request limit reached. You have already used ${currentCount} of ${limit} settlement requests available in your ${planName} plan this month. Your remaining earnings will automatically be included in the next weekly settlement.`,
-          'error'
-        );
+      // Daily batch closes at 9:00 PM IST. Orders delivered after that cutoff
+      // remain unsettled and roll into the next daily batch.
+      if (now.getTime() < cutoff.getTime()) {
+        showToast('The daily settlement cutoff is 9:00 PM IST. Please try again after the cutoff.', 'error');
         return;
       }
 
-      // 1. FIND ELIGIBLE ORDERS & 5. DUPLICATE PROTECTION
       const { data: activeSettlements, error: settlementError } = await supabase
         .from('vendor_settlements')
         .select('order_ids')
         .eq('vendor_id', currentVendorId)
-        .eq('status', 'REQUESTED');
+        .in('status', ['REQUESTED', 'AVAILABLE', 'PAID']);
 
       if (settlementError) throw settlementError;
 
-      const restrictedOrderIds: string[] = [];
-      if (activeSettlements) {
-        activeSettlements.forEach((s) => {
-          if (Array.isArray(s.order_ids)) {
-            restrictedOrderIds.push(...s.order_ids);
-          }
-        });
-      }
+      const restrictedOrderIds = new Set<string>();
+      (activeSettlements || []).forEach((settlement) => {
+        if (Array.isArray(settlement.order_ids)) {
+          settlement.order_ids.forEach((id: string) => restrictedOrderIds.add(id));
+        }
+      });
 
+      // Include all delivered, unpaid orders up to the most recent 9 PM IST cutoff.
+      // This also carries forward any older unpaid orders if a prior payout was missed.
       const { data: eligibleOrders, error: ordersError } = await supabase
         .from('orders')
-        .select('id, vendor_earning')
+        .select('id, vendor_earning, delivered_at, created_at')
         .eq('vendor_id', currentVendorId)
         .eq('order_status', 'delivered')
-        .eq('settled_vendor', false);
+        .eq('settled_vendor', false)
+        .lte('delivered_at', cutoff.toISOString());
 
       if (ordersError) throw ordersError;
 
-      const finalEligibleOrders = (eligibleOrders || []).filter(
-        (order) => !restrictedOrderIds.includes(order.id)
-      );
+      const finalEligibleOrders = (eligibleOrders || []).filter((order) => {
+        const deliveredAt = order.delivered_at || order.created_at;
+        return !!deliveredAt && new Date(deliveredAt).getTime() <= cutoff.getTime()
+          && !restrictedOrderIds.has(order.id);
+      });
 
-      // 3. VALIDATION: Check if eligible orders exist
       if (finalEligibleOrders.length === 0) {
-        showToast('No withdrawable balance available.', 'error');
+        showToast('No unpaid delivered orders are eligible for this daily settlement yet.', 'error');
         return;
       }
 
-      // 2. CALCULATE
       const totalAmount = finalEligibleOrders.reduce(
-        (sum, order) => sum + (order.vendor_earning || 0),
+        (sum, order) => sum + (Number(order.vendor_earning) || 0),
         0
       );
       const orderIds = finalEligibleOrders.map((order) => order.id);
       const orderCount = finalEligibleOrders.length;
 
-      // 3. VALIDATION: Check minimum settlement amount
-      if (totalAmount < 500) {
-        showToast('Minimum settlement amount is ₹500', 'error');
-        return;
-      }
-
-      // 4. CREATE SETTLEMENT
+      // Daily settlement has no ₹500 minimum or monthly manual-request cap.
       const { error: insertError } = await supabase
         .from('vendor_settlements')
-        .insert([
-          {
-            vendor_id: currentVendorId,
-            amount: totalAmount,
-            status: 'REQUESTED',
-            order_count: orderCount,
-            order_ids: orderIds,
-            created_at: new Date().toISOString(),
-          },
-        ]);
+        .insert([{
+          vendor_id: currentVendorId,
+          amount: totalAmount,
+          status: 'REQUESTED',
+          order_count: orderCount,
+          order_ids: orderIds,
+          created_at: now.toISOString(),
+          remarks: `Daily settlement batch through 9:00 PM IST cutoff ${cutoff.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
+        }]);
 
       if (insertError) throw insertError;
 
-      // 6. SUCCESS
-      showToast('Settlement request submitted successfully.', 'success');
+      showToast('Daily settlement batch submitted for payout processing.', 'success');
       await fetchData();
     } catch (err) {
-      console.error('Request pipeline error context:', err);
-      showToast(err instanceof Error ? err.message : 'Dispatch pipeline crash.', 'error');
+      console.error('Daily settlement request failed:', err);
+      showToast(err instanceof Error ? err.message : 'Could not submit daily settlement.', 'error');
     } finally {
       setActionLoading(false);
     }
@@ -457,11 +441,11 @@ export function Settlements() {
         
         <button
           onClick={handleRequestSettlement}
-          disabled={actionLoading || hasPendingRequest || metrics.pendingSettlement < 500}
+          disabled={actionLoading || !isAfterDailyCutoff}
           className="bg-[#10B981] hover:bg-[#059669] text-white disabled:bg-muted disabled:text-muted-foreground/60 px-5 py-2.5 rounded-xl font-bold text-sm shadow-sm transition flex items-center gap-2 justify-center disabled:cursor-not-allowed"
         >
           {actionLoading && <Loader2 size={16} className="animate-spin" />}
-          {hasPendingRequest ? 'Awaiting Approval' : 'Request Settlement'}
+          Prepare Daily Settlement
         </button>
       </div>
 
@@ -586,19 +570,23 @@ export function Settlements() {
             <ul className="text-xs text-muted-foreground space-y-2.5 list-none font-medium">
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Vendor payments will be processed **weekly every Monday** only.</span>
+                <span><strong className="text-foreground">Daily cutoff: 9:00 PM IST.</strong> Orders delivered at or before the cutoff are eligible for that day's batch.</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Dispatches operate exclusively within the standard working hours of banks.</span>
+                <span>Orders delivered after 9:00 PM IST roll into the next day's settlement batch.</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span className="text-amber-600 dark:text-amber-400 font-semibold">Minimum settlement request threshold is ₹500.00. Always check and double-verify your bank details when submitting.</span>
+                <span>Unpaid orders from earlier days carry forward so missed batches are not lost.</span>
               </li>
               <li className="flex items-start gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
-                <span>Balances computed completely from final metric workspace configurations. Thank you.</span>
+                <span>Submitting a daily batch sends it to Rivo for payout processing; this screen does not itself transfer money.</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] mt-1.5 shrink-0"></span>
+                <span>Keep bank/UPI details accurate to avoid payout delays.</span>
               </li>
             </ul>
           </div>
