@@ -22,7 +22,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
-import { getLaneWorkers, getLanePickingTasks, assignLanePickingTask, LaneWorker, LanePickingTask } from "../../../services/laneWorkerService";
+import { getLaneWorkers, getLanePickingTasks, LaneWorker, LanePickingTask } from "../../../services/laneWorkerService";
 
 const statusColors: Record<
   string,
