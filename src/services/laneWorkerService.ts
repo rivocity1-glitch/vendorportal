@@ -61,7 +61,7 @@ export async function getLanePickingTasks(vendorId:string,orderItemIds:string[])
 function distanceKm(aLat:number,aLng:number,bLat:number,bLng:number){const r=6371;const dLat=(bLat-aLat)*Math.PI/180;const dLng=(bLng-aLng)*Math.PI/180;const x=Math.sin(dLat/2)**2+Math.cos(aLat*Math.PI/180)*Math.cos(bLat*Math.PI/180)*Math.sin(dLng/2)**2;return r*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));}
 export async function getPickerCandidates(vendorId:string):Promise<PickerCandidate[]>{
  const{data:vendor,error:ve}=await supabase.from("vendor_profiles").select("latitude,longitude").eq("vendor_id",vendorId).maybeSingle();if(ve)throw ve;
- const{data,error}=await supabase.from("picker_profiles").select("id,full_name,city,locality,latitude,longitude,availability_status,application_status").eq("application_status","approved").eq("availability_status","available").order("full_name");if(error)throw error;
+ const{data,error}=await supabase.from("picker_profiles").select("id,full_name,city,locality,latitude,longitude,availability_status,application_status").eq("application_status","approved").eq("availability_status","available").is("created_by_vendor_id",null).order("full_name");if(error)throw error;
  const lat=vendor?.latitude??null,lng=vendor?.longitude??null;
  return(data||[]).map((p:any)=>({...p,distanceKm:lat!==null&&lng!==null&&p.latitude!==null&&p.longitude!==null?distanceKm(lat,lng,p.latitude,p.longitude):null})).sort((a:any,b:any)=>(a.distanceKm??999999)-(b.distanceKm??999999)) as PickerCandidate[];
 }
