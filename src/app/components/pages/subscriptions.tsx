@@ -408,24 +408,9 @@ export default function Subscriptions() {
 
       if (reqError) throw reqError;
 
-      if (subscription.subscription_type === 'trial') {
-        await supabase
-          .from('subscriptions')
-          .update({ trial_decision: payModal.planName as 'free' | 'basic', updated_at: new Date().toISOString() })
-          .eq('id', subscription.id);
-      } else {
-        // Cascade changes safely parsing structural properties definitions directly from subscription_plans row metadata mappings
-        await supabase
-          .from('subscriptions')
-          .update({
-            plan_name: targetPlanLower,
-            commission_percent: planMasterSpec.commission_percent ?? 0,
-            monthly_settlement_request_limit: planMasterSpec.monthly_settlement_request_limit,
-            max_profile_banners: planMasterSpec.max_profile_banners,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', subscription.id);
-      }
+      // Keep the current plan unchanged until an admin verifies the payment request.
+      // The admin approval workflow is responsible for applying the requested plan.
+
 
       setPayModal({ open: false, planName: '', price: 0 });
       triggerToast('Request submitted successfully. Waiting for admin verification.');
