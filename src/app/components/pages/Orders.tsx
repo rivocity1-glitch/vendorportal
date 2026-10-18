@@ -2263,7 +2263,7 @@ export function Orders() {
         }
 
         // Repair legacy orders that are missing picking-task rows before checking completion.
-        const { error: repairTasksError } = await supabase.rpc("auto_assign_picker_tasks_for_order", { p_order_id: orderId });
+        const { error: repairTasksError } = await supabase.rpc("repair_vendor_order_picking_tasks", { p_order_id: orderId });
         if (repairTasksError) throw repairTasksError;
 
         const { data: pickingTasks, error: pickingTasksError } =
