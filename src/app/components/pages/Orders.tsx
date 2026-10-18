@@ -146,6 +146,7 @@ type OrderRow = {
   rider_id: string | null;
   subtotal: number;
   delivery_fee: number;
+  handling_fee: number;
   platform_fee: number;
   total_amount: number;
   payment_status: string;
@@ -245,6 +246,7 @@ type DisplayOrder = {
   email: string;
   subtotal: number;
   deliveryFee: number;
+  handlingFee: number;
   totalAmount: number;
   platformFee: number;
   vendorEarning: number;
@@ -516,6 +518,7 @@ export function Orders() {
             rider_id,
             subtotal,
             delivery_fee,
+            handling_fee,
             platform_fee,
             total_amount,
             payment_status,
@@ -933,6 +936,9 @@ export function Orders() {
 
             deliveryFee:
               Number(parentOrder.delivery_fee || 0),
+
+            handlingFee:
+              Number(parentOrder.handling_fee || 0),
 
             totalAmount:
               Number(parentOrder.total_amount || 0),
@@ -3963,6 +3969,11 @@ export function Orders() {
                   })}
 
                   <div className="border-t border-border/60 mt-3 pt-2 space-y-1 text-xs">
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Handling Fee</span>
+                      <span>{money(selectedOrder.handlingFee)}</span>
+                    </div>
+
                     <div className="flex justify-between text-muted-foreground">
                       <span>
                         Products Total
