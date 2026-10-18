@@ -2262,6 +2262,10 @@ export function Orders() {
           throw new Error("Order vendor context unavailable.");
         }
 
+        // Repair legacy orders that are missing picking-task rows before checking completion.
+        const { error: repairTasksError } = await supabase.rpc("auto_assign_picker_tasks_for_order", { p_order_id: orderId });
+        if (repairTasksError) throw repairTasksError;
+
         const { data: pickingTasks, error: pickingTasksError } =
           await supabase
             .from("order_item_picking_tasks")
