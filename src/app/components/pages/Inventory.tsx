@@ -923,6 +923,7 @@ export function Inventory() {
         </>
       )}
 
+
       {activeTab === "batches" && (
         <div className="rounded-xl border bg-card overflow-hidden">
           <div className="p-4 border-b">
