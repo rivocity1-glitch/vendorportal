@@ -533,6 +533,8 @@ export function Orders() {
             collected_by_rider,
             created_at,
             updated_at,
+            picker_worker_id,
+            picker_claimed_at,
             cancelled_by,
             cancel_reason,
             cancelled_at
@@ -1610,20 +1612,9 @@ export function Orders() {
         throw new Error("This order is already claimed by another Picker.");
       }
 
-      const { error: taskError } = await supabase
-        .from("order_item_picking_tasks")
-        .update({
-          worker_id: ownerWorker.id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("vendor_id", order.vendorId)
-        .in(
-          "order_item_id",
-          (typedItemsCache.get(orderId) || []).map((item) => item.id)
-        )
-        .eq("status", "assigned");
-
-      if (taskError) throw taskError;
+      // claim_picker_order atomically claims the order and assigns all
+      // unfinished picking tasks to the same worker. Do not perform a second
+      // client-side task update that can fail after the claim has succeeded.
       await fetchLiveOrders(false);
     } catch (error: any) {
       console.error("Owner self-pick error:", error);
@@ -1639,20 +1630,14 @@ export function Orders() {
       const vendorId = ordersList.find((order) => order.id === orderId)?.vendorId;
       if (!vendorId) throw new Error("Order vendor context unavailable.");
 
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from("order_item_picking_tasks")
-        .update({
-          status: "picked",
-          worker_id: laneWorkers.find((worker) => worker.is_owner)?.id || null,
-          picked_at: now,
-          updated_at: now,
-        })
-        .eq("id", taskId)
-        .eq("vendor_id", vendorId)
-        .eq("status", "assigned");
-
+      const { data: picked, error } = await supabase.rpc(
+        "mark_picker_task_picked",
+        { p_task_id: taskId }
+      );
       if (error) throw error;
+      if (picked !== true) {
+        throw new Error("This item is already picked or this order is assigned to another Picker.");
+      }
       await fetchLiveOrders(false);
     } catch (error: any) {
       console.error("Owner pick completion error:", error);
