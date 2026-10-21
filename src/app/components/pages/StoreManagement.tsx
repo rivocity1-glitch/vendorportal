@@ -2464,27 +2464,13 @@ export default function StoreManagement() {
       </section>
 
       {/* LOCATION PICKER */}
-
       <StoreLocationPicker
         open={locationPickerOpen}
-        initialLatitude={
-          latitude
-            ? Number(latitude)
-            : null
-        }
-        initialLongitude={
-          longitude
-            ? Number(longitude)
-            : null
-        }
-        onClose={() =>
-          setLocationPickerOpen(false)
-        }
-        onConfirm={
-          handleLocationConfirm
-        }
+        initialLatitude={latitude ? Number(latitude) : null}
+        initialLongitude={longitude ? Number(longitude) : null}
+        onClose={() => setLocationPickerOpen(false)}
+        onConfirm={handleLocationConfirm}
       />
-      </div>
     </div>
   );
 }
