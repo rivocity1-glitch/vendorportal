@@ -233,7 +233,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                 catalog: catalog.name
               }))
               .filter((item: { name: string; brand: string; image: string; barcode: string }) =>
-                item.name && /^https?:\\/\\//i.test(item.image)
+                item.name && (item.image.startsWith("https://") || item.image.startsWith("http://"))
               );
 
             catalogWorked = true;
