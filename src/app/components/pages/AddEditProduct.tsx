@@ -6,7 +6,9 @@ import {
   Loader2,
   Sparkles,
   Percent,
-  Save
+  Save,
+  Search,
+  ExternalLink
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
@@ -36,6 +38,10 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [isImageError, setIsImageError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [imageSearchQuery, setImageSearchQuery] = useState("");
+  const [imageSearchResults, setImageSearchResults] = useState<Array<{ name: string; brand: string; image: string; barcode: string }>>([]);
+  const [isSearchingImages, setIsSearchingImages] = useState(false);
+  const [imageSearchMessage, setImageSearchMessage] = useState("");
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
@@ -153,6 +159,58 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       setIsImageError(false);
     }
   }, [product]);
+
+  const searchProductImages = async () => {
+    const query = (imageSearchQuery || form.name).trim();
+    if (!query) {
+      setImageSearchMessage("Enter a product name first.");
+      return;
+    }
+    setIsSearchingImages(true);
+    setImageSearchMessage("");
+    setImageSearchResults([]);
+    try {
+      const params = new URLSearchParams({
+        search_terms: query,
+        search_simple: "1",
+        action: "process",
+        json: "1",
+        page_size: "8",
+        fields: "product_name,brands,code,image_front_url,image_url"
+      });
+      const response = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?${params.toString()}`, {
+        headers: { Accept: "application/json" }
+      });
+      if (!response.ok) throw new Error("Image catalog is temporarily unavailable.");
+      const data = await response.json();
+      const results = (data.products || [])
+        .map((item: any) => ({
+          name: String(item.product_name || "").trim(),
+          brand: String(item.brands || "").trim(),
+          image: String(item.image_front_url || item.image_url || "").trim(),
+          barcode: String(item.code || "").trim()
+        }))
+        .filter((item: { name: string; brand: string; image: string; barcode: string }) => item.name && item.image)
+        .slice(0, 8);
+      setImageSearchResults(results);
+      setImageSearchMessage(results.length ? "Choose the closest matching product. Check the size and variant before selecting." : "No matching images found. Try a shorter name or upload your own photo.");
+    } catch (error) {
+      console.error("Product image search failed:", error);
+      setImageSearchMessage("Could not search the catalog right now. You can still upload a product photo.");
+    } finally {
+      setIsSearchingImages(false);
+    }
+  };
+
+  const selectCatalogImage = (result: { name: string; brand: string; image: string; barcode: string }) => {
+    setImageFiles([]);
+    setImageFile(null);
+    setExistingImageUrls([]);
+    setImageUrl(result.image);
+    setIsImageError(false);
+    if (result.barcode && !form.barcode.trim()) handleField("barcode", result.barcode);
+    setImageSearchMessage(`Selected image for ${result.name}. Save the product to keep it.`);
+  };
 
   const handleField = (key: string, value: string) => {
     setForm(current => ({ ...current, [key]: value }));
@@ -464,6 +522,39 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                 {isUploading ? <Loader2 className="w-6 h-6 animate-spin text-[#10B981]" /> : <><Upload className="w-6 h-6 text-muted-foreground" /><div><p className="text-xs font-medium text-foreground">Click to upload up to 5 images</p><p className="text-[10px] text-muted-foreground mt-0.5">JPG, JPEG, PNG, WEBP • Max 5MB each</p></div></>}
               </div>
             )}
+
+            <div className="border-t border-border pt-3 space-y-2">
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Find a packaged product image</label>
+              <div className="flex gap-2">
+                <input
+                  type="search"
+                  value={imageSearchQuery}
+                  onChange={(e) => setImageSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void searchProductImages(); } }}
+                  placeholder={form.name || "Search product name or brand"}
+                  className="min-w-0 flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
+                  aria-label="Search product image catalog"
+                />
+                <button type="button" onClick={() => void searchProductImages()} disabled={isSearchingImages} className="h-9 px-3 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50">
+                  {isSearchingImages ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                  Search
+                </button>
+              </div>
+              <p className="text-[10px] leading-relaxed text-muted-foreground">Searches Open Food Facts for packaged food products. Images may be community-submitted; verify the brand, size and variant before using.</p>
+              {imageSearchMessage && <p role="status" className="text-[10px] leading-relaxed text-muted-foreground">{imageSearchMessage}</p>}
+              {imageSearchResults.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  {imageSearchResults.map((result, index) => (
+                    <button type="button" key={`${result.barcode}-${result.image}-${index}`} onClick={() => selectCatalogImage(result)} className={`rounded-lg border p-2 text-left transition-colors hover:border-[#10B981] hover:bg-[#10B981]/5 ${imageUrl === result.image ? "border-[#10B981] bg-[#10B981]/5" : "border-border"}`}>
+                      <img src={result.image} alt={result.name} loading="lazy" className="w-full h-24 rounded-md object-contain bg-white" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                      <span className="mt-1 block text-[10px] font-semibold leading-snug text-foreground line-clamp-2">{result.name}</span>
+                      {result.brand && <span className="mt-0.5 block text-[9px] text-muted-foreground line-clamp-1">{result.brand}</span>}
+                      <span className="mt-2 flex items-center gap-1 text-[9px] font-semibold text-[#059669]">Use image <ExternalLink className="w-2.5 h-2.5" /></span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-4">
