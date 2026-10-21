@@ -2486,7 +2486,7 @@ export default function StoreManagement() {
           handleLocationConfirm
         }
       />
-
+      </div>
     </div>
   );
 }
