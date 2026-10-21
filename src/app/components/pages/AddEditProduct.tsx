@@ -39,9 +39,10 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const [isImageError, setIsImageError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [imageSearchQuery, setImageSearchQuery] = useState("");
-  const [imageSearchResults, setImageSearchResults] = useState<Array<{ name: string; brand: string; image: string; barcode: string }>>([]);
+  const [imageSearchResults, setImageSearchResults] = useState<Array<{ name: string; brand: string; image: string; barcode: string; source?: string; sourceUrl?: string; license?: string }>>([]);
   const [isSearchingImages, setIsSearchingImages] = useState(false);
   const [imageSearchMessage, setImageSearchMessage] = useState("");
+  const [manualImageUrl, setManualImageUrl] = useState("");
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
@@ -168,7 +169,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     }
 
     setIsSearchingImages(true);
-    setImageSearchMessage("");
+    setImageSearchMessage("Searching product catalogs and open image collections…");
     setImageSearchResults([]);
 
     const catalogs = [
@@ -179,101 +180,117 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     ];
     const fields = "product_name,product_name_en,brands,code,image_front_url,image_url";
 
-    try {
-      let results: Array<{ name: string; brand: string; image: string; barcode: string }> = [];
-      const errors: string[] = [];
-
-      // Try the current API first, then the legacy endpoint. Some catalogs or
-      // networks may temporarily block one endpoint, so a single failure must
-      // not prevent trying the others.
-      for (const catalog of catalogs) {
-        const endpoints = [
-          `${catalog.base}/api/v2/search?${new URLSearchParams({
-            search_terms: query,
-            page_size: "12",
-            fields
-          }).toString()}`,
-          `${catalog.base}/cgi/search.pl?${new URLSearchParams({
-            search_terms: query,
-            search_simple: "1",
-            action: "process",
-            json: "1",
-            page_size: "12",
-            fields
-          }).toString()}`
-        ];
-
-        let catalogWorked = false;
-        for (const endpoint of endpoints) {
+    const searchCatalog = async (catalog: { name: string; base: string }) => {
+      const endpoints = [
+        `${catalog.base}/api/v2/search?${new URLSearchParams({ search_terms: query, page_size: "12", fields }).toString()}`,
+        `${catalog.base}/cgi/search.pl?${new URLSearchParams({ search_terms: query, search_simple: "1", action: "process", json: "1", page_size: "12", fields }).toString()}`
+      ];
+      for (const endpoint of endpoints) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), 6000);
+          let response: Response;
           try {
-            const controller = new AbortController();
-            const timeoutId = window.setTimeout(() => controller.abort(), 7000);
-            let response: Response;
-            try {
-              response = await fetch(endpoint, {
-                headers: { Accept: "application/json" },
-                signal: controller.signal
-              });
-            } finally {
-              window.clearTimeout(timeoutId);
-            }
-            if (!response.ok) {
-              errors.push(`${catalog.name}: HTTP ${response.status}`);
-              continue;
-            }
-
-            const data = await response.json();
-            const products = Array.isArray(data.products) ? data.products : [];
-            const catalogResults = products
-              .map((item: any) => ({
-                name: String(item.product_name || item.product_name_en || "").trim(),
-                brand: String(item.brands || "").trim(),
-                image: String(item.image_front_url || item.image_url || "").trim(),
-                barcode: String(item.code || "").trim(),
-                catalog: catalog.name
-              }))
-              .filter((item: { name: string; brand: string; image: string; barcode: string }) =>
-                item.name && (item.image.startsWith("https://") || item.image.startsWith("http://"))
-              );
-
-            catalogWorked = true;
-            results = catalogResults;
-            break;
-          } catch (endpointError) {
-            errors.push(`${catalog.name}: ${endpointError instanceof Error ? endpointError.message : "request failed"}`);
+            response = await fetch(endpoint, { headers: { Accept: "application/json" }, signal: controller.signal });
+          } finally {
+            window.clearTimeout(timeoutId);
           }
+          if (!response.ok) continue;
+          const data = await response.json();
+          const products = Array.isArray(data.products) ? data.products : [];
+          const results = products.map((item: any) => ({
+            name: String(item.product_name || item.product_name_en || "").trim(),
+            brand: String(item.brands || "").trim(),
+            image: String(item.image_front_url || item.image_url || "").trim(),
+            barcode: String(item.code || "").trim(),
+            source: catalog.name,
+            sourceUrl: item.code ? `https://world.openfoodfacts.org/product/${encodeURIComponent(String(item.code))}` : catalog.base
+          })).filter((item: any) => item.name && (item.image.startsWith("https://") || item.image.startsWith("http://")));
+          if (results.length) return results;
+        } catch {
+          // Try the next endpoint/catalog rather than failing the entire search.
         }
-
-        if (results.length > 0) break;
-        // Continue to other catalogs if this one is reachable but has no matches.
-        if (!catalogWorked) continue;
       }
+      return [];
+    };
 
-      setImageSearchResults(results.slice(0, 8));
+    const searchCommons = async () => {
+      const params = new URLSearchParams({
+        action: "query",
+        generator: "search",
+        gsrsearch: `${query} product packaging`,
+        gsrnamespace: "6",
+        gsrlimit: "20",
+        prop: "imageinfo",
+        iiprop: "url|extmetadata",
+        iiurlwidth: "500",
+        format: "json",
+        origin: "*"
+      });
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`https://commons.wikimedia.org/w/api.php?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal
+        });
+        if (!response.ok) return [];
+        const data = await response.json();
+        return Object.values(data.query?.pages || {}).map((page: any) => {
+          const info = page.imageinfo?.[0];
+          const meta = info?.extmetadata || {};
+          const plain = (value: any) => String(value?.value || "").replace(/<[^>]*>/g, "").trim();
+          return {
+            name: String(page.title || "").replace(/^File:/, "").replace(/_/g, " "),
+            brand: "",
+            image: String(info?.thumburl || info?.url || ""),
+            barcode: "",
+            source: "Wikimedia Commons",
+            sourceUrl: String(info?.descriptionurl || `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title || "")}`),
+            license: [plain(meta.LicenseShortName), plain(meta.Artist)].filter(Boolean).join(" · ")
+          };
+        }).filter((item: any) => item.name && (item.image.startsWith("https://") || item.image.startsWith("http://")));
+      } catch {
+        return [];
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    };
+
+    try {
+      // Run all product catalogs together so one slow catalog doesn't block the others.
+      const catalogPromise = Promise.all(catalogs.map(searchCatalog)).then(groups => groups.flat());
+      const [catalogResults, commonsResults] = await Promise.all([catalogPromise, searchCommons()]);
+      const seen = new Set<string>();
+      const combined = [...catalogResults, ...commonsResults].filter((item: any) => {
+        const key = item.image.split("?")[0];
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 16);
+
+      setImageSearchResults(combined);
       setImageSearchMessage(
-        results.length
-          ? "Choose the closest matching product. Check the brand, size and variant before selecting."
-          : errors.length === catalogs.length * 2
-            ? "The image catalogs could not be reached from this browser/network. Check your connection or try again; manual upload is still available."
-            : "No matching images found across the available catalogs. Try a shorter product name or upload your own photo."
+        combined.length
+          ? `Found ${combined.length} image options. Product catalog results appear first; open-image results may be generic, so verify the exact product before using.`
+          : "No images were returned by the available sources. Try a shorter query, search the web, paste a direct image URL, or upload a photo."
       );
-      if (errors.length) console.warn("Some product image catalogs failed:", errors);
     } catch (error) {
       console.error("Product image search failed:", error);
-      setImageSearchMessage("Product image search failed. Check your internet connection and try again, or upload a product photo.");
+      setImageSearchMessage("Image search could not finish. Try again, search the web, paste a direct image URL, or upload a photo.");
     } finally {
       setIsSearchingImages(false);
     }
   };
 
-  const selectCatalogImage = (result: { name: string; brand: string; image: string; barcode: string }) => {
+  const selectCatalogImage = (result: { name: string; brand: string; image: string; barcode: string; source?: string }) => {
     setImageFiles([]);
     setImageFile(null);
     setExistingImageUrls([]);
     setImageUrl(result.image);
     setIsImageError(false);
     if (result.barcode && !form.barcode.trim()) handleField("barcode", result.barcode);
-    setImageSearchMessage(`Selected image for ${result.name}. Save the product to keep it.`);
+    setImageSearchMessage(`Selected image for ${result.name}${result.source ? ` · ${result.source}` : ""}. Save the product to keep it.`);
   };
 
   const handleField = (key: string, value: string) => {
@@ -604,17 +621,43 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                   Search
                 </button>
               </div>
-              <p className="text-[10px] leading-relaxed text-muted-foreground">Searches Open Food Facts for packaged food products. Images may be community-submitted; verify the brand, size and variant before using.</p>
+              <p className="text-[10px] leading-relaxed text-muted-foreground">Searches product catalogs plus Wikimedia Commons for broader categories. Catalog coverage varies; check the exact product and usage rights before saving an image.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageSearchQuery || form.name)}`, "_blank", "noopener,noreferrer")} className="h-8 px-3 rounded-lg border border-border text-[10px] font-semibold flex items-center gap-1.5 hover:bg-muted">
+                  Search the web <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <input type="url" value={manualImageUrl} onChange={(e) => setManualImageUrl(e.target.value)} placeholder="Paste direct image URL (https://…)" className="min-w-0 flex-1 h-8 px-2 text-[10px] border border-border rounded-lg bg-background" aria-label="Direct product image URL" />
+                <button type="button" onClick={() => {
+                  const url = manualImageUrl.trim();
+                  if (!/^https?:\/\//i.test(url)) {
+                    setImageSearchMessage("Paste a valid direct image URL beginning with https:// or http://.");
+                    return;
+                  }
+                  setImageFiles([]);
+                  setImageFile(null);
+                  setExistingImageUrls([]);
+                  setImageUrl(url);
+                  setIsImageError(false);
+                  setImageSearchMessage("Image URL selected. Check the preview, then save the product.");
+                }} className="h-8 px-3 rounded-lg bg-slate-800 text-white text-[10px] font-semibold">Use URL</button>
+              </div>
               {imageSearchMessage && <p role="status" className="text-[10px] leading-relaxed text-muted-foreground">{imageSearchMessage}</p>}
               {imageSearchResults.length > 0 && (
-                <div className="grid grid-cols-2 gap-2 pt-1">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
                   {imageSearchResults.map((result, index) => (
-                    <button type="button" key={`${result.barcode}-${result.image}-${index}`} onClick={() => selectCatalogImage(result)} className={`rounded-lg border p-2 text-left transition-colors hover:border-[#10B981] hover:bg-[#10B981]/5 ${imageUrl === result.image ? "border-[#10B981] bg-[#10B981]/5" : "border-border"}`}>
-                      <img src={result.image} alt={result.name} loading="lazy" className="w-full h-24 rounded-md object-contain bg-white" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
-                      <span className="mt-1 block text-[10px] font-semibold leading-snug text-foreground line-clamp-2">{result.name}</span>
-                      {result.brand && <span className="mt-0.5 block text-[9px] text-muted-foreground line-clamp-1">{result.brand}</span>}
-                      <span className="mt-2 flex items-center gap-1 text-[9px] font-semibold text-[#059669]">Use image <ExternalLink className="w-2.5 h-2.5" /></span>
-                    </button>
+                    <div key={`${result.source || "catalog"}-${result.barcode}-${result.image}-${index}`} className={`rounded-lg border p-2 transition-colors ${imageUrl === result.image ? "border-[#10B981] bg-[#10B981]/5" : "border-border"}`}>
+                      <button type="button" onClick={() => selectCatalogImage(result)} className="w-full text-left">
+                        <img src={result.image} alt={result.name} loading="lazy" className="w-full h-24 rounded-md object-contain bg-white" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                        <span className="mt-1 block text-[10px] font-semibold leading-snug text-foreground line-clamp-2">{result.name}</span>
+                        {result.brand && <span className="mt-0.5 block text-[9px] text-muted-foreground line-clamp-1">{result.brand}</span>}
+                        {result.source && <span className="mt-1 block text-[9px] text-muted-foreground line-clamp-1">{result.source}</span>}
+                        {result.license && <span className="mt-0.5 block text-[8px] text-muted-foreground line-clamp-2">{result.license}</span>}
+                        <span className="mt-2 flex items-center gap-1 text-[9px] font-semibold text-[#059669]">Use image</span>
+                      </button>
+                      {result.sourceUrl && <a href={result.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[9px] text-muted-foreground underline">Source <ExternalLink className="w-2.5 h-2.5" /></a>}
+                    </div>
                   ))}
                 </div>
               )}
