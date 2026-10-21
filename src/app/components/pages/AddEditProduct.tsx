@@ -257,23 +257,59 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       }
     };
 
+    const searchOpenverse = async () => {
+      const params = new URLSearchParams({
+        q: query,
+        page_size: "20",
+        mature: "false",
+        fields: "title,creator,creator_url,license,license_version,foreign_landing_url,thumbnail, url"
+      });
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`https://api.openverse.org/v1/images/?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal
+        });
+        if (!response.ok) return [];
+        const data = await response.json();
+        return (Array.isArray(data.results) ? data.results : []).map((item: any) => ({
+          name: String(item.title || query).trim(),
+          brand: String(item.creator || "").trim(),
+          image: String(item.thumbnail || item.url || "").trim(),
+          barcode: "",
+          source: "Openverse",
+          sourceUrl: String(item.foreign_landing_url || item.url || ""),
+          license: [String(item.license || "").toUpperCase(), String(item.license_version || ""), item.creator ? `by ${item.creator}` : ""].filter(Boolean).join(" · ")
+        })).filter((item: any) => item.name && (item.image.startsWith("https://") || item.image.startsWith("http://")));
+      } catch {
+        return [];
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    };
+
     try {
-      // Run all product catalogs together so one slow catalog doesn't block the others.
+      // Search catalogs and open-licensed image sources together; users can select an image in this form.
       const catalogPromise = Promise.all(catalogs.map(searchCatalog)).then(groups => groups.flat());
-      const [catalogResults, commonsResults] = await Promise.all([catalogPromise, searchCommons()]);
+      const [catalogResults, commonsResults, openverseResults] = await Promise.all([
+        catalogPromise,
+        searchCommons(),
+        searchOpenverse()
+      ]);
       const seen = new Set<string>();
-      const combined = [...catalogResults, ...commonsResults].filter((item: any) => {
+      const combined = [...catalogResults, ...commonsResults, ...openverseResults].filter((item: any) => {
         const key = item.image.split("?")[0];
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
-      }).slice(0, 16);
+      }).slice(0, 24);
 
       setImageSearchResults(combined);
       setImageSearchMessage(
         combined.length
-          ? `Found ${combined.length} image options. Product catalog results appear first; open-image results may be generic, so verify the exact product before using.`
-          : "No images were returned by the available sources. Try a shorter query, search the web, paste a direct image URL, or upload a photo."
+          ? `Found ${combined.length} image options. Select an image here to preview it, then save the product; check the source and license before use.`
+          : "No images were returned by the available sources. Try a shorter query, paste a direct image URL, or upload a photo."
       );
     } catch (error) {
       console.error("Product image search failed:", error);
@@ -621,10 +657,10 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                   Search
                 </button>
               </div>
-              <p className="text-[10px] leading-relaxed text-muted-foreground">Searches product catalogs plus Wikimedia Commons for broader categories. Catalog coverage varies; check the exact product and usage rights before saving an image.</p>
+              <p className="text-[10px] leading-relaxed text-muted-foreground">Searches product catalogs, Wikimedia Commons, and Openverse for broader categories. Catalog coverage varies; check the exact product and usage rights before saving an image.</p>
               <div className="flex gap-2">
                 <button type="button" onClick={() => window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageSearchQuery || form.name)}`, "_blank", "noopener,noreferrer")} className="h-8 px-3 rounded-lg border border-border text-[10px] font-semibold flex items-center gap-1.5 hover:bg-muted">
-                  Search the web <ExternalLink className="w-3 h-3" />
+                  Google Images <ExternalLink className="w-3 h-3" />
                 </button>
               </div>
               <div className="flex gap-2">
