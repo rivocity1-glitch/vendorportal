@@ -166,37 +166,101 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       setImageSearchMessage("Enter a product name first.");
       return;
     }
+
     setIsSearchingImages(true);
     setImageSearchMessage("");
     setImageSearchResults([]);
+
+    const catalogs = [
+      { name: "Open Food Facts", base: "https://world.openfoodfacts.org" },
+      { name: "Open Products Facts", base: "https://world.openproductsfacts.org" },
+      { name: "Open Beauty Facts", base: "https://world.openbeautyfacts.org" },
+      { name: "Open Pet Food Facts", base: "https://world.openpetfoodfacts.org" }
+    ];
+    const fields = "product_name,product_name_en,brands,code,image_front_url,image_url";
+
     try {
-      const params = new URLSearchParams({
-        search_terms: query,
-        search_simple: "1",
-        action: "process",
-        json: "1",
-        page_size: "8",
-        fields: "product_name,brands,code,image_front_url,image_url"
-      });
-      const response = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?${params.toString()}`, {
-        headers: { Accept: "application/json" }
-      });
-      if (!response.ok) throw new Error("Image catalog is temporarily unavailable.");
-      const data = await response.json();
-      const results = (data.products || [])
-        .map((item: any) => ({
-          name: String(item.product_name || "").trim(),
-          brand: String(item.brands || "").trim(),
-          image: String(item.image_front_url || item.image_url || "").trim(),
-          barcode: String(item.code || "").trim()
-        }))
-        .filter((item: { name: string; brand: string; image: string; barcode: string }) => item.name && item.image)
-        .slice(0, 8);
-      setImageSearchResults(results);
-      setImageSearchMessage(results.length ? "Choose the closest matching product. Check the size and variant before selecting." : "No matching images found. Try a shorter name or upload your own photo.");
+      let results: Array<{ name: string; brand: string; image: string; barcode: string }> = [];
+      const errors: string[] = [];
+
+      // Try the current API first, then the legacy endpoint. Some catalogs or
+      // networks may temporarily block one endpoint, so a single failure must
+      // not prevent trying the others.
+      for (const catalog of catalogs) {
+        const endpoints = [
+          `${catalog.base}/api/v2/search?${new URLSearchParams({
+            search_terms: query,
+            page_size: "12",
+            fields
+          }).toString()}`,
+          `${catalog.base}/cgi/search.pl?${new URLSearchParams({
+            search_terms: query,
+            search_simple: "1",
+            action: "process",
+            json: "1",
+            page_size: "12",
+            fields
+          }).toString()}`
+        ];
+
+        let catalogWorked = false;
+        for (const endpoint of endpoints) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 7000);
+            let response: Response;
+            try {
+              response = await fetch(endpoint, {
+                headers: { Accept: "application/json" },
+                signal: controller.signal
+              });
+            } finally {
+              window.clearTimeout(timeoutId);
+            }
+            if (!response.ok) {
+              errors.push(`${catalog.name}: HTTP ${response.status}`);
+              continue;
+            }
+
+            const data = await response.json();
+            const products = Array.isArray(data.products) ? data.products : [];
+            const catalogResults = products
+              .map((item: any) => ({
+                name: String(item.product_name || item.product_name_en || "").trim(),
+                brand: String(item.brands || "").trim(),
+                image: String(item.image_front_url || item.image_url || "").trim(),
+                barcode: String(item.code || "").trim(),
+                catalog: catalog.name
+              }))
+              .filter((item: { name: string; brand: string; image: string; barcode: string }) =>
+                item.name && /^https?:\\/\\//i.test(item.image)
+              );
+
+            catalogWorked = true;
+            results = catalogResults;
+            break;
+          } catch (endpointError) {
+            errors.push(`${catalog.name}: ${endpointError instanceof Error ? endpointError.message : "request failed"}`);
+          }
+        }
+
+        if (results.length > 0) break;
+        // Continue to other catalogs if this one is reachable but has no matches.
+        if (!catalogWorked) continue;
+      }
+
+      setImageSearchResults(results.slice(0, 8));
+      setImageSearchMessage(
+        results.length
+          ? "Choose the closest matching product. Check the brand, size and variant before selecting."
+          : errors.length === catalogs.length * 2
+            ? "The image catalogs could not be reached from this browser/network. Check your connection or try again; manual upload is still available."
+            : "No matching images found across the available catalogs. Try a shorter product name or upload your own photo."
+      );
+      if (errors.length) console.warn("Some product image catalogs failed:", errors);
     } catch (error) {
       console.error("Product image search failed:", error);
-      setImageSearchMessage("Could not search the catalog right now. You can still upload a product photo.");
+      setImageSearchMessage("Product image search failed. Check your internet connection and try again, or upload a product photo.");
     } finally {
       setIsSearchingImages(false);
     }
