@@ -47,7 +47,7 @@ export const VendorTerms: React.FC<VendorTermsProps> = ({
   const [scrollProgress, setScrollProgress] = useState(0);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const lastUpdated = 'July 22, 2026';
+  const lastUpdated = '30 October 2026';
 
   const handleCloseModal = () => {
     if (onClose) {
@@ -106,7 +106,7 @@ export const VendorTerms: React.FC<VendorTermsProps> = ({
       icon: Sparkles,
       content: (
         <p className="text-neutral-600 leading-relaxed text-sm">
-          Welcome to the Rivo Merchant Portal. By registering your commercial enterprise or listing products and services on Rivo.City, you agree to comply with and be bound by these Vendor Terms & Conditions. These terms establish a legally binding agreement between your store (&quot;Vendor&quot;) and Rivo.City. Please read these provisions carefully before proceeding.
+          Welcome to the RivoCity Vendor Portal. These terms govern your vendor account and participation on the RivoCity platform. RivoCity is currently a platform/brand and is not represented as a separately incorporated company. The platform is currently operating in Baramati, Maharashtra, India. By registering or listing products, you agree to these terms.
         </p>
       ),
     },
@@ -160,9 +160,10 @@ export const VendorTerms: React.FC<VendorTermsProps> = ({
         <div className="space-y-3 text-neutral-600 text-sm leading-relaxed">
           <p>Platform financial settlements and commission fee structures operate under the following parameters:</p>
           <ul className="list-disc pl-5 space-y-2 text-neutral-600">
-            <li>Customer payments are escrowed securely until order delivery confirmation or pickup completion.</li>
-            <li>Platform service fees and applicable transactional deductions are automatically computed prior to settlement disbursement.</li>
-            <li>Disbursements are remitted to registered merchant bank accounts according to standard weekly payout schedules.</li>
+            <li>Eligible completed orders are subject to order completion and reconciliation before settlement.</li>
+            <li>Applicable platform charges and legitimate adjustments, including refunds, cancellations, disputes and COD reconciliation, may be reflected in the settlement amount.</li>
+            <li>RivoCity’s current operational practice is to process vendor settlements daily for eligible, completed and reconciled orders. This is not a guarantee of a fixed payment hour or payment on every calendar day. Bank, payment-provider or verification delays may affect credit timing.</li>
+            <li>The settlement cycle may change in the future based on vendor activity, reconciliation requirements or operational needs. Material changes will be communicated through the Platform or another appropriate channel. Vendors must keep settlement details accurate.</li>
           </ul>
         </div>
       ),
