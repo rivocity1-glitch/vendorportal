@@ -2433,8 +2433,6 @@ export default function StoreManagement() {
           </div>
         </section>
 
-      </div>
-
       {/* RIVOCITY PICKER & OPTIONAL STORE LAYOUT */}
 
       <section id="store-lanes" className="space-y-4 scroll-mt-24">
@@ -2466,27 +2464,13 @@ export default function StoreManagement() {
       </section>
 
       {/* LOCATION PICKER */}
-
       <StoreLocationPicker
         open={locationPickerOpen}
-        initialLatitude={
-          latitude
-            ? Number(latitude)
-            : null
-        }
-        initialLongitude={
-          longitude
-            ? Number(longitude)
-            : null
-        }
-        onClose={() =>
-          setLocationPickerOpen(false)
-        }
-        onConfirm={
-          handleLocationConfirm
-        }
+        initialLatitude={latitude ? Number(latitude) : null}
+        initialLongitude={longitude ? Number(longitude) : null}
+        onClose={() => setLocationPickerOpen(false)}
+        onConfirm={handleLocationConfirm}
       />
-
     </div>
   );
 }

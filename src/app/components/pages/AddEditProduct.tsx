@@ -6,7 +6,9 @@ import {
   Loader2,
   Sparkles,
   Percent,
-  Save
+  Save,
+  Search,
+  ExternalLink
 } from "lucide-react";
 import { supabase } from "../../../lib/supabase";
 
@@ -36,6 +38,11 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const [isDragActive, setIsDragActive] = useState(false);
   const [isImageError, setIsImageError] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [imageSearchQuery, setImageSearchQuery] = useState("");
+  const [imageSearchResults, setImageSearchResults] = useState<Array<{ name: string; brand: string; image: string; barcode: string; source?: string; sourceUrl?: string; license?: string }>>([]);
+  const [isSearchingImages, setIsSearchingImages] = useState(false);
+  const [imageSearchMessage, setImageSearchMessage] = useState("");
+  const [manualImageUrl, setManualImageUrl] = useState("");
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
@@ -153,6 +160,174 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       setIsImageError(false);
     }
   }, [product]);
+
+  const searchProductImages = async () => {
+    const query = (imageSearchQuery || form.name).trim();
+    if (!query) {
+      setImageSearchMessage("Enter a product name first.");
+      return;
+    }
+
+    setIsSearchingImages(true);
+    setImageSearchMessage("Searching product catalogs and open image collections…");
+    setImageSearchResults([]);
+
+    const catalogs = [
+      { name: "Open Food Facts", base: "https://world.openfoodfacts.org" },
+      { name: "Open Products Facts", base: "https://world.openproductsfacts.org" },
+      { name: "Open Beauty Facts", base: "https://world.openbeautyfacts.org" },
+      { name: "Open Pet Food Facts", base: "https://world.openpetfoodfacts.org" }
+    ];
+    const fields = "product_name,product_name_en,brands,code,image_front_url,image_url";
+
+    const searchCatalog = async (catalog: { name: string; base: string }) => {
+      const endpoints = [
+        `${catalog.base}/api/v2/search?${new URLSearchParams({ search_terms: query, page_size: "12", fields }).toString()}`,
+        `${catalog.base}/cgi/search.pl?${new URLSearchParams({ search_terms: query, search_simple: "1", action: "process", json: "1", page_size: "12", fields }).toString()}`
+      ];
+      for (const endpoint of endpoints) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), 6000);
+          let response: Response;
+          try {
+            response = await fetch(endpoint, { headers: { Accept: "application/json" }, signal: controller.signal });
+          } finally {
+            window.clearTimeout(timeoutId);
+          }
+          if (!response.ok) continue;
+          const data = await response.json();
+          const products = Array.isArray(data.products) ? data.products : [];
+          const results = products.map((item: any) => ({
+            name: String(item.product_name || item.product_name_en || "").trim(),
+            brand: String(item.brands || "").trim(),
+            image: String(item.image_front_url || item.image_url || "").trim(),
+            barcode: String(item.code || "").trim(),
+            source: catalog.name,
+            sourceUrl: item.code ? `https://world.openfoodfacts.org/product/${encodeURIComponent(String(item.code))}` : catalog.base
+          })).filter((item: any) => item.name && (item.image.startsWith("https://") || item.image.startsWith("http://")));
+          if (results.length) return results;
+        } catch {
+          // Try the next endpoint/catalog rather than failing the entire search.
+        }
+      }
+      return [];
+    };
+
+    const searchCommons = async () => {
+      const params = new URLSearchParams({
+        action: "query",
+        generator: "search",
+        gsrsearch: `${query} product packaging`,
+        gsrnamespace: "6",
+        gsrlimit: "20",
+        prop: "imageinfo",
+        iiprop: "url|extmetadata",
+        iiurlwidth: "500",
+        format: "json",
+        origin: "*"
+      });
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`https://commons.wikimedia.org/w/api.php?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal
+        });
+        if (!response.ok) return [];
+        const data = await response.json();
+        return Object.values(data.query?.pages || {}).map((page: any) => {
+          const info = page.imageinfo?.[0];
+          const meta = info?.extmetadata || {};
+          const plain = (value: any) => String(value?.value || "").replace(/<[^>]*>/g, "").trim();
+          return {
+            name: String(page.title || "").replace(/^File:/, "").replace(/_/g, " "),
+            brand: "",
+            image: String(info?.thumburl || info?.url || ""),
+            barcode: "",
+            source: "Wikimedia Commons",
+            sourceUrl: String(info?.descriptionurl || `https://commons.wikimedia.org/wiki/${encodeURIComponent(page.title || "")}`),
+            license: [plain(meta.LicenseShortName), plain(meta.Artist)].filter(Boolean).join(" · ")
+          };
+        }).filter((item: any) => item.name && (item.image.startsWith("https://") || item.image.startsWith("http://")));
+      } catch {
+        return [];
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    };
+
+    const searchOpenverse = async () => {
+      const params = new URLSearchParams({
+        q: query,
+        page_size: "20",
+        mature: "false",
+        fields: "title,creator,creator_url,license,license_version,foreign_landing_url,thumbnail, url"
+      });
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(`https://api.openverse.org/v1/images/?${params.toString()}`, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal
+        });
+        if (!response.ok) return [];
+        const data = await response.json();
+        return (Array.isArray(data.results) ? data.results : []).map((item: any) => ({
+          name: String(item.title || query).trim(),
+          brand: String(item.creator || "").trim(),
+          image: String(item.thumbnail || item.url || "").trim(),
+          barcode: "",
+          source: "Openverse",
+          sourceUrl: String(item.foreign_landing_url || item.url || ""),
+          license: [String(item.license || "").toUpperCase(), String(item.license_version || ""), item.creator ? `by ${item.creator}` : ""].filter(Boolean).join(" · ")
+        })).filter((item: any) => item.name && (item.image.startsWith("https://") || item.image.startsWith("http://")));
+      } catch {
+        return [];
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    };
+
+    try {
+      // Search catalogs and open-licensed image sources together; users can select an image in this form.
+      const catalogPromise = Promise.all(catalogs.map(searchCatalog)).then(groups => groups.flat());
+      const [catalogResults, commonsResults, openverseResults] = await Promise.all([
+        catalogPromise,
+        searchCommons(),
+        searchOpenverse()
+      ]);
+      const seen = new Set<string>();
+      const combined = [...catalogResults, ...commonsResults, ...openverseResults].filter((item: any) => {
+        const key = item.image.split("?")[0];
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      }).slice(0, 24);
+
+      setImageSearchResults(combined);
+      setImageSearchMessage(
+        combined.length
+          ? `Found ${combined.length} image options. Select an image here to preview it, then save the product; check the source and license before use.`
+          : "No images were returned by the available sources. Try a shorter query, paste a direct image URL, or upload a photo."
+      );
+    } catch (error) {
+      console.error("Product image search failed:", error);
+      setImageSearchMessage("Image search could not finish. Try again, search the web, paste a direct image URL, or upload a photo.");
+    } finally {
+      setIsSearchingImages(false);
+    }
+  };
+
+  const selectCatalogImage = (result: { name: string; brand: string; image: string; barcode: string; source?: string }) => {
+    setImageFiles([]);
+    setImageFile(null);
+    setExistingImageUrls([]);
+    setImageUrl(result.image);
+    setIsImageError(false);
+    if (result.barcode && !form.barcode.trim()) handleField("barcode", result.barcode);
+    setImageSearchMessage(`Selected image for ${result.name}${result.source ? ` · ${result.source}` : ""}. Save the product to keep it.`);
+  };
 
   const handleField = (key: string, value: string) => {
     setForm(current => ({ ...current, [key]: value }));
@@ -464,6 +639,65 @@ export function AddEditProduct({ onNavigate, product }: Props) {
                 {isUploading ? <Loader2 className="w-6 h-6 animate-spin text-[#10B981]" /> : <><Upload className="w-6 h-6 text-muted-foreground" /><div><p className="text-xs font-medium text-foreground">Click to upload up to 5 images</p><p className="text-[10px] text-muted-foreground mt-0.5">JPG, JPEG, PNG, WEBP • Max 5MB each</p></div></>}
               </div>
             )}
+
+            <div className="border-t border-border pt-3 space-y-2">
+              <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Find a packaged product image</label>
+              <div className="flex gap-2">
+                <input
+                  type="search"
+                  value={imageSearchQuery}
+                  onChange={(e) => setImageSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void searchProductImages(); } }}
+                  placeholder={form.name || "Search product name or brand"}
+                  className="min-w-0 flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]"
+                  aria-label="Search product image catalog"
+                />
+                <button type="button" onClick={() => void searchProductImages()} disabled={isSearchingImages} className="h-9 px-3 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50">
+                  {isSearchingImages ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                  Search
+                </button>
+              </div>
+              <p className="text-[10px] leading-relaxed text-muted-foreground">Searches product catalogs, Wikimedia Commons, and Openverse for broader categories. Catalog coverage varies; check the exact product and usage rights before saving an image.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => window.open(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(imageSearchQuery || form.name)}`, "_blank", "noopener,noreferrer")} className="h-8 px-3 rounded-lg border border-border text-[10px] font-semibold flex items-center gap-1.5 hover:bg-muted">
+                  Google Images <ExternalLink className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <input type="url" value={manualImageUrl} onChange={(e) => setManualImageUrl(e.target.value)} placeholder="Paste direct image URL (https://…)" className="min-w-0 flex-1 h-8 px-2 text-[10px] border border-border rounded-lg bg-background" aria-label="Direct product image URL" />
+                <button type="button" onClick={() => {
+                  const url = manualImageUrl.trim();
+                  if (!/^https?:\/\//i.test(url)) {
+                    setImageSearchMessage("Paste a valid direct image URL beginning with https:// or http://.");
+                    return;
+                  }
+                  setImageFiles([]);
+                  setImageFile(null);
+                  setExistingImageUrls([]);
+                  setImageUrl(url);
+                  setIsImageError(false);
+                  setImageSearchMessage("Image URL selected. Check the preview, then save the product.");
+                }} className="h-8 px-3 rounded-lg bg-slate-800 text-white text-[10px] font-semibold">Use URL</button>
+              </div>
+              {imageSearchMessage && <p role="status" className="text-[10px] leading-relaxed text-muted-foreground">{imageSearchMessage}</p>}
+              {imageSearchResults.length > 0 && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                  {imageSearchResults.map((result, index) => (
+                    <div key={`${result.source || "catalog"}-${result.barcode}-${result.image}-${index}`} className={`rounded-lg border p-2 transition-colors ${imageUrl === result.image ? "border-[#10B981] bg-[#10B981]/5" : "border-border"}`}>
+                      <button type="button" onClick={() => selectCatalogImage(result)} className="w-full text-left">
+                        <img src={result.image} alt={result.name} loading="lazy" className="w-full h-24 rounded-md object-contain bg-white" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                        <span className="mt-1 block text-[10px] font-semibold leading-snug text-foreground line-clamp-2">{result.name}</span>
+                        {result.brand && <span className="mt-0.5 block text-[9px] text-muted-foreground line-clamp-1">{result.brand}</span>}
+                        {result.source && <span className="mt-1 block text-[9px] text-muted-foreground line-clamp-1">{result.source}</span>}
+                        {result.license && <span className="mt-0.5 block text-[8px] text-muted-foreground line-clamp-2">{result.license}</span>}
+                        <span className="mt-2 flex items-center gap-1 text-[9px] font-semibold text-[#059669]">Use image</span>
+                      </button>
+                      {result.sourceUrl && <a href={result.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex items-center gap-1 text-[9px] text-muted-foreground underline">Source <ExternalLink className="w-2.5 h-2.5" /></a>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-4">
