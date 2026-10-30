@@ -76,7 +76,7 @@ export const vendorPrivacyPolicyContent: PrivacySection[] = [
   {
     title: "9. Payment Information",
     content: [
-      "We log total platform handling fees, collected commissions, subscription billing historical logs, settlement batch distributions, adjustments, and reconciliation items."
+      "We log collected commissions, subscription billing historical logs, settlement batch distributions, adjustments, and reconciliation items."
     ]
   },
   {
