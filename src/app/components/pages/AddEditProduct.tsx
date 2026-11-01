@@ -414,20 +414,24 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     // Reuse an existing shared image. A vendor listing must never replace a
     // catalogue image simply because that vendor selected a different picture.
     let canonicalImageUrl = universalProduct?.image_url || "";
+    let sharedImageUrls: string[] = [];
 
     if (!canonicalImageUrl && pendingFiles.length) {
       setIsUploading(true);
-      const file = pendingFiles[0];
-      const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
-      const objectPath = `universal-products/${universalId}/${crypto.randomUUID()}.${extension}`;
-      const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, {
-        upsert: false,
-        contentType: file.type
-      });
-      if (uploadError) throw uploadError;
-      canonicalImageUrl = supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl;
+      for (const [index, file] of pendingFiles.slice(0, 5).entries()) {
+        const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
+        const objectPath = `universal-products/${universalId}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, {
+          upsert: false,
+          contentType: file.type
+        });
+        if (uploadError) throw uploadError;
+        sharedImageUrls.push(supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl);
+      }
+      canonicalImageUrl = sharedImageUrls[0] || "";
     } else if (!canonicalImageUrl && requestedImageUrl && !requestedImageUrl.startsWith("blob:")) {
       canonicalImageUrl = requestedImageUrl;
+      sharedImageUrls = [canonicalImageUrl];
     }
 
     if (canonicalImageUrl && !universalProduct?.image_url) {
@@ -437,21 +441,21 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         .eq("id", universalId);
       if (updateUniversalError) throw updateUniversalError;
 
-      // Keep the existing image catalogue in sync when its RLS policy permits
-      // vendor-originated submissions. The universal_products image remains the
-      // canonical fallback if this optional provenance insert is denied.
+      // Store the canonical image and any additional vendor-uploaded angles once
+      // against the universal product. The primary URL remains universal_products.image_url.
+      const imageRows = (sharedImageUrls.length ? sharedImageUrls : [canonicalImageUrl]).map((url, index) => ({
+        universal_product_id: universalId,
+        image_url: url,
+        is_primary: index === 0,
+        source: imageSource
+          ? [imageSource.source, imageSource.license, imageSource.sourceUrl].filter(Boolean).join(" | ").slice(0, 500)
+          : pendingFiles.length ? "Vendor upload" : "External image",
+        created_by: authUserId
+      }));
       const { error: imageInsertError } = await supabase
         .from("universal_product_images")
-        .insert({
-          universal_product_id: universalId,
-          image_url: canonicalImageUrl,
-          is_primary: true,
-          source: imageSource
-            ? [imageSource.source, imageSource.license, imageSource.sourceUrl].filter(Boolean).join(" | ").slice(0, 500)
-            : pendingFiles.length ? "Vendor upload" : "External image",
-          created_by: authUserId
-        });
-      if (imageInsertError) console.warn("Shared image saved, but image provenance row was not created:", imageInsertError);
+        .insert(imageRows);
+      if (imageInsertError) console.warn("Shared image saved, but image provenance rows were not created:", imageInsertError);
     }
 
     if (canonicalImageUrl) {
