@@ -43,6 +43,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const [isSearchingImages, setIsSearchingImages] = useState(false);
   const [imageSearchMessage, setImageSearchMessage] = useState("");
   const [manualImageUrl, setManualImageUrl] = useState("");
+  const [selectedImageSource, setSelectedImageSource] = useState<{ source: string; sourceUrl: string; license: string } | null>(null);
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
@@ -324,6 +325,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     setImageFile(null);
     setExistingImageUrls([]);
     setImageUrl(result.image);
+    setSelectedImageSource({ source: result.source || "External image", sourceUrl: result.sourceUrl || result.image, license: (result as any).license || "" });
     setIsImageError(false);
     if (result.barcode && !form.barcode.trim()) handleField("barcode", result.barcode);
     setImageSearchMessage(`Selected image for ${result.name}${result.source ? ` · ${result.source}` : ""}. Save the product to keep it.`);
@@ -342,6 +344,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       return;
     }
     setExistingImageUrls([]);
+    setSelectedImageSource(null);
     setImageFiles(selected);
     setImageFile(selected[0]);
     setImageUrl(URL.createObjectURL(selected[0]));
@@ -379,39 +382,86 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     setImageFile(null);
     setImageFiles([]);
     setExistingImageUrls([]);
+    setSelectedImageSource(null);
     setIsImageError(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const resolveUniversalProduct = async (productId: string) => {
+  /**
+   * Resolve the vendor listing to the shared catalogue first. The canonical image
+   * is then attached to universal_products, not uploaded once per vendor listing.
+   */
+  const resolveUniversalProduct = async (
+    productId: string,
+    authUserId: string,
+    pendingFiles: File[],
+    requestedImageUrl: string,
+    imageSource: { source: string; sourceUrl: string; license: string } | null
+  ) => {
     const { data: resolverData, error: resolverError } = await supabase.rpc("resolve_product_master", { p_product_id: productId });
-    if (resolverError) {
-      console.error("Universal product resolver failed:", resolverError);
-      throw new Error(`Product saved, but universal product matching failed: ${resolverError.message || resolverError}`);
-    }
+    if (resolverError) throw new Error(`Product saved, but universal matching failed: ${resolverError.message}`);
     const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
-    if (!resolverResult?.universal_product_id) return;
+    const universalId = resolverResult?.universal_product_id;
+    if (!universalId) return;
 
     const { data: universalProduct, error: universalError } = await supabase
       .from("universal_products")
       .select("id, image_url")
-      .eq("id", resolverResult.universal_product_id)
+      .eq("id", universalId)
       .maybeSingle();
-    if (universalError) {
-      console.warn("Could not load universal product image:", universalError);
-      return;
+    if (universalError) throw universalError;
+
+    // Reuse an existing shared image. A vendor listing must never replace a
+    // catalogue image simply because that vendor selected a different picture.
+    let canonicalImageUrl = universalProduct?.image_url || "";
+
+    if (!canonicalImageUrl && pendingFiles.length) {
+      setIsUploading(true);
+      const file = pendingFiles[0];
+      const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const objectPath = `universal-products/${universalId}/${crypto.randomUUID()}.${extension}`;
+      const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, {
+        upsert: false,
+        contentType: file.type
+      });
+      if (uploadError) throw uploadError;
+      canonicalImageUrl = supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl;
+    } else if (!canonicalImageUrl && requestedImageUrl && !requestedImageUrl.startsWith("blob:")) {
+      canonicalImageUrl = requestedImageUrl;
     }
 
-    if (universalProduct?.image_url && !imageFile && imageFiles.length === 0 && existingImageUrls.length === 0 && !imageUrl) {
-      const { error: fallbackError } = await supabase
+    if (canonicalImageUrl && !universalProduct?.image_url) {
+      const { error: updateUniversalError } = await supabase
+        .from("universal_products")
+        .update({ image_url: canonicalImageUrl })
+        .eq("id", universalId);
+      if (updateUniversalError) throw updateUniversalError;
+
+      // Keep the existing image catalogue in sync when its RLS policy permits
+      // vendor-originated submissions. The universal_products image remains the
+      // canonical fallback if this optional provenance insert is denied.
+      const { error: imageInsertError } = await supabase
+        .from("universal_product_images")
+        .insert({
+          universal_product_id: universalId,
+          image_url: canonicalImageUrl,
+          is_primary: true,
+          source: imageSource
+            ? [imageSource.source, imageSource.license, imageSource.sourceUrl].filter(Boolean).join(" | ").slice(0, 500)
+            : pendingFiles.length ? "Vendor upload" : "External image",
+          created_by: authUserId
+        });
+      if (imageInsertError) console.warn("Shared image saved, but image provenance row was not created:", imageInsertError);
+    }
+
+    if (canonicalImageUrl) {
+      const { error: vendorImageError } = await supabase
         .from("products")
-        .update({ image_url: universalProduct.image_url, updated_at: new Date().toISOString() })
+        .update({ image_url: canonicalImageUrl })
         .eq("id", productId);
-      if (fallbackError) console.warn("Could not apply universal image fallback:", fallbackError);
-      else {
-        setImageUrl(universalProduct.image_url);
-        setIsImageError(false);
-      }
+      if (vendorImageError) throw vendorImageError;
+      setImageUrl(canonicalImageUrl);
+      setIsImageError(false);
     }
   };
 
@@ -467,23 +517,9 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         }
       }
 
-      let finalImageUrl = imageUrl;
-      if (imageFiles.length) {
-        setIsUploading(true);
-        const uploadedUrls: string[] = [];
-        for (const file of imageFiles.slice(0, 5)) {
-          const fileExt = file.name.split(".").pop() || "jpg";
-          const fileName = `${crypto.randomUUID()}.${fileExt}`;
-          const { error: uploadError } = await supabase.storage.from("product-images").upload(fileName, file);
-          if (uploadError) throw uploadError;
-          const { data: publicUrlData } = supabase.storage.from("product-images").getPublicUrl(fileName);
-          uploadedUrls.push(publicUrlData.publicUrl);
-        }
-        finalImageUrl = uploadedUrls.length > 1 ? JSON.stringify(uploadedUrls) : (uploadedUrls[0] || "");
-        setIsUploading(false);
-      } else if (existingImageUrls.length) {
-        finalImageUrl = existingImageUrls.length > 1 ? JSON.stringify(existingImageUrls) : existingImageUrls[0];
-      }
+      // Do not upload here. First resolve the shared catalogue identity, then
+      // upload at most one canonical image only if that universal product lacks one.
+      const finalImageUrl = imageFiles.length ? null : (imageUrl || (existingImageUrls[0] || null));
 
       const finalWeightString = form.weightValue.trim() ? `${form.weightValue.trim()} ${form.weightUnit}` : null;
       const numericGst = parseFloat(form.gst_slab) || 0;
@@ -532,7 +568,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         savedProductId = insertedProduct.id;
       }
 
-      await resolveUniversalProduct(savedProductId);
+      await resolveUniversalProduct(savedProductId, authData.user.id, imageFiles, imageUrl, selectedImageSource);
       onNavigate("products");
     } catch (err: any) {
       console.error("Product preservation exception:", err);
