@@ -1,3 +1,1372 @@
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import {
+  Store,
+  MapPin,
+  Clock,
+  FileText,
+  Building2,
+  Loader2,
+  CheckCircle,
+  Upload,
+  AlertCircle,
+  Search,
+  X,
+  Tag,
+  Check,
+  AlertTriangle,
+  Calendar,
+  Power,
+  XCircle,
+  CheckCircle2,
+  Wallet,
+  Users,
+  Boxes,
+  Navigation,
+  CalendarDays
+} from 'lucide-react';
+
+import {
+  getCurrentVendor,
+  getVendorProfile,
+  updateVendorProfile,
+  updateStoreOperations,
+  updateBankDetails,
+  updateBusinessDocuments,
+  VendorProfile
+} from '../../../services/vendorService';
+
+import { supabase } from '../../../lib/supabase';
+import StoreLayout from "./StoreLayout";
+import LanePicking from "./LanePicking";
+import {
+  StoreLocationPicker,
+  ConfirmLocationPayload
+} from '../maps/StoreLocationPicker';
+
+interface ProductCategory {
+  id: string;
+  name: string;
+  status: string;
+}
+
+export interface DaySchedule {
+  open: string;
+  close: string;
+  closed: boolean;
+}
+
+export type BusinessHoursJSON = Record<string, DaySchedule>;
+
+const DAYS_OF_WEEK = [
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday',
+] as const;
+
+type DayName = (typeof DAYS_OF_WEEK)[number];
+
+const DEFAULT_SCHEDULE: BusinessHoursJSON = {
+  monday: { open: '09:00', close: '22:00', closed: false },
+  tuesday: { open: '09:00', close: '22:00', closed: false },
+  wednesday: { open: '09:00', close: '22:00', closed: false },
+  thursday: { open: '09:00', close: '22:00', closed: false },
+  friday: { open: '09:00', close: '22:00', closed: false },
+  saturday: { open: '09:00', close: '22:00', closed: false },
+  sunday: { open: '10:00', close: '20:00', closed: true },
+};
+
+const parseTimeToMinutes = (timeStr: string): number => {
+  if (!timeStr) return 0;
+
+  const [hours, minutes] = timeStr.split(':').map(Number);
+
+  if (
+    Number.isNaN(hours) ||
+    Number.isNaN(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return 0;
+  }
+
+  return hours * 60 + minutes;
+};
+
+const formatMinutes = (minutes: number): string => {
+  const safeMinutes = Math.max(0, Math.ceil(minutes));
+  const hours = Math.floor(safeMinutes / 60);
+  const mins = safeMinutes % 60;
+
+  if (hours > 0) {
+    return `${hours}h ${mins}m`;
+  }
+
+  return `${mins}m`;
+};
+
+export default function StoreManagement() {
+  // ---------------------------------------------------------------------------
+  // CORE VENDOR
+  // ---------------------------------------------------------------------------
+
+  const [vendorId, setVendorId] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+
+  // ---------------------------------------------------------------------------
+  // LIVE CLOCK
+  // ---------------------------------------------------------------------------
+
+  const [currentTime, setCurrentTime] = useState<Date>(() => new Date());
+
+  useEffect(() => {
+    const updateClock = () => {
+      setCurrentTime(new Date());
+    };
+
+    updateClock();
+
+    const interval = window.setInterval(updateClock, 60 * 1000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // TOAST
+  // ---------------------------------------------------------------------------
+
+  const [toast, setToast] = useState<{
+    message: string;
+    type: 'success' | 'error';
+  } | null>(null);
+
+  // ---------------------------------------------------------------------------
+  // SAVE STATE
+  // ---------------------------------------------------------------------------
+
+  const [isSavingAll, setIsSavingAll] = useState<boolean>(false);
+  const [uploadingQr, setUploadingQr] = useState<boolean>(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+
+  // ---------------------------------------------------------------------------
+  // MAP PICKER
+  // ---------------------------------------------------------------------------
+
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
+  const [operationsView, setOperationsView] = useState<"picker" | "layout">("picker");
+
+  // ---------------------------------------------------------------------------
+  // SECTION 1: STORE INFO
+  // ---------------------------------------------------------------------------
+
+  const [storeName, setStoreName] = useState('');
+  const [tagline, setTagline] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState('');
+  const [bannerUrl, setBannerUrl] = useState('');
+
+  // ---------------------------------------------------------------------------
+  // CATEGORIES
+  // ---------------------------------------------------------------------------
+
+  const [availableCategories, setAvailableCategories] = useState<ProductCategory[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState<boolean>(false);
+  const [primaryCategoryId, setPrimaryCategoryId] = useState<string>('');
+  const [additionalCategoryNames, setAdditionalCategoryNames] = useState<string[]>([]);
+  const [categorySearch, setCategorySearch] = useState<string>('');
+
+  // ---------------------------------------------------------------------------
+  // SECTION 2: LOCATION
+  // ---------------------------------------------------------------------------
+
+  const [addressLine1, setAddressLine1] = useState('');
+  const [addressLine2, setAddressLine2] = useState('');
+  const [city, setCity] = useState('');
+  const [state, setState] = useState('');
+  const [pinCode, setPinCode] = useState('');
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+
+  // ---------------------------------------------------------------------------
+  // SECTION 3: BUSINESS OPERATIONS
+  // ---------------------------------------------------------------------------
+
+  const [storeStatus, setStoreStatus] = useState<'open' | 'busy' | 'closed'>('closed');
+  const [manualOverride, setManualOverride] = useState<boolean>(false);
+  const [schedule, setSchedule] = useState<BusinessHoursJSON>(DEFAULT_SCHEDULE);
+
+  // ---------------------------------------------------------------------------
+  // SECTION 4: DOCUMENTS
+  // ---------------------------------------------------------------------------
+
+  const [panNumber, setPanNumber] = useState('');
+  const [gstNumber, setGstNumber] = useState('');
+  const [fssaiLicense, setFssaiLicense] = useState('');
+  const [drugLicense, setDrugLicense] = useState('');
+  const [drugLicenseExpiry, setDrugLicenseExpiry] = useState('');
+
+  // ---------------------------------------------------------------------------
+  // SECTION 5: BANK DETAILS
+  // ---------------------------------------------------------------------------
+
+  const [accountHolderName, setAccountHolderName] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [ifscCode, setIfscCode] = useState('');
+  const [upiId, setUpiId] = useState('');
+  const qrFileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  // ---------------------------------------------------------------------------
+  // TOAST HELPER
+  // ---------------------------------------------------------------------------
+
+  const showToast = useCallback(
+    (message: string, type: 'success' | 'error') => {
+      setToast({ message, type });
+
+      window.setTimeout(() => {
+        setToast(null);
+      }, 4000);
+    },
+    []
+  );
+
+  // ---------------------------------------------------------------------------
+  // LOCATION VALIDATION
+  // ---------------------------------------------------------------------------
+
+  const isLocationVerified = useMemo(() => {
+    if (!latitude || !longitude) return false;
+
+    const lat = parseFloat(latitude);
+    const lng = parseFloat(longitude);
+
+    return (
+      !Number.isNaN(lat) &&
+      !Number.isNaN(lng) &&
+      (lat !== 0 || lng !== 0)
+    );
+  }, [latitude, longitude]);
+
+  // ---------------------------------------------------------------------------
+  // CATEGORY HELPERS
+  // ---------------------------------------------------------------------------
+
+  const allSelectedCategoryNames = useMemo(() => {
+    const list: string[] = [];
+
+    const primaryObj = availableCategories.find(
+      c => c.id === primaryCategoryId
+    );
+
+    if (primaryObj) {
+      list.push(primaryObj.name.trim());
+    }
+
+    additionalCategoryNames.forEach(name => {
+      const trimmed = name.trim();
+
+      if (trimmed && !list.includes(trimmed)) {
+        list.push(trimmed);
+      }
+    });
+
+    return list.sort((a, b) => a.localeCompare(b));
+  }, [
+    primaryCategoryId,
+    additionalCategoryNames,
+    availableCategories
+  ]);
+
+  const displaysDrugLicense = useMemo(() => {
+    return allSelectedCategoryNames.some(name => {
+      const lower = name.toLowerCase();
+
+      return (
+        lower.includes('medical') ||
+        lower.includes('pharmacy')
+      );
+    });
+  }, [allSelectedCategoryNames]);
+
+  const filteredAvailableCategories = useMemo(() => {
+    return availableCategories.filter(cat => {
+      const matchesSearch = cat.name
+        .toLowerCase()
+        .includes(categorySearch.toLowerCase());
+
+      const isPrimary = cat.id === primaryCategoryId;
+
+      return matchesSearch && !isPrimary;
+    });
+  }, [
+    availableCategories,
+    categorySearch,
+    primaryCategoryId
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // LOAD CATEGORIES
+  // ---------------------------------------------------------------------------
+
+  const loadProductCategories = useCallback(async () => {
+    try {
+      setCategoriesLoading(true);
+
+      const { data, error } = await supabase
+        .from('product_categories')
+        .select('id, name, status')
+        .eq('status', 'active');
+
+      if (error) throw error;
+
+      if (data) {
+        const sorted = (data as ProductCategory[]).sort(
+          (a, b) => a.name.localeCompare(b.name)
+        );
+
+        setAvailableCategories(sorted);
+      }
+    } catch (err) {
+      console.error('Error loading product categories:', err);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // POPULATE PROFILE
+  // ---------------------------------------------------------------------------
+
+  const populateProfileData = useCallback(
+    (profile: VendorProfile, shopName?: string) => {
+      setStoreName(profile.store_name || shopName || '');
+      setTagline(profile.tagline || '');
+      setAvatarUrl(profile.avatar_url || '');
+      setBannerUrl(profile.banner_url || '');
+
+      if (profile.categories && Array.isArray(profile.categories)) {
+        setAdditionalCategoryNames(profile.categories);
+      } else {
+        setAdditionalCategoryNames([]);
+      }
+
+      setAddressLine1(profile.address_line1 || '');
+      setAddressLine2(profile.address_line2 || '');
+      setCity(profile.city || '');
+      setState(profile.state || '');
+      setPinCode(profile.pin_code || '');
+
+      setLatitude(
+        profile.latitude !== null &&
+        profile.latitude !== undefined
+          ? String(profile.latitude)
+          : ''
+      );
+
+      setLongitude(
+        profile.longitude !== null &&
+        profile.longitude !== undefined
+          ? String(profile.longitude)
+          : ''
+      );
+
+      if (profile.store_status) {
+        const normalizedStatus =
+          profile.store_status.toLowerCase();
+
+        if (
+          normalizedStatus === 'open' ||
+          normalizedStatus === 'busy' ||
+          normalizedStatus === 'closed'
+        ) {
+          setStoreStatus(normalizedStatus);
+        }
+      }
+
+      setManualOverride(!!profile.manual_override);
+
+      if (profile.business_hours) {
+        try {
+          const parsed =
+            typeof profile.business_hours === 'string'
+              ? JSON.parse(profile.business_hours)
+              : profile.business_hours;
+
+          if (parsed?.monday || parsed?.tuesday) {
+            setSchedule({
+              ...DEFAULT_SCHEDULE,
+              ...parsed
+            });
+          } else if (parsed?.open && parsed?.close) {
+            const migrated = {
+              ...DEFAULT_SCHEDULE
+            };
+
+            DAYS_OF_WEEK.forEach(day => {
+              if (!migrated[day].closed) {
+                migrated[day] = {
+                  open: parsed.open,
+                  close: parsed.close,
+                  closed: false
+                };
+              }
+            });
+
+            setSchedule(migrated);
+          }
+        } catch (e) {
+          console.error(
+            'Failed to parse business_hours JSON:',
+            e
+          );
+        }
+      }
+
+      setPanNumber(profile.pan_number || '');
+      setGstNumber(profile.gst_number || '');
+      setFssaiLicense(profile.fssai_license || '');
+      setDrugLicense(profile.drug_license || '');
+      setDrugLicenseExpiry(profile.drug_license_expiry || '');
+
+      setAccountHolderName(
+        profile.account_holder_name || ''
+      );
+      setBankName(profile.bank_name || '');
+      setAccountNumber(profile.account_number || '');
+      setIfscCode(profile.ifsc_code || '');
+      setUpiId(profile.upi_id || '');
+      setQrCodeUrl(profile.qr_code_url || '');
+    },
+    []
+  );
+
+  // ---------------------------------------------------------------------------
+  // INITIAL LOAD + REALTIME
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    let profileChannel: any;
+
+    async function loadData() {
+      try {
+        setLoading(true);
+
+        await loadProductCategories();
+
+        const vendorRes = await getCurrentVendor();
+
+        if (!vendorRes.success || !vendorRes.data) {
+          throw new Error(
+            vendorRes.error || 'Failed to locate vendor.'
+          );
+        }
+
+        const currentId = vendorRes.data.id;
+
+        setVendorId(currentId);
+
+        if (vendorRes.data.category_id) {
+          setPrimaryCategoryId(
+            vendorRes.data.category_id
+          );
+        }
+
+        const profileRes = await getVendorProfile(currentId);
+
+        if (!profileRes.success || !profileRes.data) {
+          throw new Error(
+            profileRes.error || 'Failed to sync profile.'
+          );
+        }
+
+        const canonicalStoreName =
+          profileRes.data.store_name?.trim() || vendorRes.data.shop_name || '';
+
+        // Use the same canonical name displayed in the portal header.
+        populateProfileData(
+          { ...profileRes.data, store_name: canonicalStoreName },
+          canonicalStoreName
+        );
+
+        profileChannel = supabase
+          .channel(`store-mgmt-${currentId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'vendor_profiles',
+              filter: `vendor_id=eq.${currentId}`
+            },
+            (payload: any) => {
+              if (payload.new) {
+                populateProfileData(
+                  payload.new as VendorProfile,
+                  payload.new.store_name?.trim() || canonicalStoreName
+                );
+              }
+            }
+          )
+          .subscribe();
+      } catch (err: any) {
+        showToast(
+          err.message || 'Error loading profile data.',
+          'error'
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadData();
+
+    return () => {
+      if (profileChannel) {
+        supabase.removeChannel(profileChannel);
+      }
+    };
+  }, [
+    loadProductCategories,
+    populateProfileData,
+    showToast
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // WEEKLY SCHEDULE EVALUATION
+  // ---------------------------------------------------------------------------
+
+  const evaluateSchedule = useCallback(
+    (date: Date, currentSchedule: BusinessHoursJSON) => {
+      const dayNames = [
+        'sunday',
+        'monday',
+        'tuesday',
+        'wednesday',
+        'thursday',
+        'friday',
+        'saturday'
+      ];
+
+      const todayName = dayNames[
+        date.getDay()
+      ] as DayName;
+
+      const todaySchedule =
+        currentSchedule[todayName] || {
+          open: '09:00',
+          close: '22:00',
+          closed: false
+        };
+
+      if (todaySchedule.closed) {
+        return {
+          status: 'CLOSED' as const,
+          badgeText: '🔴 Closed Today',
+          badgeColor:
+            'bg-red-500/10 text-red-600 border-red-200 dark:border-red-900/50',
+          minsUntilClose: 0,
+          countdownText: 'Closed All Day',
+          isOperational: false
+        };
+      }
+
+      const currentMins =
+        date.getHours() * 60 +
+        date.getMinutes();
+
+      const openMins = parseTimeToMinutes(
+        todaySchedule.open
+      );
+
+      const closeMins = parseTimeToMinutes(
+        todaySchedule.close
+      );
+
+      const isOvernight =
+        closeMins <= openMins;
+
+      let isOpenNow = false;
+      let minsLeft = 0;
+
+      if (isOvernight) {
+        if (currentMins >= openMins) {
+          isOpenNow = true;
+          minsLeft =
+            closeMins +
+            1440 -
+            currentMins;
+        } else if (currentMins < closeMins) {
+          isOpenNow = true;
+          minsLeft =
+            closeMins -
+            currentMins;
+        }
+      } else {
+        if (
+          currentMins >= openMins &&
+          currentMins < closeMins
+        ) {
+          isOpenNow = true;
+          minsLeft =
+            closeMins -
+            currentMins;
+        }
+      }
+
+      if (isOpenNow) {
+        const countdown =
+          formatMinutes(minsLeft);
+
+        if (minsLeft <= 90) {
+          return {
+            status: 'CLOSING_SOON' as const,
+            badgeText: '🟠 Closing Soon',
+            badgeColor:
+              'bg-orange-500/10 text-orange-600 border-orange-200 dark:border-orange-900/50',
+            minsUntilClose: minsLeft,
+            countdownText: countdown,
+            isOperational: true
+          };
+        }
+
+        return {
+          status: 'OPEN' as const,
+          badgeText: '🟢 Open',
+          badgeColor:
+            'bg-emerald-500/10 text-emerald-600 border-emerald-200 dark:border-emerald-900/50',
+          minsUntilClose: minsLeft,
+          countdownText: countdown,
+          isOperational: true
+        };
+      }
+
+      if (!isOvernight && currentMins < openMins) {
+        const minsToOpen =
+          openMins - currentMins;
+
+        const openingSoon =
+          minsToOpen <= 60;
+
+        return {
+          status: openingSoon
+            ? ('OPENING_SOON' as const)
+            : ('CLOSED' as const),
+          badgeText: openingSoon
+            ? '🟠 Opening Soon'
+            : '🔴 Closed',
+          badgeColor: openingSoon
+            ? 'bg-orange-500/10 text-orange-600 border-orange-200 dark:border-orange-900/50'
+            : 'bg-red-500/10 text-red-600 border-red-200 dark:border-red-900/50',
+          minsUntilClose: 0,
+          countdownText: `Opens in ${formatMinutes(
+            minsToOpen
+          )}`,
+          isOperational: false
+        };
+      }
+
+      return {
+        status: 'AUTO_CLOSED' as const,
+        badgeText: '🔴 Closed (Time Expired)',
+        badgeColor:
+          'bg-red-500/10 text-red-600 border-red-200 dark:border-red-900/50',
+        minsUntilClose: 0,
+        countdownText: 'Closed for the day',
+        isOperational: false
+      };
+    },
+    []
+  );
+
+  // ---------------------------------------------------------------------------
+  // LIVE BUSINESS HOURS EVALUATION
+  // ---------------------------------------------------------------------------
+
+  const currentEvaluation = useMemo(() => {
+    const scheduledEvaluation = evaluateSchedule(
+      currentTime,
+      schedule
+    );
+
+    if (manualOverride) {
+      if (storeStatus === 'closed') {
+        return {
+          status: 'MANUALLY_CLOSED' as const,
+          badgeText:
+            '🔴 Temporarily Closed (Manual)',
+          badgeColor:
+            'bg-red-500/10 text-red-600 border-red-200 dark:border-red-900/50',
+          minsUntilClose: 0,
+          countdownText:
+            'Manually Turned Off',
+          isOperational: false
+        };
+      }
+
+      if (storeStatus === 'busy') {
+        return {
+          status: 'BUSY' as const,
+          badgeText:
+            '🟠 High Order Volume (Busy)',
+          badgeColor:
+            'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-900/50',
+          minsUntilClose:
+            scheduledEvaluation.isOperational
+              ? scheduledEvaluation.minsUntilClose
+              : 0,
+          countdownText:
+            scheduledEvaluation.isOperational
+              ? `Manually Busy • ${scheduledEvaluation.countdownText}`
+              : 'Manually Overridden (Busy)',
+          isOperational: true
+        };
+      }
+
+      return {
+        status: 'OPEN' as const,
+        badgeText: '🟢 Open',
+        badgeColor:
+          'bg-emerald-500/10 text-emerald-600 border-emerald-200 dark:border-emerald-900/50',
+        minsUntilClose:
+          scheduledEvaluation.isOperational
+            ? scheduledEvaluation.minsUntilClose
+            : 0,
+        countdownText:
+          scheduledEvaluation.isOperational
+            ? `Manually Overridden • ${scheduledEvaluation.countdownText}`
+            : 'Manually Overridden (Open)',
+        isOperational: true
+      };
+    }
+
+    if (
+      scheduledEvaluation.status ===
+      'CLOSING_SOON'
+    ) {
+      return scheduledEvaluation;
+    }
+
+    if (
+      scheduledEvaluation.status === 'OPEN'
+    ) {
+      if (storeStatus === 'busy') {
+        return {
+          status: 'BUSY' as const,
+          badgeText:
+            '🟠 High Order Volume (Busy)',
+          badgeColor:
+            'bg-amber-500/10 text-amber-600 border-amber-200 dark:border-amber-900/50',
+          minsUntilClose:
+            scheduledEvaluation.minsUntilClose,
+          countdownText:
+            scheduledEvaluation.countdownText,
+          isOperational: true
+        };
+      }
+
+      return scheduledEvaluation;
+    }
+
+    return scheduledEvaluation;
+  }, [
+    currentTime,
+    schedule,
+    storeStatus,
+    manualOverride,
+    evaluateSchedule
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // AUTOMATIC CLOSE
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (
+      currentEvaluation.status !==
+      'AUTO_CLOSED'
+    ) {
+      return;
+    }
+
+    if (
+      storeStatus === 'closed' ||
+      manualOverride ||
+      !vendorId
+    ) {
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+
+    setStoreStatus('closed');
+
+    updateStoreOperations(vendorId, {
+      store_status: 'closed',
+      auto_closed_at: nowIso,
+      manual_override: false
+    }).then(res => {
+      if (!res.success) {
+        console.error(
+          'Failed to trigger auto-close:',
+          res.error
+        );
+
+        showToast(
+          res.error ||
+            'Failed to automatically close store.',
+          'error'
+        );
+      }
+    });
+  }, [
+    currentEvaluation.status,
+    storeStatus,
+    manualOverride,
+    vendorId,
+    showToast
+  ]);
+
+  // ---------------------------------------------------------------------------
+  // MANUAL STORE STATUS
+  // ---------------------------------------------------------------------------
+
+  const handleManualStatusChange = async (
+    newStatus: 'open' | 'busy' | 'closed'
+  ) => {
+    if (!vendorId) return;
+
+    setStoreStatus(newStatus);
+    setManualOverride(true);
+
+    const nowIso = new Date().toISOString();
+
+    const res = await updateStoreOperations(
+      vendorId,
+      {
+        store_status: newStatus,
+        business_hours: schedule,
+        manual_override: true,
+        manual_override_at: nowIso
+      }
+    );
+
+    if (!res.success) {
+      showToast(
+        res.error ||
+          'Error updating store status.',
+        'error'
+      );
+
+      return;
+    }
+
+    showToast(
+      `Store status manually updated to ${newStatus}.`,
+      'success'
+    );
+
+    if (res.data) {
+      populateProfileData(res.data);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // RESUME AUTO SCHEDULE
+  // ---------------------------------------------------------------------------
+
+  const handleResetToAuto = async () => {
+    if (!vendorId) return;
+
+    const scheduledEvaluation =
+      evaluateSchedule(
+        new Date(),
+        schedule
+      );
+
+    const resolvedStatus =
+      scheduledEvaluation.isOperational
+        ? 'open'
+        : 'closed';
+
+    setManualOverride(false);
+    setStoreStatus(resolvedStatus);
+
+    const res =
+      await updateStoreOperations(
+        vendorId,
+        {
+          store_status: resolvedStatus,
+          business_hours: schedule,
+          manual_override: false,
+          manual_override_at: null
+        }
+      );
+
+    if (!res.success) {
+      showToast(
+        res.error ||
+          'Error resetting to schedule.',
+        'error'
+      );
+
+      return;
+    }
+
+    showToast(
+      'Restored automatic business hours schedule.',
+      'success'
+    );
+
+    if (res.data) {
+      populateProfileData(res.data);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // SCHEDULE CONTROLS
+  // ---------------------------------------------------------------------------
+
+  const handleDayToggle = (
+    day: DayName
+  ) => {
+    setSchedule(prev => ({
+      ...prev,
+      [day]: {
+        ...prev[day],
+        closed: !prev[day].closed
+      }
+    }));
+  };
+
+  const handleTimeChange = (
+    day: DayName,
+    field: 'open' | 'close',
+    value: string
+  ) => {
+    setSchedule(prev => ({
+      ...prev,
+      [day]: {
+        ...prev[day],
+        [field]: value
+      }
+    }));
+  };
+
+  // ---------------------------------------------------------------------------
+  // CATEGORY CONTROLS
+  // ---------------------------------------------------------------------------
+
+  const handlePrimaryCategoryChange = (
+    e: React.ChangeEvent<HTMLSelectElement>
+  ) => {
+    setPrimaryCategoryId(e.target.value);
+  };
+
+  const handleToggleAdditionalCategory = (
+    name: string
+  ) => {
+    const trimmed = name.trim();
+
+    if (
+      additionalCategoryNames.includes(
+        trimmed
+      )
+    ) {
+      setAdditionalCategoryNames(
+        additionalCategoryNames.filter(
+          n => n !== trimmed
+        )
+      );
+    } else {
+      setAdditionalCategoryNames([
+        ...additionalCategoryNames,
+        trimmed
+      ]);
+    }
+  };
+
+  const handleRemoveCategoryPill = (
+    name: string
+  ) => {
+    const trimmed = name.trim();
+
+    const primaryObj =
+      availableCategories.find(
+        c => c.id === primaryCategoryId
+      );
+
+    if (
+      primaryObj &&
+      primaryObj.name.trim() === trimmed
+    ) {
+      showToast(
+        'Please choose another Primary Category.',
+        'error'
+      );
+
+      return;
+    }
+
+    setAdditionalCategoryNames(
+      additionalCategoryNames.filter(
+        n => n.trim() !== trimmed
+      )
+    );
+  };
+
+  // ---------------------------------------------------------------------------
+  // MAP LOCATION
+  // ---------------------------------------------------------------------------
+
+  const handleLocationConfirm = (
+    location: ConfirmLocationPayload
+  ) => {
+    // Keep the address preview readable: the first line already contains
+    // the locality when reverse geocoding supplies it, so avoid repeating it.
+    const normalized = (value: string) =>
+      value.trim().replace(/\\s+/g, " ").replace(/,+/g, ",").replace(/^,|,$/g, "").trim();
+    const cityValue = normalized(location.city || "");
+    const line1Value = normalized(location.addressLine1 || location.formattedAddress || "");
+    const line1Parts = line1Value.split(",").map(normalized).filter(Boolean);
+    const deduplicatedLine1 = line1Parts.filter((part, index, parts) =>
+      parts.findIndex((candidate) => candidate.toLowerCase() === part.toLowerCase()) === index
+    );
+    const nextLine1 = deduplicatedLine1.join(", ");
+    const nextLine2 = normalized(addressLine2 || "");
+    setAddressLine1(nextLine1);
+
+    // City can be present as a trailing component of a geocoder address line.
+    // Keep it in the dedicated city field and omit duplicates in the preview.
+    if (cityValue) setCity(cityValue);
+    if (location.state) setState(location.state);
+    if (location.pinCode) setPinCode(location.pinCode);
+    setLatitude(String(location.latitude));
+    setLongitude(String(location.longitude));
+    setLocationPickerOpen(false);
+    showToast('Store location selected from map.', 'success');
+  };
+
+  // ---------------------------------------------------------------------------
+  // SAVE STORE INFO
+  // ---------------------------------------------------------------------------
+
+  const saveStoreInfo = async () => {
+    if (!vendorId) return;
+
+    if (!storeName.trim()) {
+      throw new Error(
+        'Store Name field is required.'
+      );
+    }
+
+    if (!primaryCategoryId) {
+      throw new Error(
+        'One primary category selection is required.'
+      );
+    }
+
+    const primaryObj =
+      availableCategories.find(
+        c => c.id === primaryCategoryId
+      );
+
+    if (!primaryObj) {
+      throw new Error(
+        'Selected primary category configuration parameters are out of sync.'
+      );
+    }
+
+    const primaryName =
+      primaryObj.name.trim();
+
+    let updatedList = [
+      ...additionalCategoryNames.map(
+        n => n.trim()
+      )
+    ];
+
+    if (
+      !updatedList.includes(primaryName)
+    ) {
+      updatedList.push(primaryName);
+    }
+
+    updatedList = Array.from(
+      new Set(updatedList)
+    )
+      .filter(Boolean)
+      .sort((a, b) =>
+        a.localeCompare(b)
+      );
+
+    const { error: vendorError } =
+      await supabase
+        .from('vendors')
+        .update({
+          category_id:
+            primaryCategoryId
+        })
+        .eq('id', vendorId);
+
+    if (vendorError) {
+      throw vendorError;
+    }
+
+    const canonicalStoreName = storeName.trim();
+    const { error: vendorNameError } = await supabase
+      .from('vendors')
+      .update({ shop_name: canonicalStoreName, updated_at: new Date().toISOString() })
+      .eq('id', vendorId);
+    if (vendorNameError) throw vendorNameError;
+
+    const res =
+      await updateVendorProfile(
+        vendorId,
+        {
+          store_name:
+            canonicalStoreName,
+          tagline:
+            tagline.trim(),
+          avatar_url:
+            avatarUrl,
+          banner_url:
+            bannerUrl,
+          categories:
+            updatedList
+        }
+      );
+
+    if (!res.success) {
+      throw new Error(
+        res.error ||
+          'Failed to update store info.'
+      );
+    }
+
+    setAdditionalCategoryNames(
+      updatedList.filter(
+        n => n !== primaryName
+      )
+    );
+  };
+
+  // ---------------------------------------------------------------------------
+  // SAVE LOCATION
+  // ---------------------------------------------------------------------------
+
+  const saveLocation = async () => {
+    if (!vendorId) return;
+
+    if (
+      pinCode &&
+      !/^\d{6}$/.test(
+        pinCode.trim()
+      )
+    ) {
+      throw new Error(
+        'PIN Code must be a 6-digit number.'
+      );
+    }
+
+    const parsedLat =
+      parseFloat(latitude);
+
+    const parsedLng =
+      parseFloat(longitude);
+
+    if (
+      Number.isNaN(parsedLat) ||
+      Number.isNaN(parsedLng)
+    ) {
+      throw new Error(
+        'Store location coordinates are incomplete. Please verify location or pick on map.'
+      );
+    }
+
+    const res =
+      await updateVendorProfile(
+        vendorId,
+        {
+          address_line1:
+            addressLine1,
+          address_line2:
+            addressLine2,
+          city,
+          state,
+          pin_code:
+            pinCode,
+          latitude:
+            parsedLat,
+          longitude:
+            parsedLng
+        }
+      );
+
+    if (!res.success) {
+      throw new Error(
+        res.error ||
+          'Failed to save location.'
+      );
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // SAVE OPERATIONS
+  // ---------------------------------------------------------------------------
+
+  const saveOperations = async () => {
+    if (!vendorId) return;
+
+    const scheduledEvaluation =
+      evaluateSchedule(
+        new Date(),
+        schedule
+      );
+
+    const resolvedStatus =
+      manualOverride
+        ? storeStatus
+        : scheduledEvaluation.isOperational
+        ? 'open'
+        : 'closed';
+
+    const res =
+      await updateStoreOperations(
+        vendorId,
+        {
+          store_status:
+            resolvedStatus,
+          business_hours:
+            schedule,
+          manual_override:
+            manualOverride,
+          manual_override_at:
+            manualOverride
+              ? new Date().toISOString()
+              : null,
+          delivery_radius_km:
+            null,
+          minimum_order:
+            null,
+          preparation_time_minutes:
+            null
+        }
+      );
+
+    if (!res.success) {
+      throw new Error(
+        res.error ||
+          'Failed to save operations.'
+      );
+    }
+
+    if (res.data) {
+      populateProfileData(
+        res.data
+      );
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // SAVE DOCUMENTS
+  // ---------------------------------------------------------------------------
+
+  const saveDocuments = async () => {
+    if (!vendorId) return;
+
+    const res =
+      await updateBusinessDocuments(
+        vendorId,
+        {
+          pan_number:
+            panNumber,
+          gst_number:
+            gstNumber,
+          fssai_license:
+            fssaiLicense,
+          drug_license:
+            displaysDrugLicense
+              ? drugLicense
+              : null,
+          drug_license_expiry:
+            displaysDrugLicense
+              ? drugLicenseExpiry
+              : null
+        }
+      );
+
+    if (!res.success) {
+      throw new Error(
+        res.error ||
+          'Failed to save business documents.'
+      );
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // SAVE BANK DETAILS
+  // ---------------------------------------------------------------------------
+
+  const handleQrUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file || !vendorId) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid QR image file.', 'error');
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('QR image must be 5 MB or smaller.', 'error');
+      event.target.value = '';
+      return;
+    }
+
+    setUploadingQr(true);
+
+    try {
+      const extension =
+        file.name.split('.').pop()?.toLowerCase() || 'png';
+      const filePath =
+        `${vendorId}/payment-qr-${Date.now()}.${extension}`;
+
+      const { error: uploadError } =
+        await supabase.storage
+          .from('vendor-QR')
+          .upload(filePath, file, {
+            upsert: true,
+            contentType: file.type
+          });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } =
+        supabase.storage
+          .from('vendor-QR')
+          .getPublicUrl(filePath);
+
+      const publicUrl =
+        publicUrlData?.publicUrl || '';
+
+      if (!publicUrl) {
+        throw new Error('Could not generate the QR image URL.');
+      }
+
+      const { error: profileError } =
+        await supabase
+          .from('vendor_profiles')
+          .update({ qr_code_url: publicUrl })
           .eq('vendor_id', vendorId);
 
       if (profileError) throw profileError;
