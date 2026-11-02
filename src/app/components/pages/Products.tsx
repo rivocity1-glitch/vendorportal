@@ -1048,12 +1048,11 @@ export function Products({
                         <button
                           type="button"
                           onClick={() =>
-                            onNavigate(
-                              "add-product",
-                              {
-                                product: p,
-                              }
-                            )
+                            onNavigate("add-product", {
+                              product: p,
+                              navigationProducts: filtered,
+                              productIndex: filtered.findIndex((item) => item.id === p.id)
+                            })
                           }
                           className="w-7 h-7 rounded-md flex items-center justify-center text-muted-foreground hover:text-[#10B981] hover:bg-[#ECFDF5]"
                         >
