@@ -3,6 +3,7 @@ import {
   Upload,
   X,
   ChevronLeft,
+  ChevronRight,
   Loader2,
   Sparkles,
   Percent,
@@ -20,14 +21,26 @@ interface StoreCategory {
 }
 
 interface Props {
-  onNavigate: (page: string) => void;
+  onNavigate: (page: string, params?: any) => void;
   product?: any;
+  navigationProducts?: any[];
+  productIndex?: number;
 }
 
 const gstOptions = [0, 5, 12, 18, 28];
 const unitOptions = ["Gm", "Kg", "Ltr", "Ml", "Pcs", "Pack"];
 
-export function AddEditProduct({ onNavigate, product }: Props) {
+export function AddEditProduct({ onNavigate, product, navigationProducts = [], productIndex = 0 }: Props) {
+  const hasProductNavigation = Boolean(product && navigationProducts.length > 1);
+  const navigateProduct = (nextIndex: number) => {
+    const nextProduct = navigationProducts[nextIndex];
+    if (!nextProduct) return;
+    onNavigate("add-product", {
+      product: nextProduct,
+      navigationProducts,
+      productIndex: nextIndex
+    });
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [imageUrl, setImageUrl] = useState("");
@@ -592,16 +605,30 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const selectedCategoryName = categories.find(category => category.id === form.category_id)?.name || "";
 
   return (
-    <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={() => onNavigate("products")} className="w-9 h-9 rounded-lg border border-border flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-all"><ChevronLeft className="w-4 h-4" /></button>
-        <div>
-          <h1 className="text-xl font-bold text-foreground">{product ? "Edit Product" : "Add New Product"}</h1>
-          <p className="text-xs text-muted-foreground">List a new item with dynamic margin evaluations</p>
+    <div className="p-4 lg:p-6 max-w-5xl mx-auto space-y-5">
+      <div className="sticky top-0 z-30 -mx-4 lg:-mx-6 px-4 lg:px-6 py-3 bg-background/95 backdrop-blur border-b border-border flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button type="button" onClick={() => onNavigate("products")} className="w-9 h-9 shrink-0 rounded-lg border border-border flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-all" aria-label="Back to products"><ChevronLeft className="w-4 h-4" /></button>
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold text-foreground">{product ? "Edit Product" : "Add New Product"}</h1>
+            <p className="text-xs text-muted-foreground truncate">{product ? form.name || "Update product details" : "Add an item to your store catalogue"}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasProductNavigation && (
+            <>
+              <span className="hidden sm:inline text-xs text-muted-foreground tabular-nums">{productIndex + 1} of {navigationProducts.length}</span>
+              <button type="button" onClick={() => navigateProduct(productIndex - 1)} disabled={productIndex <= 0 || isSubmitting} className="h-9 px-3 rounded-lg border border-border bg-card text-xs font-medium flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted" aria-label="Previous product"><ChevronLeft className="w-4 h-4" /><span className="hidden sm:inline">Previous</span></button>
+              <button type="button" onClick={() => navigateProduct(productIndex + 1)} disabled={productIndex >= navigationProducts.length - 1 || isSubmitting} className="h-9 px-3 rounded-lg border border-border bg-card text-xs font-medium flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted" aria-label="Next product"><span className="hidden sm:inline">Next</span><ChevronRight className="w-4 h-4" /></button>
+            </>
+          )}
+          <button type="submit" form="product-edit-form" disabled={isSubmitting || isUploading} className="h-9 px-4 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+            {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />Saving…</> : <><Save className="w-4 h-4" />{product ? "Update Product" : "Save Product"}</>}
+          </button>
         </div>
       </div>
 
-      <form onSubmit={handleSaveProduct} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <form id="product-edit-form" onSubmit={handleSaveProduct} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
             <div>
@@ -751,9 +778,9 @@ export function AddEditProduct({ onNavigate, product }: Props) {
             </div>
           </div>
 
-          <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
-            <button type="submit" disabled={isSubmitting || isUploading} className="w-full h-10 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />{product ? "Updating Product..." : "Saving Product..."}</> : <><Save className="w-4 h-4" />{product ? "Update Product" : "Save Product"}</>}</button>
-            <button type="button" onClick={() => onNavigate("products")} disabled={isSubmitting} className="w-full h-10 rounded-lg border border-border bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">Cancel</button>
+          <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+            <p className="text-xs text-muted-foreground mb-3">Changes are saved to your store when you select Update Product above.</p>
+            <button type="button" onClick={() => onNavigate("products")} disabled={isSubmitting} className="w-full h-9 rounded-lg border border-border bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">Cancel</button>
           </div>
         </div>
       </form>
