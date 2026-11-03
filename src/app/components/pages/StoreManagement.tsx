@@ -2463,6 +2463,8 @@ export default function StoreManagement() {
         {operationsView === "picker" ? <LanePicking /> : <StoreLayout />}
       </section>
 
+      </div>
+
       {/* LOCATION PICKER */}
       <StoreLocationPicker
         open={locationPickerOpen}

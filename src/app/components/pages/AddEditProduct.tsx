@@ -3,6 +3,7 @@ import {
   Upload,
   X,
   ChevronLeft,
+  ChevronRight,
   Loader2,
   Sparkles,
   Percent,
@@ -20,14 +21,26 @@ interface StoreCategory {
 }
 
 interface Props {
-  onNavigate: (page: string) => void;
+  onNavigate: (page: string, params?: any) => void;
   product?: any;
+  navigationProducts?: any[];
+  productIndex?: number;
 }
 
 const gstOptions = [0, 5, 12, 18, 28];
 const unitOptions = ["Gm", "Kg", "Ltr", "Ml", "Pcs", "Pack"];
 
-export function AddEditProduct({ onNavigate, product }: Props) {
+export function AddEditProduct({ onNavigate, product, navigationProducts = [], productIndex = 0 }: Props) {
+  const hasProductNavigation = Boolean(product && navigationProducts.length > 1);
+  const navigateProduct = (nextIndex: number) => {
+    const nextProduct = navigationProducts[nextIndex];
+    if (!nextProduct) return;
+    onNavigate("add-product", {
+      product: nextProduct,
+      navigationProducts,
+      productIndex: nextIndex
+    });
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [imageUrl, setImageUrl] = useState("");
@@ -43,6 +56,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const [isSearchingImages, setIsSearchingImages] = useState(false);
   const [imageSearchMessage, setImageSearchMessage] = useState("");
   const [manualImageUrl, setManualImageUrl] = useState("");
+  const [selectedImageSource, setSelectedImageSource] = useState<{ source: string; sourceUrl: string; license: string } | null>(null);
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
@@ -324,6 +338,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     setImageFile(null);
     setExistingImageUrls([]);
     setImageUrl(result.image);
+    setSelectedImageSource({ source: result.source || "External image", sourceUrl: result.sourceUrl || result.image, license: (result as any).license || "" });
     setIsImageError(false);
     if (result.barcode && !form.barcode.trim()) handleField("barcode", result.barcode);
     setImageSearchMessage(`Selected image for ${result.name}${result.source ? ` · ${result.source}` : ""}. Save the product to keep it.`);
@@ -342,6 +357,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
       return;
     }
     setExistingImageUrls([]);
+    setSelectedImageSource(null);
     setImageFiles(selected);
     setImageFile(selected[0]);
     setImageUrl(URL.createObjectURL(selected[0]));
@@ -379,39 +395,90 @@ export function AddEditProduct({ onNavigate, product }: Props) {
     setImageFile(null);
     setImageFiles([]);
     setExistingImageUrls([]);
+    setSelectedImageSource(null);
     setIsImageError(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const resolveUniversalProduct = async (productId: string) => {
+  /**
+   * Resolve the vendor listing to the shared catalogue first. The canonical image
+   * is then attached to universal_products, not uploaded once per vendor listing.
+   */
+  const resolveUniversalProduct = async (
+    productId: string,
+    authUserId: string,
+    pendingFiles: File[],
+    requestedImageUrl: string,
+    imageSource: { source: string; sourceUrl: string; license: string } | null
+  ) => {
     const { data: resolverData, error: resolverError } = await supabase.rpc("resolve_product_master", { p_product_id: productId });
-    if (resolverError) {
-      console.error("Universal product resolver failed:", resolverError);
-      throw new Error(`Product saved, but universal product matching failed: ${resolverError.message || resolverError}`);
-    }
+    if (resolverError) throw new Error(`Product saved, but universal matching failed: ${resolverError.message}`);
     const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
-    if (!resolverResult?.universal_product_id) return;
+    const universalId = resolverResult?.universal_product_id;
+    if (!universalId) return;
 
     const { data: universalProduct, error: universalError } = await supabase
       .from("universal_products")
       .select("id, image_url")
-      .eq("id", resolverResult.universal_product_id)
+      .eq("id", universalId)
       .maybeSingle();
-    if (universalError) {
-      console.warn("Could not load universal product image:", universalError);
-      return;
+    if (universalError) throw universalError;
+
+    // Reuse an existing shared image. A vendor listing must never replace a
+    // catalogue image simply because that vendor selected a different picture.
+    let canonicalImageUrl = universalProduct?.image_url || "";
+    let sharedImageUrls: string[] = [];
+
+    if (!canonicalImageUrl && pendingFiles.length) {
+      setIsUploading(true);
+      for (const [index, file] of pendingFiles.slice(0, 5).entries()) {
+        const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
+        const objectPath = `universal-products/${universalId}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, {
+          upsert: false,
+          contentType: file.type
+        });
+        if (uploadError) throw uploadError;
+        sharedImageUrls.push(supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl);
+      }
+      canonicalImageUrl = sharedImageUrls[0] || "";
+    } else if (!canonicalImageUrl && requestedImageUrl && !requestedImageUrl.startsWith("blob:")) {
+      canonicalImageUrl = requestedImageUrl;
+      sharedImageUrls = [canonicalImageUrl];
     }
 
-    if (universalProduct?.image_url && !imageFile && imageFiles.length === 0 && existingImageUrls.length === 0 && !imageUrl) {
-      const { error: fallbackError } = await supabase
+    if (canonicalImageUrl && !universalProduct?.image_url) {
+      const { error: updateUniversalError } = await supabase
+        .from("universal_products")
+        .update({ image_url: canonicalImageUrl })
+        .eq("id", universalId);
+      if (updateUniversalError) throw updateUniversalError;
+
+      // Store the canonical image and any additional vendor-uploaded angles once
+      // against the universal product. The primary URL remains universal_products.image_url.
+      const imageRows = (sharedImageUrls.length ? sharedImageUrls : [canonicalImageUrl]).map((url, index) => ({
+        universal_product_id: universalId,
+        image_url: url,
+        is_primary: index === 0,
+        source: imageSource
+          ? [imageSource.source, imageSource.license, imageSource.sourceUrl].filter(Boolean).join(" | ").slice(0, 500)
+          : pendingFiles.length ? "Vendor upload" : "External image",
+        created_by: authUserId
+      }));
+      const { error: imageInsertError } = await supabase
+        .from("universal_product_images")
+        .insert(imageRows);
+      if (imageInsertError) console.warn("Shared image saved, but image provenance rows were not created:", imageInsertError);
+    }
+
+    if (canonicalImageUrl) {
+      const { error: vendorImageError } = await supabase
         .from("products")
-        .update({ image_url: universalProduct.image_url, updated_at: new Date().toISOString() })
+        .update({ image_url: canonicalImageUrl })
         .eq("id", productId);
-      if (fallbackError) console.warn("Could not apply universal image fallback:", fallbackError);
-      else {
-        setImageUrl(universalProduct.image_url);
-        setIsImageError(false);
-      }
+      if (vendorImageError) throw vendorImageError;
+      setImageUrl(canonicalImageUrl);
+      setIsImageError(false);
     }
   };
 
@@ -467,23 +534,9 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         }
       }
 
-      let finalImageUrl = imageUrl;
-      if (imageFiles.length) {
-        setIsUploading(true);
-        const uploadedUrls: string[] = [];
-        for (const file of imageFiles.slice(0, 5)) {
-          const fileExt = file.name.split(".").pop() || "jpg";
-          const fileName = `${crypto.randomUUID()}.${fileExt}`;
-          const { error: uploadError } = await supabase.storage.from("product-images").upload(fileName, file);
-          if (uploadError) throw uploadError;
-          const { data: publicUrlData } = supabase.storage.from("product-images").getPublicUrl(fileName);
-          uploadedUrls.push(publicUrlData.publicUrl);
-        }
-        finalImageUrl = uploadedUrls.length > 1 ? JSON.stringify(uploadedUrls) : (uploadedUrls[0] || "");
-        setIsUploading(false);
-      } else if (existingImageUrls.length) {
-        finalImageUrl = existingImageUrls.length > 1 ? JSON.stringify(existingImageUrls) : existingImageUrls[0];
-      }
+      // Do not upload here. First resolve the shared catalogue identity, then
+      // upload at most one canonical image only if that universal product lacks one.
+      const finalImageUrl = imageFiles.length ? null : (imageUrl || (existingImageUrls[0] || null));
 
       const finalWeightString = form.weightValue.trim() ? `${form.weightValue.trim()} ${form.weightUnit}` : null;
       const numericGst = parseFloat(form.gst_slab) || 0;
@@ -532,7 +585,7 @@ export function AddEditProduct({ onNavigate, product }: Props) {
         savedProductId = insertedProduct.id;
       }
 
-      await resolveUniversalProduct(savedProductId);
+      await resolveUniversalProduct(savedProductId, authData.user.id, imageFiles, imageUrl, selectedImageSource);
       onNavigate("products");
     } catch (err: any) {
       console.error("Product preservation exception:", err);
@@ -552,16 +605,30 @@ export function AddEditProduct({ onNavigate, product }: Props) {
   const selectedCategoryName = categories.find(category => category.id === form.category_id)?.name || "";
 
   return (
-    <div className="p-4 lg:p-6 max-w-4xl mx-auto space-y-6">
-      <div className="flex items-center gap-3">
-        <button type="button" onClick={() => onNavigate("products")} className="w-9 h-9 rounded-lg border border-border flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-all"><ChevronLeft className="w-4 h-4" /></button>
-        <div>
-          <h1 className="text-xl font-bold text-foreground">{product ? "Edit Product" : "Add New Product"}</h1>
-          <p className="text-xs text-muted-foreground">List a new item with dynamic margin evaluations</p>
+    <div className="p-4 lg:p-6 max-w-5xl mx-auto space-y-5">
+      <div className="sticky top-0 z-30 -mx-4 lg:-mx-6 px-4 lg:px-6 py-3 bg-background/95 backdrop-blur border-b border-border flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <button type="button" onClick={() => onNavigate("products")} className="w-9 h-9 shrink-0 rounded-lg border border-border flex items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-all" aria-label="Back to products"><ChevronLeft className="w-4 h-4" /></button>
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold text-foreground">{product ? "Edit Product" : "Add New Product"}</h1>
+            <p className="text-xs text-muted-foreground truncate">{product ? form.name || "Update product details" : "Add an item to your store catalogue"}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasProductNavigation && (
+            <>
+              <span className="hidden sm:inline text-xs text-muted-foreground tabular-nums">{productIndex + 1} of {navigationProducts.length}</span>
+              <button type="button" onClick={() => navigateProduct(productIndex - 1)} disabled={productIndex <= 0 || isSubmitting} className="h-9 px-3 rounded-lg border border-border bg-card text-xs font-medium flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted" aria-label="Previous product"><ChevronLeft className="w-4 h-4" /><span className="hidden sm:inline">Previous</span></button>
+              <button type="button" onClick={() => navigateProduct(productIndex + 1)} disabled={productIndex >= navigationProducts.length - 1 || isSubmitting} className="h-9 px-3 rounded-lg border border-border bg-card text-xs font-medium flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-muted" aria-label="Next product"><span className="hidden sm:inline">Next</span><ChevronRight className="w-4 h-4" /></button>
+            </>
+          )}
+          <button type="submit" form="product-edit-form" disabled={isSubmitting || isUploading} className="h-9 px-4 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+            {isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />Saving…</> : <><Save className="w-4 h-4" />{product ? "Update Product" : "Save Product"}</>}
+          </button>
         </div>
       </div>
 
-      <form onSubmit={handleSaveProduct} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <form id="product-edit-form" onSubmit={handleSaveProduct} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
             <div>
@@ -711,9 +778,9 @@ export function AddEditProduct({ onNavigate, product }: Props) {
             </div>
           </div>
 
-          <div className="bg-card border border-border rounded-xl p-4 shadow-sm space-y-3">
-            <button type="submit" disabled={isSubmitting || isUploading} className="w-full h-10 rounded-lg bg-[#10B981] hover:bg-[#059669] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">{isSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />{product ? "Updating Product..." : "Saving Product..."}</> : <><Save className="w-4 h-4" />{product ? "Update Product" : "Save Product"}</>}</button>
-            <button type="button" onClick={() => onNavigate("products")} disabled={isSubmitting} className="w-full h-10 rounded-lg border border-border bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">Cancel</button>
+          <div className="bg-card border border-border rounded-xl p-4 shadow-sm">
+            <p className="text-xs text-muted-foreground mb-3">Changes are saved to your store when you select Update Product above.</p>
+            <button type="button" onClick={() => onNavigate("products")} disabled={isSubmitting} className="w-full h-9 rounded-lg border border-border bg-background text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50">Cancel</button>
           </div>
         </div>
       </form>

@@ -259,7 +259,14 @@ export default function App() {
       case "smart-import":
         return <SmartImport onNavigate={handleNavigate} />;
       case "add-product":
-        return <AddEditProduct onNavigate={handleNavigate} product={pageParams?.product} />;
+        return (
+          <AddEditProduct
+            onNavigate={handleNavigate}
+            product={pageParams?.product}
+            navigationProducts={pageParams?.navigationProducts}
+            productIndex={pageParams?.productIndex}
+          />
+        );
       case "inventory":
         return <Inventory />;
       case "offers":
