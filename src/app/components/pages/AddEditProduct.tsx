@@ -74,7 +74,13 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     description: "",
     stock: "",
     sku: "",
-    barcode: ""
+    barcode: "",
+    is_exclusive: false,
+    allow_loose_quantity: false,
+    loose_min_quantity: "100",
+    loose_max_quantity: "5000",
+    loose_step_quantity: "100",
+    loose_unit: "Gm"
   });
 
   useEffect(() => {
@@ -141,7 +147,13 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         description: product.description || "",
         stock: product.stock !== undefined && product.stock !== null ? String(product.stock) : "",
         sku: product.sku || "",
-        barcode: product.barcode || ""
+        barcode: product.barcode || "",
+        is_exclusive: product.is_exclusive === true,
+        allow_loose_quantity: product.allow_loose_quantity === true,
+        loose_min_quantity: product.loose_min_quantity != null ? String(product.loose_min_quantity) : "100",
+        loose_max_quantity: product.loose_max_quantity != null ? String(product.loose_max_quantity) : "5000",
+        loose_step_quantity: product.loose_step_quantity != null ? String(product.loose_step_quantity) : "100",
+        loose_unit: product.loose_unit || "Gm"
       });
 
       const urls = parseImageUrls(product.image_url);
@@ -165,7 +177,13 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         description: "",
         stock: "",
         sku: "",
-        barcode: ""
+        barcode: "",
+        is_exclusive: false,
+        allow_loose_quantity: false,
+        loose_min_quantity: "100",
+        loose_max_quantity: "5000",
+        loose_step_quantity: "100",
+        loose_unit: "Gm"
       });
       setExistingImageUrls([]);
       setImageUrl("");
@@ -540,6 +558,14 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
 
       const finalWeightString = form.weightValue.trim() ? `${form.weightValue.trim()} ${form.weightUnit}` : null;
       const numericGst = parseFloat(form.gst_slab) || 0;
+      const looseMin = Number(form.loose_min_quantity);
+      const looseMax = Number(form.loose_max_quantity);
+      const looseStep = Number(form.loose_step_quantity);
+      if (form.allow_loose_quantity && (!Number.isFinite(looseMin) || !Number.isFinite(looseMax) || !Number.isFinite(looseStep) || looseMin <= 0 || looseMax < looseMin || looseStep <= 0)) {
+        alert("Enter valid loose quantity limits. Minimum must be positive, maximum must be at least the minimum, and step must be positive.");
+        return;
+      }
+
       const productPayload = {
         name: form.name.trim(),
         category_id: selectedCategory.id,
@@ -554,6 +580,12 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         description: form.description || null,
         stock: parseInt(form.stock) || 0,
         image_url: finalImageUrl || null,
+        is_exclusive: form.is_exclusive,
+        allow_loose_quantity: form.allow_loose_quantity,
+        loose_min_quantity: form.allow_loose_quantity ? looseMin : null,
+        loose_max_quantity: form.allow_loose_quantity ? looseMax : null,
+        loose_step_quantity: form.allow_loose_quantity ? looseStep : null,
+        loose_unit: form.allow_loose_quantity ? form.loose_unit : null,
         vendor_id: vendor.id,
         sku: form.sku || null,
         barcode: form.barcode || null
@@ -659,6 +691,17 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
             <div className="grid grid-cols-2 gap-3">
               <div><label className="block text-xs font-medium text-muted-foreground mb-1">Weight / Volume</label><div className="flex items-center gap-1"><input type="number" step="any" placeholder="e.g. 500" value={form.weightValue} onChange={e => handleField("weightValue", e.target.value)} className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /><select value={form.weightUnit} onChange={e => handleField("weightUnit", e.target.value)} className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">{unitOptions.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select></div></div>
               <div><label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label><input type="number" required placeholder="0" value={form.stock} onChange={e => handleField("stock", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
+            </div>
+            <div className="rounded-xl border border-border p-3 space-y-3">
+              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.is_exclusive} onChange={e => handleField("is_exclusive", String(e.target.checked))} /> Mark as RivoCity Exclusive</label>
+              <p className="text-[10px] text-muted-foreground">Exclusive products receive a visible badge in the customer app.</p>
+              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.allow_loose_quantity} onChange={e => handleField("allow_loose_quantity", String(e.target.checked))} /> Allow loose quantity ordering</label>
+              {form.allow_loose_quantity && <div className="grid grid-cols-2 gap-2">
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum quantity</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum quantity</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Increment / step</label><input type="number" min="0.001" step="any" value={form.loose_step_quantity} onChange={e => handleField("loose_step_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Unit</label><select value={form.loose_unit} onChange={e => handleField("loose_unit", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background"><option value="Gm">Grams</option><option value="Kg">Kilograms</option><option value="Ml">Millilitres</option><option value="Ltr">Litres</option></select></div>
+              </div>}
             </div>
             <div><label className="block text-xs font-medium text-muted-foreground mb-1">Description</label><textarea rows={2} placeholder="Describe the product..." value={form.description} onChange={e => handleField("description", e.target.value)} className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none" /></div>
           </div>
