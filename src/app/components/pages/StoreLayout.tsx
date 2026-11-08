@@ -48,7 +48,7 @@ export default function StoreLayout() {
     const [l, r, w, p, loc, a, h] = await Promise.all([
       supabase.from("vendor_lanes").select("id,lane_name,lane_code,status").eq("vendor_id", vendor.id).order("lane_name"),
       supabase.from("vendor_racks").select("id,lane_id,rack_name,rack_code,status").eq("vendor_id", vendor.id).order("rack_name"),
-      supabase.from("vendor_workers").select("id,worker_name").eq("vendor_id", vendor.id).eq("status", "active").order("worker_name"),
+      supabase.from("vendor_workers").select("id,worker_name,auth_user_id").eq("vendor_id", vendor.id).eq("status", "active").neq("auth_user_id", auth.user.id).order("worker_name"),
       supabase.from("products").select("id,name,stock,low_stock_threshold").eq("vendor_id", vendor.id).order("name"),
       supabase.from("product_storage_locations").select("id,product_id,lane_id,rack_id,location_note").eq("vendor_id", vendor.id),
       supabase.from("vendor_lane_picker_assignments").select("id,lane_id,worker_id,status").eq("vendor_id", vendor.id).eq("status", "active"),
@@ -60,7 +60,10 @@ export default function StoreLayout() {
     setWorkers((w.data || []) as Worker[]);
     setProducts((p.data || []) as Product[]);
     setLocations((loc.data || []) as Location[]);
-    setAssignments((a.data || []) as Assignment[]);
+    const visibleWorkerIds = new Set((w.data || []).map((worker: any) => worker.id));
+    // A vendor may have a legacy vendor_workers row for internal picking, but must never appear
+    // as a Picker in assignment controls or the assignment list.
+    setAssignments(((a.data || []).filter((row: any) => visibleWorkerIds.has(row.worker_id))) as Assignment[]);
     setHelperRequests((h.data || []) as HelperRequest[]);
   };
 
@@ -110,17 +113,90 @@ export default function StoreLayout() {
 
   const assignWorker = () => run(async () => {
     if (!vendorId || !workerId) throw new Error("Select a Picker.");
+
     if (workerScope === "store") {
-      const { error } = await supabase.from("vendor_lane_picker_assignments").update({ status: "inactive", unassigned_at: new Date().toISOString() }).eq("vendor_id", vendorId).eq("worker_id", workerId).eq("status", "active");
+      const { error } = await supabase
+        .from("vendor_lane_picker_assignments")
+        .update({ status: "inactive", unassigned_at: new Date().toISOString() })
+        .eq("vendor_id", vendorId)
+        .eq("worker_id", workerId)
+        .eq("status", "active");
       if (error) throw error;
       setMessage("Picker is assigned store-wide.");
-    } else {
-      if (!workerLaneId) throw new Error("Select a lane for this Picker.");
-      if (assignments.some(a => a.worker_id === workerId && a.lane_id === workerLaneId)) throw new Error("This Picker is already assigned to that lane.");
-      const { error } = await supabase.from("vendor_lane_picker_assignments").insert({ vendor_id: vendorId, lane_id: workerLaneId, worker_id: workerId, status: "active" });
-      if (error) throw error;
-      setMessage("Picker assigned to lane.");
+      return;
     }
+
+    if (!workerLaneId) throw new Error("Select a lane for this Picker.");
+
+    const existing = assignments.find(
+      assignment => assignment.worker_id === workerId && assignment.lane_id === workerLaneId
+    );
+
+    if (existing) {
+      throw new Error("This Picker is already assigned to that lane.");
+    }
+
+    // Reuse an inactive historical row when the database has a unique constraint
+    // on (vendor_id, lane_id, worker_id). Inserting a second row would return HTTP 409.
+    const { data: previous, error: previousError } = await supabase
+      .from("vendor_lane_picker_assignments")
+      .select("id,status")
+      .eq("vendor_id", vendorId)
+      .eq("lane_id", workerLaneId)
+      .eq("worker_id", workerId)
+      .maybeSingle();
+
+    if (previousError) throw previousError;
+
+    if (previous) {
+      if (previous.status === "active") {
+        throw new Error("This Picker is already assigned to that lane.");
+      }
+
+      const { error: reactivateError } = await supabase
+        .from("vendor_lane_picker_assignments")
+        .update({ status: "active", unassigned_at: null })
+        .eq("id", previous.id)
+        .eq("vendor_id", vendorId);
+
+      if (reactivateError) throw reactivateError;
+      setMessage("Previous Picker assignment restored.");
+      return;
+    }
+
+    const { error: insertError } = await supabase
+      .from("vendor_lane_picker_assignments")
+      .insert({ vendor_id: vendorId, lane_id: workerLaneId, worker_id: workerId, status: "active" });
+
+    if (insertError) {
+      // Handle a concurrent save / duplicate request without hiding unrelated errors.
+      if (insertError.code === "23505" || (insertError as any).status === 409) {
+        const { data: duplicate, error: duplicateError } = await supabase
+          .from("vendor_lane_picker_assignments")
+          .select("id,status")
+          .eq("vendor_id", vendorId)
+          .eq("lane_id", workerLaneId)
+          .eq("worker_id", workerId)
+          .maybeSingle();
+
+        if (duplicateError) throw duplicateError;
+        if (duplicate?.status !== "active" && duplicate?.id) {
+          const { error: restoreError } = await supabase
+            .from("vendor_lane_picker_assignments")
+            .update({ status: "active", unassigned_at: null })
+            .eq("id", duplicate.id)
+            .eq("vendor_id", vendorId);
+          if (restoreError) throw restoreError;
+          setMessage("Previous Picker assignment restored.");
+          return;
+        }
+
+        throw new Error("This Picker is already assigned to that lane.");
+      }
+      throw insertError;
+    }
+
+    setMessage("Picker assigned to lane.");
   });
 
   const requestHelper = () => run(async () => {
