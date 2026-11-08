@@ -187,7 +187,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         loose_min_quantity: "100",
         loose_max_quantity: "5000",
         loose_step_quantity: "100",
-        loose_unit: "Gm"
+        loose_unit: "Pcs"
       });
       setExistingImageUrls([]);
       setImageUrl("");
