@@ -596,6 +596,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         vendor_id: vendor.id,
         sku: form.sku || null,
         barcode: form.barcode || null
+      };
 
       let savedProductId: string;
       if (editingId) {
