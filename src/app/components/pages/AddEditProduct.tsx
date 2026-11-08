@@ -28,7 +28,7 @@ interface Props {
 }
 
 const gstOptions = [0, 5, 12, 18, 28];
-const unitOptions = ["Gm", "Kg", "Ltr", "Ml", "Pcs", "Pack"];
+const unitOptions = ["Pcs", "Bottle", "Pack", "Unit", "Set", "Dozen", "Gm", "Kg", "Ml", "Ltr"];
 
 export function AddEditProduct({ onNavigate, product, navigationProducts = [], productIndex = 0 }: Props) {
   const hasProductNavigation = Boolean(product && navigationProducts.length > 1);
@@ -70,7 +70,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     batch_number: "",
     expiry_date: "",
     weightValue: "",
-    weightUnit: "Gm",
+    weightUnit: "Pcs",
     description: "",
     stock: "",
     sku: "",
@@ -120,7 +120,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
   useEffect(() => {
     if (product) {
       let parsedWeightVal = "";
-      let parsedWeightUnit = "Gm";
+      let parsedWeightUnit = "Pcs";
       if (product.weight) {
         const weightStr = product.weight.toString().trim();
         const numericMatch = weightStr.match(/^[\d.]+/);
@@ -177,7 +177,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         batch_number: "",
         expiry_date: "",
         weightValue: "",
-        weightUnit: "Gm",
+        weightUnit: "Pcs",
         description: "",
         stock: "",
         sku: "",
@@ -711,18 +711,18 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
               <div><label className="block text-xs font-medium text-muted-foreground mb-1">Expiry Date {selectedCategoryName === "Medical" && "*"}</label><input type="date" value={form.expiry_date} onChange={e => handleField("expiry_date", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-medium text-muted-foreground mb-1">Weight / Volume</label><div className="flex items-center gap-1"><input type="number" step="any" placeholder="e.g. 500" value={form.weightValue} onChange={e => handleField("weightValue", e.target.value)} className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /><select value={form.weightUnit} onChange={e => handleField("weightUnit", e.target.value)} className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">{unitOptions.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select></div></div>
+              <div><label className="block text-xs font-medium text-muted-foreground mb-1">Pack size / selling unit</label><div className="flex items-center gap-1"><input type="number" step="any" placeholder="e.g. 500" value={form.weightValue} onChange={e => handleField("weightValue", e.target.value)} className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /><select value={form.weightUnit} onChange={e => handleField("weightUnit", e.target.value)} className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">{unitOptions.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select></div></div>
               <div><label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label><input type="number" required placeholder="0" value={form.stock} onChange={e => handleField("stock", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
             </div>
             <div className="rounded-xl border border-border p-3 space-y-3">
               <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.is_exclusive} onChange={e => setForm(current => ({ ...current, is_exclusive: e.target.checked }))} /> Mark as RivoCity Exclusive</label>
-              <p className="text-[10px] text-muted-foreground">Exclusive products receive a visible badge in the customer app.</p>
+              <p className="text-[10px] text-muted-foreground">Exclusive products receive a visible badge on customer product cards and details.</p>
               <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.allow_loose_quantity} onChange={e => setForm(current => ({ ...current, allow_loose_quantity: e.target.checked }))} /> Allow loose quantity ordering</label>
               {form.allow_loose_quantity && <div className="grid grid-cols-2 gap-2">
                 <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum quantity</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
                 <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum quantity</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
                 <div><label className="block text-[10px] text-muted-foreground mb-1">Increment / step</label><input type="number" min="0.001" step="any" value={form.loose_step_quantity} onChange={e => handleField("loose_step_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Unit</label><select value={form.loose_unit} onChange={e => handleField("loose_unit", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background"><option value="Gm">Grams</option><option value="Kg">Kilograms</option><option value="Ml">Millilitres</option><option value="Ltr">Litres</option></select></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Measured quantity unit</label><select value={form.loose_unit} onChange={e => handleField("loose_unit", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background"><option value="Gm">Grams</option><option value="Kg">Kilograms</option><option value="Ml">Millilitres</option><option value="Ltr">Litres</option></select></div>
               </div>}
             </div>
             <div><label className="block text-xs font-medium text-muted-foreground mb-1">Description</label><textarea rows={2} placeholder="Describe the product..." value={form.description} onChange={e => handleField("description", e.target.value)} className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none" /></div>
