@@ -80,7 +80,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     loose_min_quantity: "100",
     loose_max_quantity: "5000",
     loose_step_quantity: "100",
-    loose_unit: "Gm"
+    loose_unit: "Pcs"
   });
 
   useEffect(() => {
@@ -153,7 +153,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         loose_min_quantity: product.loose_min_quantity != null ? String(product.loose_min_quantity) : "100",
         loose_max_quantity: product.loose_max_quantity != null ? String(product.loose_max_quantity) : "5000",
         loose_step_quantity: product.loose_step_quantity != null ? String(product.loose_step_quantity) : "100",
-        loose_unit: product.loose_unit || "Gm"
+        loose_unit: product.loose_unit || "Pcs"
       });
 
       const urls = parseImageUrls(product.image_url);
@@ -722,7 +722,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
                 <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum quantity</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
                 <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum quantity</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
                 <div><label className="block text-[10px] text-muted-foreground mb-1">Increment / step</label><input type="number" min="0.001" step="any" value={form.loose_step_quantity} onChange={e => handleField("loose_step_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Measured quantity unit</label><select value={form.loose_unit} onChange={e => handleField("loose_unit", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background"><option value="Gm">Grams</option><option value="Kg">Kilograms</option><option value="Ml">Millilitres</option><option value="Ltr">Litres</option></select></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Measured quantity unit</label><select value={form.loose_unit} onChange={e => handleField("loose_unit", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background"><option value="Pcs">Pieces</option><option value="Bottle">Bottles</option><option value="Pack">Packs</option><option value="Unit">Units</option><option value="Set">Sets</option><option value="Dozen">Dozen</option><option value="Gm">Grams</option><option value="Kg">Kilograms</option><option value="Ml">Millilitres</option><option value="Ltr">Litres</option></select></div>
               </div>}
             </div>
             <div><label className="block text-xs font-medium text-muted-foreground mb-1">Description</label><textarea rows={2} placeholder="Describe the product..." value={form.description} onChange={e => handleField("description", e.target.value)} className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none" /></div>
