@@ -237,6 +237,12 @@ export function Products({
             gst_slab: p.gst_slab,
             batch_number: p.batch_number,
             weight: p.weight,
+            is_exclusive: p.is_exclusive === true,
+            allow_loose_quantity: p.allow_loose_quantity === true,
+            loose_min_quantity: p.loose_min_quantity,
+            loose_max_quantity: p.loose_max_quantity,
+            loose_step_quantity: p.loose_step_quantity,
+            loose_unit: p.loose_unit,
             description: p.description,
 
             low_stock_threshold:
@@ -986,9 +992,13 @@ export function Products({
                           )}
                         </div>
 
-                        <p className="text-sm font-medium text-foreground">
-                          {p.name}
-                        </p>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-foreground">{p.name}</p>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {p.is_exclusive && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[#0D0D0D] text-[#A8E63A] font-bold">RIVO EXCLUSIVE</span>}
+                            {p.allow_loose_quantity && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold">LOOSE {p.loose_unit || ""}</span>}
+                          </div>
+                        </div>
                       </div>
                     </td>
 
