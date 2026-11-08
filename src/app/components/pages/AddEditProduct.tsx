@@ -159,6 +159,10 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
       const urls = parseImageUrls(product.image_url);
       setExistingImageUrls(urls);
       setImageUrl(urls[0] || "");
+      // Vendor-specific gallery is stored on the product row, while the shared catalogue remains canonical.
+      supabase.from("products").select("image_url").eq("id", product.id).maybeSingle().then(({ data }) => {
+        if (data?.image_url) setExistingImageUrls(parseImageUrls(data.image_url));
+      });
       setImageFile(null);
       setImageFiles([]);
       setIsImageError(false);
@@ -617,6 +621,21 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         savedProductId = insertedProduct.id;
       }
 
+      if (imageFiles.length > 0) {
+        setIsUploading(true);
+        const galleryUrls: string[] = [];
+        for (const [index, file] of imageFiles.slice(0, 5).entries()) {
+          const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
+          const objectPath = `vendor-products/${vendor.id}/${savedProductId}/${crypto.randomUUID()}.${extension}`;
+          const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, { upsert: false, contentType: file.type });
+          if (uploadError) throw uploadError;
+          galleryUrls.push(supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl);
+        }
+        const { error: galleryUpdateError } = await supabase.from("products").update({ image_url: JSON.stringify(galleryUrls) }).eq("id", savedProductId);
+        if (galleryUpdateError) throw galleryUpdateError;
+        setExistingImageUrls(galleryUrls);
+        setImageUrl(galleryUrls[0] || "");
+      }
       await resolveUniversalProduct(savedProductId, authData.user.id, imageFiles, imageUrl, selectedImageSource);
       onNavigate("products");
     } catch (err: any) {
