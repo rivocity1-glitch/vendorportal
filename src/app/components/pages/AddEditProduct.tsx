@@ -493,7 +493,10 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
       if (imageInsertError) console.warn("Shared image saved, but image provenance rows were not created:", imageInsertError);
     }
 
-    if (canonicalImageUrl) {
+    // When vendor-specific gallery files were uploaded, products.image_url
+    // already contains the gallery JSON. Do not replace it with the shared
+    // universal catalogue's single canonical image.
+    if (canonicalImageUrl && pendingFiles.length === 0) {
       const { error: vendorImageError } = await supabase
         .from("products")
         .update({ image_url: canonicalImageUrl })
@@ -712,9 +715,9 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
               <div><label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label><input type="number" required placeholder="0" value={form.stock} onChange={e => handleField("stock", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
             </div>
             <div className="rounded-xl border border-border p-3 space-y-3">
-              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.is_exclusive} onChange={e => handleField("is_exclusive", String(e.target.checked))} /> Mark as RivoCity Exclusive</label>
+              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.is_exclusive} onChange={e => setForm(current => ({ ...current, is_exclusive: e.target.checked }))} /> Mark as RivoCity Exclusive</label>
               <p className="text-[10px] text-muted-foreground">Exclusive products receive a visible badge in the customer app.</p>
-              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.allow_loose_quantity} onChange={e => handleField("allow_loose_quantity", String(e.target.checked))} /> Allow loose quantity ordering</label>
+              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.allow_loose_quantity} onChange={e => setForm(current => ({ ...current, allow_loose_quantity: e.target.checked }))} /> Allow loose quantity ordering</label>
               {form.allow_loose_quantity && <div className="grid grid-cols-2 gap-2">
                 <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum quantity</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
                 <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum quantity</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
