@@ -624,7 +624,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
       if (imageFiles.length > 0) {
         setIsUploading(true);
         const galleryUrls: string[] = [];
-        for (const [index, file] of imageFiles.slice(0, 5).entries()) {
+        for (const file of imageFiles.slice(0, 5)) {
           const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
           const objectPath = `vendor-products/${vendor.id}/${savedProductId}/${crypto.randomUUID()}.${extension}`;
           const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, { upsert: false, contentType: file.type });
