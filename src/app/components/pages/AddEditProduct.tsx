@@ -28,7 +28,7 @@ interface Props {
 }
 
 const gstOptions = [0, 5, 12, 18, 28];
-const unitOptions = ["Gm", "Kg", "Ltr", "Ml", "Pcs", "Pack"];
+const unitOptions = ["Pcs", "Bottle", "Pack", "Unit", "Set", "Dozen", "Gm", "Kg", "Ml", "Ltr"];
 
 export function AddEditProduct({ onNavigate, product, navigationProducts = [], productIndex = 0 }: Props) {
   const hasProductNavigation = Boolean(product && navigationProducts.length > 1);
@@ -70,11 +70,17 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     batch_number: "",
     expiry_date: "",
     weightValue: "",
-    weightUnit: "Gm",
+    weightUnit: "Pcs",
     description: "",
     stock: "",
     sku: "",
-    barcode: ""
+    barcode: "",
+    is_exclusive: false,
+    allow_loose_quantity: false,
+    loose_min_quantity: "100",
+    loose_max_quantity: "5000",
+    loose_step_quantity: "100",
+    loose_unit: "Pcs"
   });
 
   useEffect(() => {
@@ -114,7 +120,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
   useEffect(() => {
     if (product) {
       let parsedWeightVal = "";
-      let parsedWeightUnit = "Gm";
+      let parsedWeightUnit = "Pcs";
       if (product.weight) {
         const weightStr = product.weight.toString().trim();
         const numericMatch = weightStr.match(/^[\d.]+/);
@@ -141,12 +147,22 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         description: product.description || "",
         stock: product.stock !== undefined && product.stock !== null ? String(product.stock) : "",
         sku: product.sku || "",
-        barcode: product.barcode || ""
+        barcode: product.barcode || "",
+        is_exclusive: product.is_exclusive === true,
+        allow_loose_quantity: product.allow_loose_quantity === true,
+        loose_min_quantity: product.loose_min_quantity != null ? String(product.loose_min_quantity) : "100",
+        loose_max_quantity: product.loose_max_quantity != null ? String(product.loose_max_quantity) : "5000",
+        loose_step_quantity: product.loose_step_quantity != null ? String(product.loose_step_quantity) : "100",
+        loose_unit: product.loose_unit || "Pcs"
       });
 
       const urls = parseImageUrls(product.image_url);
       setExistingImageUrls(urls);
       setImageUrl(urls[0] || "");
+      // Vendor-specific gallery is stored on the product row, while the shared catalogue remains canonical.
+      supabase.from("products").select("image_url").eq("id", product.id).maybeSingle().then(({ data }) => {
+        if (data?.image_url) setExistingImageUrls(parseImageUrls(data.image_url));
+      });
       setImageFile(null);
       setImageFiles([]);
       setIsImageError(false);
@@ -161,11 +177,17 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         batch_number: "",
         expiry_date: "",
         weightValue: "",
-        weightUnit: "Gm",
+        weightUnit: "Pcs",
         description: "",
         stock: "",
         sku: "",
-        barcode: ""
+        barcode: "",
+        is_exclusive: false,
+        allow_loose_quantity: false,
+        loose_min_quantity: "100",
+        loose_max_quantity: "5000",
+        loose_step_quantity: "100",
+        loose_unit: "Pcs"
       });
       setExistingImageUrls([]);
       setImageUrl("");
@@ -471,7 +493,10 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
       if (imageInsertError) console.warn("Shared image saved, but image provenance rows were not created:", imageInsertError);
     }
 
-    if (canonicalImageUrl) {
+    // When vendor-specific gallery files were uploaded, products.image_url
+    // already contains the gallery JSON. Do not replace it with the shared
+    // universal catalogue's single canonical image.
+    if (canonicalImageUrl && pendingFiles.length === 0) {
       const { error: vendorImageError } = await supabase
         .from("products")
         .update({ image_url: canonicalImageUrl })
@@ -540,6 +565,14 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
 
       const finalWeightString = form.weightValue.trim() ? `${form.weightValue.trim()} ${form.weightUnit}` : null;
       const numericGst = parseFloat(form.gst_slab) || 0;
+      const looseMin = Number(form.loose_min_quantity);
+      const looseMax = Number(form.loose_max_quantity);
+      const looseStep = Number(form.loose_step_quantity);
+      if (form.allow_loose_quantity && (!Number.isFinite(looseMin) || !Number.isFinite(looseMax) || !Number.isFinite(looseStep) || looseMin <= 0 || looseMax < looseMin || looseStep <= 0)) {
+        alert("Enter valid loose quantity limits. Minimum must be positive, maximum must be at least the minimum, and step must be positive.");
+        return;
+      }
+
       const productPayload = {
         name: form.name.trim(),
         category_id: selectedCategory.id,
@@ -554,6 +587,12 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         description: form.description || null,
         stock: parseInt(form.stock) || 0,
         image_url: finalImageUrl || null,
+        is_exclusive: form.is_exclusive,
+        allow_loose_quantity: form.allow_loose_quantity,
+        loose_min_quantity: form.allow_loose_quantity ? looseMin : null,
+        loose_max_quantity: form.allow_loose_quantity ? looseMax : null,
+        loose_step_quantity: form.allow_loose_quantity ? looseStep : null,
+        loose_unit: form.allow_loose_quantity ? form.loose_unit : null,
         vendor_id: vendor.id,
         sku: form.sku || null,
         barcode: form.barcode || null
@@ -585,6 +624,21 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         savedProductId = insertedProduct.id;
       }
 
+      if (imageFiles.length > 0) {
+        setIsUploading(true);
+        const galleryUrls: string[] = [];
+        for (const file of imageFiles.slice(0, 5)) {
+          const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
+          const objectPath = `vendor-products/${vendor.id}/${savedProductId}/${crypto.randomUUID()}.${extension}`;
+          const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, { upsert: false, contentType: file.type });
+          if (uploadError) throw uploadError;
+          galleryUrls.push(supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl);
+        }
+        const { error: galleryUpdateError } = await supabase.from("products").update({ image_url: JSON.stringify(galleryUrls) }).eq("id", savedProductId);
+        if (galleryUpdateError) throw galleryUpdateError;
+        setExistingImageUrls(galleryUrls);
+        setImageUrl(galleryUrls[0] || "");
+      }
       await resolveUniversalProduct(savedProductId, authData.user.id, imageFiles, imageUrl, selectedImageSource);
       onNavigate("products");
     } catch (err: any) {
@@ -657,8 +711,19 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
               <div><label className="block text-xs font-medium text-muted-foreground mb-1">Expiry Date {selectedCategoryName === "Medical" && "*"}</label><input type="date" value={form.expiry_date} onChange={e => handleField("expiry_date", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-medium text-muted-foreground mb-1">Weight / Volume</label><div className="flex items-center gap-1"><input type="number" step="any" placeholder="e.g. 500" value={form.weightValue} onChange={e => handleField("weightValue", e.target.value)} className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /><select value={form.weightUnit} onChange={e => handleField("weightUnit", e.target.value)} className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">{unitOptions.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select></div></div>
+              <div><label className="block text-xs font-medium text-muted-foreground mb-1">Pack size / selling unit</label><div className="flex items-center gap-1"><input type="number" step="any" placeholder="e.g. 500" value={form.weightValue} onChange={e => handleField("weightValue", e.target.value)} className="flex-1 h-9 px-3 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]" /><select value={form.weightUnit} onChange={e => handleField("weightUnit", e.target.value)} className="w-20 h-9 px-1 text-xs border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981]">{unitOptions.map(unit => <option key={unit} value={unit}>{unit}</option>)}</select></div></div>
               <div><label className="block text-xs font-medium text-muted-foreground mb-1">Stock Quantity *</label><input type="number" required placeholder="0" value={form.stock} onChange={e => handleField("stock", e.target.value)} className="w-full h-9 px-3 text-xs border border-border rounded-lg bg-background" /></div>
+            </div>
+            <div className="rounded-xl border border-border p-3 space-y-3">
+              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.is_exclusive} onChange={e => setForm(current => ({ ...current, is_exclusive: e.target.checked }))} /> Mark as RivoCity Exclusive</label>
+              <p className="text-[10px] text-muted-foreground">Exclusive products receive a visible badge on customer product cards and details.</p>
+              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.allow_loose_quantity} onChange={e => setForm(current => ({ ...current, allow_loose_quantity: e.target.checked }))} /> Allow loose quantity ordering</label>
+              {form.allow_loose_quantity && <div className="grid grid-cols-2 gap-2">
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum quantity</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum quantity</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Increment / step</label><input type="number" min="0.001" step="any" value={form.loose_step_quantity} onChange={e => handleField("loose_step_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                <div><label className="block text-[10px] text-muted-foreground mb-1">Measured quantity unit</label><select value={form.loose_unit} onChange={e => handleField("loose_unit", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background"><option value="Pcs">Pieces</option><option value="Bottle">Bottles</option><option value="Pack">Packs</option><option value="Unit">Units</option><option value="Set">Sets</option><option value="Dozen">Dozen</option><option value="Gm">Grams</option><option value="Kg">Kilograms</option><option value="Ml">Millilitres</option><option value="Ltr">Litres</option></select></div>
+              </div>}
             </div>
             <div><label className="block text-xs font-medium text-muted-foreground mb-1">Description</label><textarea rows={2} placeholder="Describe the product..." value={form.description} onChange={e => handleField("description", e.target.value)} className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none" /></div>
           </div>

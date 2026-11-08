@@ -10,40 +10,16 @@ export async function getCurrentVendorId():Promise<string|null>{
  const{data,error}=await supabase.from("vendors").select("id").eq("auth_user_id",authData.user.id).maybeSingle();if(error)throw error;return data?.id??null;
 }
 export async function getLaneWorkers(vendorId:string):Promise<LaneWorker[]>{
- const{data:vendor,error:vendorError}=await supabase.from("vendors").select("auth_user_id,owner_name").eq("id",vendorId).maybeSingle();
+ const{data:vendor,error:vendorError}=await supabase.from("vendors").select("auth_user_id").eq("id",vendorId).maybeSingle();
  if(vendorError)throw vendorError;
- const{data,error}=await supabase.from("vendor_workers").select("id,worker_name,status,auth_user_id").eq("vendor_id",vendorId).eq("status","active").order("worker_name");
- if(error)throw error;
- const workers=(data||[]) as LaneWorker[];
  const ownerAuthUserId=vendor?.auth_user_id||null;
- if(ownerAuthUserId){
-   const activeOwner=workers.find(worker=>worker.auth_user_id===ownerAuthUserId);
-   if(activeOwner){
-     activeOwner.is_owner=true;
-   }else{
-     const{data:existingOwner,error:existingOwnerError}=await supabase.from("vendor_workers").select("id,worker_name,status,auth_user_id").eq("vendor_id",vendorId).eq("auth_user_id",ownerAuthUserId).maybeSingle();
-     if(existingOwnerError)throw existingOwnerError;
-     if(existingOwner){
-       const{data:reactivatedOwner,error:reactivateError}=await supabase.from("vendor_workers").update({
-         worker_name:vendor?.owner_name||existingOwner.worker_name||"Store Owner",
-         status:"active",
-         updated_at:new Date().toISOString()
-       }).eq("id",existingOwner.id).eq("vendor_id",vendorId).select("id,worker_name,status,auth_user_id").single();
-       if(!reactivateError&&reactivatedOwner)workers.push({...reactivatedOwner,is_owner:true} as LaneWorker);
-       else if(reactivateError)console.warn("Owner worker reactivation warning:",reactivateError);
-     }else{
-       const{data:ownerWorker,error:ownerError}=await supabase.from("vendor_workers").insert({
-         vendor_id:vendorId,
-         auth_user_id:ownerAuthUserId,
-         worker_name:vendor?.owner_name||"Store Owner",
-         status:"active"
-       }).select("id,worker_name,status,auth_user_id").single();
-       if(!ownerError&&ownerWorker)workers.push({...ownerWorker,is_owner:true} as LaneWorker);
-       else if(ownerError)console.warn("Owner worker provisioning warning:",ownerError);
-     }
-   }
- }
- return workers.sort((a,b)=>a.worker_name.localeCompare(b.worker_name)) as LaneWorker[];
+ let query=supabase.from("vendor_workers").select("id,worker_name,status,auth_user_id").eq("vendor_id",vendorId).eq("status","active").order("worker_name");
+ // Keep the vendor's own account out of Picker lists. Do not auto-create/reactivate
+ // a vendor_workers row for the vendor; this identity is not a Picker candidate.
+ if(ownerAuthUserId)query=query.neq("auth_user_id",ownerAuthUserId);
+ const{data,error}=await query;
+ if(error)throw error;
+ return((data||[]) as LaneWorker[]).sort((a,b)=>a.worker_name.localeCompare(b.worker_name));
 }
 export async function removeLaneWorker(workerId:string,vendorId:string){
  const{data:worker,error:we}=await supabase.from("vendor_workers").select("auth_user_id").eq("id",workerId).eq("vendor_id",vendorId).maybeSingle();
