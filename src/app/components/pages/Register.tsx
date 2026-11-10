@@ -734,10 +734,35 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
         );
       }
 
-      const shopCode = `RIVO${Math.random()
-        .toString(36)
-        .slice(2, 4)
-        .toUpperCase()}`;
+      // Vendor IDs must be RIVO- followed by exactly four digits.
+      // Check existing records before insert to avoid issuing an already-used code.
+      let shopCode = "";
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const numericCode = Math.floor(1000 + Math.random() * 9000);
+        const candidate = `RIVO-${numericCode}`;
+        const { data: existingVendor, error: codeLookupError } = await supabase
+          .from("vendors")
+          .select("id")
+          .eq("shop_code", candidate)
+          .maybeSingle();
+
+        if (codeLookupError) {
+          throw new Error(
+            `Could not verify vendor ID availability: ${codeLookupError.message}`
+          );
+        }
+
+        if (!existingVendor) {
+          shopCode = candidate;
+          break;
+        }
+      }
+
+      if (!shopCode) {
+        throw new Error(
+          "Could not generate an available vendor ID. Please try registration again."
+        );
+      }
 
       const {
         data: vendorData,
@@ -790,6 +815,34 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
           `Vendor profile setup failed: ${profileError.message}`
         );
       }
+
+      // Send the same style of welcome email used by the Rider/Admin approval flow.
+      // Email delivery is best-effort and must not roll back a successfully-created account.
+      let welcomeEmailSent = false;
+      try {
+        const { error: emailError } = await supabase.functions.invoke("send-email", {
+          body: {
+            type: "vendor-registered",
+            to: cleanEmail,
+            ownerName: ownerName.trim(),
+            shopName: shopName.trim(),
+            shopCode: vendorData.shop_code || shopCode,
+          },
+        });
+        if (emailError) {
+          console.error("Vendor registration welcome email failed:", emailError);
+        } else {
+          welcomeEmailSent = true;
+        }
+      } catch (emailError) {
+        console.error("Vendor registration welcome email failed:", emailError);
+      }
+
+      setSuccessMessage(
+        welcomeEmailSent
+          ? `Registration submitted. Your vendor code is ${vendorData.shop_code || shopCode}. A confirmation email has been sent to ${cleanEmail}. Your store will become active after admin approval.`
+          : `Registration submitted. Your vendor code is ${vendorData.shop_code || shopCode}. Your store will become active after admin approval. We could not send the confirmation email, so please save your vendor code.`
+      );
 
       setGeneratedShopCode(
         vendorData.shop_code || shopCode
@@ -1074,8 +1127,13 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                   inputRef={emailRef}
                   type="email"
                   value={email}
-                  onChange={setEmail}
+                  onChange={(value) => setEmail(value.replace(/\s/g, ""))}
                   placeholder="owner@example.com"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  helperText="Use a valid email address. Spaces are removed automatically."
                 />
 
                 <div>
@@ -1559,6 +1617,11 @@ interface FieldProps {
   type?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  autoComplete?: string;
+  autoCapitalize?: string;
+  autoCorrect?: string;
+  spellCheck?: boolean;
+  helperText?: string;
 }
 
 function Field({
@@ -1569,6 +1632,11 @@ function Field({
   type = "text",
   inputMode,
   inputRef,
+  autoComplete,
+  autoCapitalize,
+  autoCorrect,
+  spellCheck,
+  helperText,
 }: FieldProps) {
   return (
     <div>
@@ -1580,6 +1648,10 @@ function Field({
         ref={inputRef}
         type={type}
         inputMode={inputMode}
+        autoComplete={autoComplete}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
+        spellCheck={spellCheck}
         value={value}
         onChange={(event) =>
           onChange(event.target.value)
@@ -1587,6 +1659,9 @@ function Field({
         placeholder={placeholder}
         className="w-full h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-[#0F172A] outline-none focus:border-[#2ECC71] transition-colors"
       />
+      {helperText && (
+        <p className="text-[10px] text-neutral-400 mt-1.5">{helperText}</p>
+      )}
     </div>
   );
 }
