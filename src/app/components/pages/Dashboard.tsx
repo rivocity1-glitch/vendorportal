@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ShoppingBag, Clock, IndianRupee, TrendingUp, Package,
-  AlertTriangle, Star, ArrowUp, ArrowDown, Send, Percent, Award
+  AlertTriangle, Star, ArrowUp, ArrowDown, Percent, Award
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -85,7 +85,6 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
   // Core structured relational atomic data vectors
   const [activeVendorId, setActiveVendorId] = useState<string | null>(null);
   const [hasPendingRequest, setHasPendingRequest] = useState<boolean>(false);
-  const [submittingSettlement, setSubmittingSettlement] = useState<boolean>(false);
 
   const [rawOrders, setRawOrders] = useState<any[]>([]);
   const [rawProducts, setRawProducts] = useState<any[]>([]);
@@ -134,7 +133,10 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
       setRawOrders(ordersRes.data || []);
       setRawReviews(reviewsRes.data || []);
       setRawOrderItems(orderItemsRes.data || []);
-      setHasPendingRequest((settlementsRes.data || []).some(s => s.status === "pending_request"));
+      setHasPendingRequest((settlementsRes.data || []).some(s => {
+        const status = String(s.status || "").trim().toUpperCase();
+        return status === "REQUESTED" || status === "PENDING_REQUEST";
+      }));
 
     } catch (err) {
       console.error("Dashboard component data fetching exception:", err);
@@ -272,30 +274,6 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
     };
   }, [rawOrders, rawProducts, rawReviews, rawOrderItems]);
 
-  const handleRequestSettlement = async () => {
-    if (!activeVendorId || derivedMetrics.pendingSettlement < 500 || hasPendingRequest || submittingSettlement) return;
-
-    try {
-      setSubmittingSettlement(true);
-      const { error } = await supabase
-        .from("vendor_settlements")
-        .insert({
-          vendor_id: activeVendorId,
-          amount: derivedMetrics.pendingSettlement,
-          status: "pending_request",
-          request_date: new Date().toISOString()
-        });
-
-      if (error) throw error;
-      setHasPendingRequest(true);
-      await fetchLiveDashboardMetrics();
-    } catch (err) {
-      console.error("Failed to post settlement pipeline modification sequence:", err);
-    } finally {
-      setSubmittingSettlement(false);
-    }
-  };
-
   if (loading) {
     return <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">Syncing store records...</div>;
   }
@@ -315,22 +293,12 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
             <span className="text-xs font-semibold px-3 py-1.5 bg-[#FEF3C7] text-[#92400E] rounded-lg border border-[#FDE68A] inline-block animate-pulse">
               Settlement Request Pending Approval
             </span>
-          ) : derivedMetrics.pendingSettlement < 500 ? (
-            <span className="text-xs font-semibold px-3 py-1.5 bg-muted text-muted-foreground rounded-lg border border-border inline-block">
-              Minimum ₹500 required
-            </span>
           ) : (
             <button
-              onClick={handleRequestSettlement}
-              disabled={submittingSettlement}
-              className="h-9 px-4 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+              onClick={() => onNavigate("settlements")}
+              className="h-9 px-4 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
             >
-              {submittingSettlement ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Send className="w-3.5 h-3.5" />
-              )}
-              <span>Request Settlement</span>
+              <span>Manage Settlements</span>
             </button>
           )}
         </div>
