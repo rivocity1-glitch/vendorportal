@@ -30,3 +30,6 @@ Thumbs.db
 
 # Coverage
 coverage/
+supabase/.temp/
+
+supabase/.temp/

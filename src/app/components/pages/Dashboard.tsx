@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ShoppingBag, Clock, IndianRupee, TrendingUp, Package,
-  AlertTriangle, Star, ArrowUp, ArrowDown, Send, Percent, Award
+  AlertTriangle, Star, ArrowUp, ArrowDown, Percent, Award
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -57,6 +57,13 @@ const StatCard = React.memo(function StatCard({ title, value, change, changeUp, 
 });
 
 // Relative timestamp transformer optimized for relative human readings
+function getLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function getRelativeTime(dateString: string): string {
   const now = new Date();
   const past = new Date(dateString);
@@ -66,14 +73,14 @@ function getRelativeTime(dateString: string): string {
   if (diffMins < 1) return "Just now";
   if (diffMins < 60) return `${diffMins} mins ago`;
 
-  const todayStr = now.toISOString().split("T")[0];
-  const pastStr = past.toISOString().split("T")[0];
+  const todayStr = getLocalDateKey(now);
+  const pastStr = getLocalDateKey(past);
 
   if (todayStr === pastStr) return "Today";
   
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  if (yesterday.toISOString().split("T")[0] === pastStr) return "Yesterday";
+  if (getLocalDateKey(yesterday) === pastStr) return "Yesterday";
 
   return past.toLocaleDateString();
 }
@@ -85,7 +92,6 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
   // Core structured relational atomic data vectors
   const [activeVendorId, setActiveVendorId] = useState<string | null>(null);
   const [hasPendingRequest, setHasPendingRequest] = useState<boolean>(false);
-  const [submittingSettlement, setSubmittingSettlement] = useState<boolean>(false);
 
   const [rawOrders, setRawOrders] = useState<any[]>([]);
   const [rawProducts, setRawProducts] = useState<any[]>([]);
@@ -126,7 +132,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
         supabase.from("products").select("name, stock, low_stock_threshold").eq("vendor_id", vendorId),
         supabase.from("orders").select("id, order_number, total_amount, subtotal, order_status, created_at, vendor_earning, vendor_commission, delivery_fee, platform_fee, settled_vendor, customers!customer_id(customer_name)").eq("vendor_id", vendorId).order("created_at", { ascending: false }),
         supabase.from("reviews").select("rating").eq("vendor_id", vendorId),
-        supabase.from("order_items").select("quantity, products!inner(name, vendor_id)").eq("products.vendor_id", vendorId)
+        supabase.from("order_items").select("quantity, products!inner(name, vendor_id), orders!inner(order_status)").eq("products.vendor_id", vendorId).eq("orders.order_status", "delivered")
       ]);
 
       setRawSettlements(settlementsRes.data || []);
@@ -134,7 +140,10 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
       setRawOrders(ordersRes.data || []);
       setRawReviews(reviewsRes.data || []);
       setRawOrderItems(orderItemsRes.data || []);
-      setHasPendingRequest((settlementsRes.data || []).some(s => s.status === "pending_request"));
+      setHasPendingRequest((settlementsRes.data || []).some(s => {
+        const status = String(s.status || "").trim().toUpperCase();
+        return status === "REQUESTED" || status === "PENDING_REQUEST";
+      }));
 
     } catch (err) {
       console.error("Dashboard component data fetching exception:", err);
@@ -163,7 +172,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
 
   // Memoized Metric Analysis Engines to avoid unnecessary recalculations and re-renders
   const derivedMetrics = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateKey(new Date());
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -179,7 +188,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
 
     rawOrders.forEach((order) => {
       const itemDate = new Date(order.created_at);
-      const itemDateStr = order.created_at ? order.created_at.split('T')[0] : "";
+      const itemDateStr = order.created_at && !Number.isNaN(itemDate.getTime()) ? getLocalDateKey(itemDate) : "";
       const isToday = itemDateStr === todayStr;
       const statusLower = (order.order_status || "").toLowerCase();
       const rowAmount = Number(order.vendor_earning || 0);
@@ -272,30 +281,6 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
     };
   }, [rawOrders, rawProducts, rawReviews, rawOrderItems]);
 
-  const handleRequestSettlement = async () => {
-    if (!activeVendorId || derivedMetrics.pendingSettlement < 500 || hasPendingRequest || submittingSettlement) return;
-
-    try {
-      setSubmittingSettlement(true);
-      const { error } = await supabase
-        .from("vendor_settlements")
-        .insert({
-          vendor_id: activeVendorId,
-          amount: derivedMetrics.pendingSettlement,
-          status: "pending_request",
-          request_date: new Date().toISOString()
-        });
-
-      if (error) throw error;
-      setHasPendingRequest(true);
-      await fetchLiveDashboardMetrics();
-    } catch (err) {
-      console.error("Failed to post settlement pipeline modification sequence:", err);
-    } finally {
-      setSubmittingSettlement(false);
-    }
-  };
-
   if (loading) {
     return <div className="p-6 text-center text-xs text-muted-foreground animate-pulse">Syncing store records...</div>;
   }
@@ -315,22 +300,12 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
             <span className="text-xs font-semibold px-3 py-1.5 bg-[#FEF3C7] text-[#92400E] rounded-lg border border-[#FDE68A] inline-block animate-pulse">
               Settlement Request Pending Approval
             </span>
-          ) : derivedMetrics.pendingSettlement < 500 ? (
-            <span className="text-xs font-semibold px-3 py-1.5 bg-muted text-muted-foreground rounded-lg border border-border inline-block">
-              Minimum ₹500 required
-            </span>
           ) : (
             <button
-              onClick={handleRequestSettlement}
-              disabled={submittingSettlement}
-              className="h-9 px-4 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+              onClick={() => onNavigate("settlements")}
+              className="h-9 px-4 bg-[#10B981] hover:bg-[#059669] text-white font-bold text-xs rounded-lg flex items-center gap-1.5 transition-colors shadow-sm"
             >
-              {submittingSettlement ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Send className="w-3.5 h-3.5" />
-              )}
-              <span>Request Settlement</span>
+              <span>Manage Settlements</span>
             </button>
           )}
         </div>

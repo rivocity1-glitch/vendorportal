@@ -267,7 +267,7 @@ export function Settlements() {
         .eq('vendor_id', currentVendorId)
         .eq('order_status', 'delivered')
         .eq('settled_vendor', false)
-        .lte('delivered_at', cutoff.toISOString());
+        .or(`delivered_at.lte.${cutoff.toISOString()},and(delivered_at.is.null,created_at.lte.${cutoff.toISOString()})`);
 
       if (ordersError) throw ordersError;
 
