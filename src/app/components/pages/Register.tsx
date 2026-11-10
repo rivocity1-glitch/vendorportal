@@ -1074,8 +1074,13 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
                   inputRef={emailRef}
                   type="email"
                   value={email}
-                  onChange={setEmail}
+                  onChange={(value) => setEmail(value.replace(/\s/g, ""))}
                   placeholder="owner@example.com"
+                  autoComplete="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  helperText="Use a valid email address. Spaces are removed automatically."
                 />
 
                 <div>
@@ -1559,6 +1564,11 @@ interface FieldProps {
   type?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  autoComplete?: string;
+  autoCapitalize?: string;
+  autoCorrect?: string;
+  spellCheck?: boolean;
+  helperText?: string;
 }
 
 function Field({
@@ -1569,6 +1579,11 @@ function Field({
   type = "text",
   inputMode,
   inputRef,
+  autoComplete,
+  autoCapitalize,
+  autoCorrect,
+  spellCheck,
+  helperText,
 }: FieldProps) {
   return (
     <div>
@@ -1580,6 +1595,10 @@ function Field({
         ref={inputRef}
         type={type}
         inputMode={inputMode}
+        autoComplete={autoComplete}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
+        spellCheck={spellCheck}
         value={value}
         onChange={(event) =>
           onChange(event.target.value)
@@ -1587,6 +1606,9 @@ function Field({
         placeholder={placeholder}
         className="w-full h-11 rounded-xl border border-neutral-200 bg-white px-3 text-sm text-[#0F172A] outline-none focus:border-[#2ECC71] transition-colors"
       />
+      {helperText && (
+        <p className="text-[10px] text-neutral-400 mt-1.5">{helperText}</p>
+      )}
     </div>
   );
 }
