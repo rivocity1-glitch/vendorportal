@@ -734,9 +734,10 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
         );
       }
 
-      const shopCode = `RIVO${Math.random()
+      // Match the RIVO-XXXX vendor-code format used by Admin-created vendors.
+      const shopCode = `RIVO-${Math.random()
         .toString(36)
-        .slice(2, 4)
+        .substring(2, 6)
         .toUpperCase()}`;
 
       const {
@@ -790,6 +791,34 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
           `Vendor profile setup failed: ${profileError.message}`
         );
       }
+
+      // Send the same style of welcome email used by the Rider/Admin approval flow.
+      // Email delivery is best-effort and must not roll back a successfully-created account.
+      let welcomeEmailSent = false;
+      try {
+        const { error: emailError } = await supabase.functions.invoke("send-email", {
+          body: {
+            type: "vendor-registered",
+            to: cleanEmail,
+            ownerName: ownerName.trim(),
+            shopName: shopName.trim(),
+            shopCode: vendorData.shop_code || shopCode,
+          },
+        });
+        if (emailError) {
+          console.error("Vendor registration welcome email failed:", emailError);
+        } else {
+          welcomeEmailSent = true;
+        }
+      } catch (emailError) {
+        console.error("Vendor registration welcome email failed:", emailError);
+      }
+
+      setSuccessMessage(
+        welcomeEmailSent
+          ? `Registration submitted. Your vendor code is ${vendorData.shop_code || shopCode}. A confirmation email has been sent to ${cleanEmail}. Your store will become active after admin approval.`
+          : `Registration submitted. Your vendor code is ${vendorData.shop_code || shopCode}. Your store will become active after admin approval. We could not send the confirmation email, so please save your vendor code.`
+      );
 
       setGeneratedShopCode(
         vendorData.shop_code || shopCode
