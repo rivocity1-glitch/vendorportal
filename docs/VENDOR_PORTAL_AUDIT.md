@@ -24,6 +24,10 @@ Audit type: static repository review. No live Supabase/RLS inspection or local r
 4. **Logging**
    - Removed unnecessary logging of the Supabase project URL.
 
+5. **Dashboard analytics**
+   - Top-selling product quantities now include only order items belonging to delivered orders.
+   - “Today” and relative-date labels now use the browser’s local calendar date rather than UTC date strings, avoiding day-boundary shifts for IST users.
+
 ## Findings requiring further verification / follow-up
 
 ### High priority
@@ -34,8 +38,6 @@ Audit type: static repository review. No live Supabase/RLS inspection or local r
 ### Medium priority
 - `src/services/orderService.ts` appears unused and defines an order `status` field with values that do not match the established `orders.order_status` schema. Its update helper writes `status`, so reusing it may fail or update the wrong field. It was not changed because it currently has no discovered callers.
 - Dashboard metrics fetch several resources concurrently but do not check each Supabase response's `error`; failed queries can be presented as empty/zero metrics.
-- Dashboard top-selling-product totals are derived from order items without joining/filtering delivered orders, so cancelled or incomplete orders may contribute to the ranking.
-- Some date calculations use UTC date strings while the business operates on IST. Verify dashboard “today” and relative-time labels around midnight IST.
 - Product statistics and several list views fetch all matching rows without explicit pagination/count handling; PostgREST row limits may undercount larger vendor catalogs or histories.
 - Subscription page reads platform settings and plan configuration but does not consistently surface query errors. Verify the live `platform_settings` JSON/key structure and active subscription uniqueness before changing behavior.
 - Profile and settings flows include vendor banking/KYC-related fields. Verify field-level access and storage policies; do not rely on hidden UI fields for protection.
