@@ -125,7 +125,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
         supabase.from("products").select("name, stock, low_stock_threshold").eq("vendor_id", vendorId),
         supabase.from("orders").select("id, order_number, total_amount, subtotal, order_status, created_at, vendor_earning, vendor_commission, delivery_fee, platform_fee, settled_vendor, customers!customer_id(customer_name)").eq("vendor_id", vendorId).order("created_at", { ascending: false }),
         supabase.from("reviews").select("rating").eq("vendor_id", vendorId),
-        supabase.from("order_items").select("quantity, products!inner(name, vendor_id)").eq("products.vendor_id", vendorId)
+        supabase.from("order_items").select("quantity, products!inner(name, vendor_id), orders!inner(order_status)").eq("products.vendor_id", vendorId).eq("orders.order_status", "delivered")
       ]);
 
       setRawSettlements(settlementsRes.data || []);
