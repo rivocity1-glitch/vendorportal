@@ -96,23 +96,23 @@ export default function App() {
 
   const checkActiveSession = async () => {
     try {
-      const { data: { session }, error } = await supabase.auth.getSession();
+      const { data: { user }, error } = await supabase.auth.getUser();
 
-      if (error || !session) {
+      if (error || !user) {
         throw new Error("Invalid or expired authorization signature.");
       }
 
       const { data: profile, error: profileError } = await supabase
         .from("vendors")
         .select("id, status, shop_name, shop_code")
-        .eq("auth_user_id", session.user.id)
+        .eq("auth_user_id", user.id)
         .maybeSingle();
 
       if (profileError || !profile) {
         throw new Error("Operational business profile matrix layout records not discovered.");
       }
 
-      const cleanStatus = profile.status?.toLowerCase();
+      const cleanStatus = String(profile.status || "").toLowerCase();
 
       if (cleanStatus === "approved") {
         // Canonical store identity: vendor_profiles.store_name is the display name
@@ -172,7 +172,8 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event) => {
         if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-          checkActiveSession();
+          // Defer Supabase calls until after the auth callback releases its internal lock.
+          window.setTimeout(() => { void checkActiveSession(); }, 0);
         } else if (event === "SIGNED_OUT") {
           setIsLoggedIn(false);
           setActiveVendor(null);
