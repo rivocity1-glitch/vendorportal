@@ -57,6 +57,13 @@ const StatCard = React.memo(function StatCard({ title, value, change, changeUp, 
 });
 
 // Relative timestamp transformer optimized for relative human readings
+function getLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function getRelativeTime(dateString: string): string {
   const now = new Date();
   const past = new Date(dateString);
@@ -66,14 +73,14 @@ function getRelativeTime(dateString: string): string {
   if (diffMins < 1) return "Just now";
   if (diffMins < 60) return `${diffMins} mins ago`;
 
-  const todayStr = now.toISOString().split("T")[0];
-  const pastStr = past.toISOString().split("T")[0];
+  const todayStr = getLocalDateKey(now);
+  const pastStr = getLocalDateKey(past);
 
   if (todayStr === pastStr) return "Today";
   
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
-  if (yesterday.toISOString().split("T")[0] === pastStr) return "Yesterday";
+  if (getLocalDateKey(yesterday) === pastStr) return "Yesterday";
 
   return past.toLocaleDateString();
 }
@@ -165,7 +172,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
 
   // Memoized Metric Analysis Engines to avoid unnecessary recalculations and re-renders
   const derivedMetrics = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalDateKey(new Date());
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -181,7 +188,7 @@ export function Dashboard({ onNavigate }: { onNavigate: (page: string) => void }
 
     rawOrders.forEach((order) => {
       const itemDate = new Date(order.created_at);
-      const itemDateStr = order.created_at ? order.created_at.split('T')[0] : "";
+      const itemDateStr = order.created_at && !Number.isNaN(itemDate.getTime()) ? getLocalDateKey(itemDate) : "";
       const isToday = itemDateStr === todayStr;
       const statusLower = (order.order_status || "").toLowerCase();
       const rowAmount = Number(order.vendor_earning || 0);
