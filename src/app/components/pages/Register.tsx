@@ -734,11 +734,35 @@ export function Register({ onNavigateToLogin }: RegisterProps) {
         );
       }
 
-      // Match the RIVO-XXXX vendor-code format used by Admin-created vendors.
-      const shopCode = `RIVO-${Math.random()
-        .toString(36)
-        .substring(2, 6)
-        .toUpperCase()}`;
+      // Vendor IDs must be RIVO- followed by exactly four digits.
+      // Check existing records before insert to avoid issuing an already-used code.
+      let shopCode = "";
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const numericCode = Math.floor(1000 + Math.random() * 9000);
+        const candidate = `RIVO-${numericCode}`;
+        const { data: existingVendor, error: codeLookupError } = await supabase
+          .from("vendors")
+          .select("id")
+          .eq("shop_code", candidate)
+          .maybeSingle();
+
+        if (codeLookupError) {
+          throw new Error(
+            `Could not verify vendor ID availability: ${codeLookupError.message}`
+          );
+        }
+
+        if (!existingVendor) {
+          shopCode = candidate;
+          break;
+        }
+      }
+
+      if (!shopCode) {
+        throw new Error(
+          "Could not generate an available vendor ID. Please try registration again."
+        );
+      }
 
       const {
         data: vendorData,
