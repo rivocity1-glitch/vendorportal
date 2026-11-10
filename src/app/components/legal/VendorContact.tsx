@@ -97,12 +97,14 @@ export const VendorContact: React.FC<VendorContactProps> = ({
 
       const { data: vendor, error: vendorError } = await supabase
         .from("vendors")
-        .select("id")
+        .select("id, auth_user_id")
         .eq("auth_user_id", authData.user.id)
         .maybeSingle();
 
       if (vendorError) throw vendorError;
-      if (!vendor) throw new Error("Vendor profile could not be found.");
+      if (!vendor || vendor.auth_user_id !== authData.user.id) {
+        throw new Error("Your vendor profile could not be verified. Please sign out and sign in again.");
+      }
 
       const { error } = await supabase.from("vendor_support_tickets").insert({
         vendor_id: vendor.id,
@@ -114,7 +116,14 @@ export const VendorContact: React.FC<VendorContactProps> = ({
         screenshot_url: null,
       });
 
-      if (error) throw error;
+      if (error) {
+        if (error.code === "42501") {
+          throw new Error(
+            "Your account is signed in, but Supabase is blocking support-ticket creation. The vendor_support_tickets INSERT RLS policy must be applied in Supabase SQL Editor."
+          );
+        }
+        throw error;
+      }
 
       return true;
     } catch (error: any) {
