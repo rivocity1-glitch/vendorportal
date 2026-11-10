@@ -116,14 +116,7 @@ export const VendorContact: React.FC<VendorContactProps> = ({
         screenshot_url: null,
       });
 
-      if (error) {
-        if (error.code === "42501") {
-          throw new Error(
-            "Your account is signed in, but Supabase is blocking support-ticket creation. The vendor_support_tickets INSERT RLS policy must be applied in Supabase SQL Editor."
-          );
-        }
-        throw error;
-      }
+      if (error) throw error;
 
       return true;
     } catch (error: any) {
