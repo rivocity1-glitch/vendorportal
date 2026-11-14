@@ -7,6 +7,7 @@ import { Orders } from "./components/pages/Orders";
 import Invoice from "./components/pages/Invoice";
 import { Products } from "./components/pages/Products";
 import { AddEditProduct } from "./components/pages/AddEditProduct";
+import { ProductVariants } from "./components/pages/ProductVariants";
 import { Inventory } from "./components/pages/Inventory";
 import { Offers } from "./components/pages/Offers";
 import { Analytics } from "./components/pages/Analytics";
@@ -39,6 +40,7 @@ type Page =
   | "products"
   | "smart-import"
   | "add-product"
+  | "product-variants"
   | "inventory"
   | "offers"
   | "analytics"
@@ -268,6 +270,8 @@ export default function App() {
             productIndex={pageParams?.productIndex}
           />
         );
+      case "product-variants":
+        return <ProductVariants onNavigate={handleNavigate} initialProduct={pageParams?.product} />;
       case "inventory":
         return <Inventory />;
       case "offers":
