@@ -4,7 +4,7 @@ import { supabase } from "../../../lib/supabase";
 
 type Product = { id: string; name: string; category_id: string | null; price: number; mrp: number | null; stock: number; sku: string | null };
 type GroupDraft = { key: string; name: string; displayType: "text" | "color" | "image" | "button" | "dropdown"; values: string };
-type VariantDraft = { key: string; name: string; signature: string; optionIds: string[]; price: string; mrp: string; costPrice: string; stock: string; sku: string; barcode: string; enabled: boolean };
+type VariantDraft = { key: string; id?: string; name: string; signature: string; optionIds: string[]; price: string; mrp: string; costPrice: string; stock: string; sku: string; barcode: string; enabled: boolean };
 
 const uid = () => `draft-${Math.random().toString(36).slice(2, 10)}`;
 const money = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -19,6 +19,7 @@ export function ProductVariants({ onNavigate, initialProduct }: { onNavigate: (p
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{type:"info"|"error"|"success"; text:string}|null>(null);
   const [savedCount, setSavedCount] = useState(0);
+  const [savedVariantsLoaded, setSavedVariantsLoaded] = useState(false);
 
   const selectedProduct = products.find(p => p.id === productId) || initialProduct || null;
 
@@ -43,7 +44,52 @@ export function ProductVariants({ onNavigate, initialProduct }: { onNavigate: (p
     } finally { setLoading(false); }
   };
 
+
+  const loadSavedVariants = async (selectedProductId: string) => {
+    if (!selectedProductId) return;
+    setSavedVariantsLoaded(false);
+    const { data: groupRows, error: groupError } = await supabase.from("product_variation_groups")
+      .select("id,name,display_name,display_type").eq("product_id", selectedProductId).order("display_order");
+    if (groupError) throw groupError;
+    const groupsData = groupRows || [];
+    if (!groupsData.length) { setGroups([]); setVariants([]); setSavedVariantsLoaded(true); return; }
+    const groupIds = groupsData.map((group: any) => group.id);
+    const { data: optionRows, error: optionError } = await supabase.from("product_variation_options")
+      .select("id,variation_group_id,value").in("variation_group_id", groupIds).order("display_order");
+    if (optionError) throw optionError;
+    const { data: variantRows, error: variantError } = await supabase.from("product_variants")
+      .select("id,product_id,name,sku,barcode,price,mrp,cost_price,stock,status,option_signature")
+      .eq("product_id", selectedProductId).order("name");
+    if (variantError) throw variantError;
+    const variantIds = (variantRows || []).map((variant: any) => variant.id);
+    const { data: links, error: linksError } = variantIds.length
+      ? await supabase.from("product_variant_options").select("variant_id,option_id").in("variant_id", variantIds)
+      : { data: [], error: null };
+    if (linksError) throw linksError;
+    const optionById = new Map((optionRows || []).map((option: any) => [option.id, option]));
+    setGroups(groupsData.map((group: any) => ({
+      key: group.id, name: group.display_name || group.name, displayType: group.display_type || "button",
+      values: (optionRows || []).filter((option: any) => option.variation_group_id === group.id).map((option: any) => option.value).join(", ")
+    })));
+    setVariants((variantRows || []).map((variant: any) => {
+      const optionIds = (links || []).filter((link: any) => link.variant_id === variant.id).map((link: any) => link.option_id);
+      const labels = optionIds.map((id: string) => optionById.get(id)?.value).filter(Boolean);
+      return {
+        key: variant.id, id: variant.id, name: variant.name || labels.join(" / "), signature: variant.option_signature || "",
+        optionIds, price: String(variant.price ?? 0), mrp: variant.mrp == null ? "" : String(variant.mrp),
+        costPrice: variant.cost_price == null ? "" : String(variant.cost_price), stock: String(variant.stock ?? 0),
+        sku: variant.sku || "", barcode: variant.barcode || "", enabled: variant.status !== "inactive"
+      };
+    }));
+    setSavedCount(0);
+    setSavedVariantsLoaded(true);
+  };
+
   useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    if (!productId || !vendorId) return;
+    loadSavedVariants(productId).catch((error: any) => setNotice({type:"error",text:error?.message || "Could not load saved variants."}));
+  }, [productId, vendorId]);
 
   const setGroup = (key: string, patch: Partial<GroupDraft>) => setGroups(current => current.map(g => g.key === key ? {...g, ...patch} : g));
   const addGroup = () => setGroups(current => [...current, {key:uid(), name:"", displayType:"button", values:""}]);
@@ -117,6 +163,23 @@ export function ProductVariants({ onNavigate, initialProduct }: { onNavigate: (p
     setSaving(true);
     setNotice(null);
     try {
+      // Update existing records in place so repeated saves never duplicate groups or combinations.
+      if (variants.some(variant => variant.id)) {
+        if (variants.some(variant => !variant.id)) throw new Error("Save newly generated combinations separately from existing variants.");
+        for (const variant of variants) {
+          const { error } = await supabase.from("product_variants").update({
+            name: variant.name.trim(), sku: variant.sku.trim() || null, barcode: variant.barcode.trim() || null,
+            price: Number(variant.price), mrp: variant.mrp.trim() ? Number(variant.mrp) : null,
+            cost_price: variant.costPrice.trim() ? Number(variant.costPrice) : null, stock: Number(variant.stock),
+            status: variant.enabled ? (Number(variant.stock) > 0 ? "active" : "out_of_stock") : "inactive"
+          }).eq("id", variant.id).eq("product_id", productId);
+          if (error) throw error;
+        }
+        setNotice({type:"success",text:"Saved changes to existing variants."});
+        await loadSavedVariants(productId);
+        return;
+      }
+
       // Persist variation groups and options first, then their variant combinations.
       const groupRows = parsedGroups.map((g, index) => ({
         product_id: productId, name: g.name.trim(), display_name: g.name.trim(),
@@ -199,7 +262,7 @@ export function ProductVariants({ onNavigate, initialProduct }: { onNavigate: (p
 
     <div className="rounded-xl border border-border bg-card p-4 space-y-2">
       <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide">Select existing product</label>
-      <select value={productId} onChange={e => {setProductId(e.target.value);setGroups([]);setVariants([]);setSavedCount(0);setNotice(null);}} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm">
+      <select value={productId} onChange={e => {setProductId(e.target.value);setGroups([]);setVariants([]);setSavedCount(0);setSavedVariantsLoaded(false);setNotice(null);}} className="w-full h-10 px-3 rounded-lg border border-border bg-background text-sm">
         {products.length === 0 && <option value="">No products found</option>}
         {products.map(product => <option key={product.id} value={product.id}>{product.name}</option>)}
       </select>
@@ -216,7 +279,7 @@ export function ProductVariants({ onNavigate, initialProduct }: { onNavigate: (p
         <label className="text-xs font-medium">Values (comma separated)<input value={group.values} onChange={e=>setGroup(group.key,{values:e.target.value})} placeholder="S, M, L, XL" className="mt-1 w-full h-9 px-2 border border-border rounded-md bg-background"/></label>
         <button type="button" onClick={()=>removeGroup(group.key)} className="h-9 w-9 rounded-md border border-border text-red-600 flex items-center justify-center" aria-label={`Remove group ${index+1}`}><Trash2 className="w-4 h-4"/></button>
       </div>)}
-      <button type="button" onClick={generateVariants} disabled={!productId || !groups.length} className="h-10 px-4 rounded-lg border border-emerald-600 text-emerald-700 text-sm font-semibold flex items-center gap-2 disabled:opacity-40"><Wand2 className="w-4 h-4"/>Generate combinations</button>
+      <button type="button" onClick={generateVariants} disabled={!productId || !groups.length || variants.some(v => !!v.id)} className="h-10 px-4 rounded-lg border border-emerald-600 text-emerald-700 text-sm font-semibold flex items-center gap-2 disabled:opacity-40"><Wand2 className="w-4 h-4"/>Generate combinations</button>
     </section>
 
     {variants.length > 0 && <section className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -226,6 +289,6 @@ export function ProductVariants({ onNavigate, initialProduct }: { onNavigate: (p
     </section>}
 
     {notice && <div role="status" className={`rounded-lg p-3 text-sm border ${notice.type==="error"?"border-red-200 bg-red-50 text-red-700":notice.type==="success"?"border-emerald-200 bg-emerald-50 text-emerald-800":"border-slate-200 bg-slate-50 text-slate-700"}`}>{notice.text}</div>}
-    <div className="text-[11px] text-muted-foreground">This first vendor-side increment creates variant definitions and per-variant price/stock records. Editing existing saved variants, bundles and atomic inventory/order processing will be added in subsequent integration work.</div>
+    {savedVariantsLoaded && variants.some(v=>!!v.id) && <div className="text-[11px] text-muted-foreground">Saved combinations are loaded from your catalog. Changes update these records instead of creating duplicate variation groups.</div>}
   </div>;
 }
