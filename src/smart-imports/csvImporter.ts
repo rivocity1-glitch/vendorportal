@@ -5,8 +5,8 @@ import * as fieldNormalizer from './fieldNormalizer';
 function normalizeDate(value: unknown): string | null {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const input = String(value).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
-  const dmy = input.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(input)) return input;
+  const dmy = input.match(/^(\\d{1,2})[\\/.-](\\d{1,2})[\\/.-](\\d{4})$/);
   if (dmy) {
     const [, day, month, year] = dmy;
     const d = Number(day), m = Number(month);
@@ -22,7 +22,8 @@ function normalizeDate(value: unknown): string | null {
 
 function parseNumber(value: unknown): number | null {
   if (value === null || value === undefined || String(value).trim() === '') return null;
-  const parsed = Number(String(value).replace(/,/g, '').replace(/%/g, '').trim());
+  const cleaned = String(value).replace(/[,₹$€£%]/g, '').replace(/\\s/g, '').trim();
+  const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -34,19 +35,55 @@ function parseBoolean(value: unknown): boolean | null {
   return null;
 }
 
+function scoreHeaderRow(row: string[]): number {
+  const headers = fieldNormalizer.normalizeHeaders(row);
+  const hasName = headers.includes('productName');
+  const hasPriceOrQuantity = headers.some(header =>
+    ['quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(header)
+  );
+  const recognized = headers.filter(header => header !== '').length;
+  return hasName && hasPriceOrQuantity ? 100 + recognized : 0;
+}
+
 export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
 
     reader.onload = (event: ProgressEvent<FileReader>) => {
       try {
-        const text = String(event.target?.result ?? '').replace(/^\uFEFF/, '');
+        const text = String(event.target?.result ?? '').replace(/^\\uFEFF/, '');
         if (!text.trim()) throw new Error('The selected CSV file is empty.');
 
-        // Let Papa Parse detect comma, semicolon or tab delimiters.
-        // Do not pre-parse and re-serialize the file: that can corrupt quoted fields
-        // and is unnecessary when the CSV starts with its header row.
-        const parsed = Papa.parse<Record<string, unknown>>(text, {
+        // First parse without headers so we can locate a real header row even
+        // when suppliers put a company name, invoice number or blank lines first.
+        // Papa Parse auto-detects comma, semicolon, tab and other delimiters.
+        const preliminary = Papa.parse<string[]>(text, {
+          header: false,
+          skipEmptyLines: 'greedy',
+          delimiter: ''
+        });
+        const rawRows = preliminary.data;
+        let headerRowIndex = -1;
+        let bestScore = 0;
+
+        for (let index = 0; index < Math.min(rawRows.length, 25); index++) {
+          const score = scoreHeaderRow(rawRows[index] || []);
+          if (score > bestScore) {
+            bestScore = score;
+            headerRowIndex = index;
+          }
+        }
+
+        if (headerRowIndex < 0) {
+          throw new Error(
+            'Could not identify the CSV header row. Include a product/item name column and at least one quantity or price column (for example: Product, Qty, Rate, Selling Price or MRP).'
+          );
+        }
+
+        // Re-serialise only after delimiter detection and header-row selection;
+        // Papa.unparse safely quotes values containing commas or quotes.
+        const csvFromHeader = Papa.unparse(rawRows.slice(headerRowIndex));
+        const parsed = Papa.parse<Record<string, unknown>>(csvFromHeader, {
           header: true,
           skipEmptyLines: 'greedy',
           transformHeader: (header: string) =>
@@ -58,35 +95,21 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         }
 
         const headers = Object.keys(parsed.data[0] || {});
-        const hasUsefulField = headers.some(header =>
+        const hasNameHeader = headers.includes('productName');
+        const hasUsefulHeader = headers.some(header =>
           ['quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(header)
         );
 
-        // Backward compatibility for the first Rivo test-catalog format.
-        // That file labelled the product-name column "Subcategory". Only apply
-        // this fallback when Product Name is genuinely absent and the rest of
-        // the expected catalog columns are present.
-        const isLegacyRivoCatalog =
-          !headers.includes('productName') &&
-          headers.includes('subcategory') &&
-          headers.includes('category') &&
-          headers.includes('productCategory') &&
-          hasUsefulField;
-
-        if (!headers.includes('productName') && !isLegacyRivoCatalog || !hasUsefulField) {
+        if (!hasNameHeader || !hasUsefulHeader) {
           throw new Error(
-            `CSV headers not recognised. Detected: ${headers.join(', ') || 'none'}. Required: Product Name and at least one of Quantity, Purchase Rate, Selling Price or MRP.`
+            `CSV headers not recognised. Detected: ${headers.join(', ') || 'none'}. Include a product/item name and at least one quantity or price column.`
           );
         }
 
         const products: ParsedProduct[] = [];
         for (const row of parsed.data) {
           const normalized = fieldNormalizer.normalizeInvoiceRow(row);
-          const name = String(
-            normalized.productName ??
-            (isLegacyRivoCatalog ? normalized.subcategory : '') ??
-            ''
-          ).trim();
+          const name = String(normalized.productName ?? '').trim();
           if (!name) continue;
 
           const quantity = parseNumber(normalized.quantity);
@@ -98,7 +121,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
           const gst = parseNumber(normalized.gst);
           const category = String(normalized.category ?? '').trim() || null;
           const productCategory = String(normalized.productCategory ?? '').trim() || null;
-          const subcategory = isLegacyRivoCatalog ? null : (String(normalized.subcategory ?? '').trim() || null);
+          const subcategory = String(normalized.subcategory ?? '').trim() || null;
           const variant = String(normalized.variant ?? '').trim() || null;
           const batch = String(normalized.batch ?? '').trim() || null;
           const manufacturer = String(normalized.manufacturer ?? '').trim() || null;
@@ -137,7 +160,9 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         }
 
         if (products.length === 0) {
-          throw new Error('The CSV headers were recognised, but no product rows were valid. Each row needs a Product Name and at least one of Quantity, Purchase Rate, Selling Price or MRP.');
+          throw new Error(
+            'The CSV headers were recognised, but no product rows were valid. Each row needs a product name and at least one quantity or price value.'
+          );
         }
 
         resolve(products);
