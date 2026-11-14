@@ -123,6 +123,9 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
 
     try {
       const result = await runImportPipeline(file);
+      if (result.items.length === 0) {
+        throw new Error('No products were detected. For CSV files, include a Product Name column and at least one price or quantity column.');
+      }
 
       setItems(result.items);
       setSummary(result.summary);
