@@ -58,11 +58,22 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         }
 
         const headers = Object.keys(parsed.data[0] || {});
-        const hasProductName = headers.includes('productName');
         const hasUsefulField = headers.some(header =>
           ['quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(header)
         );
-        if (!hasProductName || !hasUsefulField) {
+
+        // Backward compatibility for the first Rivo test-catalog format.
+        // That file labelled the product-name column "Subcategory". Only apply
+        // this fallback when Product Name is genuinely absent and the rest of
+        // the expected catalog columns are present.
+        const isLegacyRivoCatalog =
+          !headers.includes('productName') &&
+          headers.includes('subcategory') &&
+          headers.includes('category') &&
+          headers.includes('productCategory') &&
+          hasUsefulField;
+
+        if (!headers.includes('productName') && !isLegacyRivoCatalog || !hasUsefulField) {
           throw new Error(
             `CSV headers not recognised. Detected: ${headers.join(', ') || 'none'}. Required: Product Name and at least one of Quantity, Purchase Rate, Selling Price or MRP.`
           );
@@ -71,7 +82,11 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         const products: ParsedProduct[] = [];
         for (const row of parsed.data) {
           const normalized = fieldNormalizer.normalizeInvoiceRow(row);
-          const name = String(normalized.productName ?? '').trim();
+          const name = String(
+            normalized.productName ??
+            (isLegacyRivoCatalog ? normalized.subcategory : '') ??
+            ''
+          ).trim();
           if (!name) continue;
 
           const quantity = parseNumber(normalized.quantity);
@@ -83,7 +98,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
           const gst = parseNumber(normalized.gst);
           const category = String(normalized.category ?? '').trim() || null;
           const productCategory = String(normalized.productCategory ?? '').trim() || null;
-          const subcategory = String(normalized.subcategory ?? '').trim() || null;
+          const subcategory = isLegacyRivoCatalog ? null : (String(normalized.subcategory ?? '').trim() || null);
           const variant = String(normalized.variant ?? '').trim() || null;
           const batch = String(normalized.batch ?? '').trim() || null;
           const manufacturer = String(normalized.manufacturer ?? '').trim() || null;
