@@ -1,18 +1,19 @@
 import Papa from 'papaparse';
 
 function normalizeHeaderKey(header: string): string {
-  const clean = header.trim().toLowerCase().replace(/[_\s-]+/g, '');
+  const clean = header.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[_\s-]+/g, '');
 
   if (['product', 'item', 'name', 'description', 'itemname', 'productname', 'particulars'].includes(clean)) return 'productName';
   if (['hsn', 'hsncode', 'sac', 'saccode'].includes(clean)) return 'hsn';
   if (['barcode', 'upc', 'ean'].includes(clean)) return 'barcode';
   if (['batch', 'batchno', 'batchnumber', 'lot'].includes(clean)) return 'batch';
   if (['exp', 'expiry', 'expdate', 'expirydate', 'bestbefore'].includes(clean)) return 'expiry';
+  if (['manufacturingdate', 'mfgdate', 'manufacturedate'].includes(clean)) return 'manufacturingDate';
   if (['gst', 'gst%', 'gstrate', 'gstpercent', 'tax', 'tax%'].includes(clean)) return 'gst';
   if (['quantity', 'qty', 'stock', 'units', 'count', 'stockquantity', 'stockqty', 'quantityavailable', 'availablequantity'].includes(clean)) return 'quantity';
   if (['unit', 'uom', 'pack', 'packing', 'packsize'].includes(clean)) return 'unit';
-  if (['cost', 'costprice', 'purchaseprice', 'rate', 'unitprice', 'buyprice', 'cp', 'ptr', 'pts', 'netrate'].includes(clean)) return 'purchasePrice';
-  if (['price', 'priceinr', 'price(inr)', 'price(rs)', 'pricers', 'sellingprice', 'sellprice', 'retailprice', 'sp'].includes(clean)) return 'sellingPrice';
+  if (['cost', 'costprice', 'purchaseprice', 'purchaserate', 'buyrate', 'wholesalerate', 'rate', 'unitprice', 'buyprice', 'cp', 'ptr', 'pts', 'netrate'].includes(clean)) return 'purchasePrice';
+  if (['price', 'priceinr', 'price(inr)', 'price(rs)', 'pricers', 'sellingprice', 'sellingrate', 'sellprice', 'retailprice', 'sp'].includes(clean)) return 'sellingPrice';
   if (['mrp', 'mrpinr', 'mrp(inr)', 'mrprs', 'maximumretailprice', 'maxretailprice'].includes(clean)) return 'mrp';
   if (['sku', 'itemcode', 'code'].includes(clean)) return 'sku';
   if (['scheme', 'schemepct', 'sch'].includes(clean)) return 'scheme';
