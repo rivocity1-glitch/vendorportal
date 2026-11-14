@@ -170,7 +170,6 @@ export function ProductVariants({ onNavigate, initialProduct }: { onNavigate: (p
         const source = chosen.find(item => item.ids.slice().sort().join("|") === variant.option_signature);
         return (source?.ids || []).map(optionId => {
           const option = insertedOptions.find(item => item.id === optionId);
-          const group = parsedGroups.find(g => groupIdByKey.get(g.key) === option?.variation_group_id);
           return {
             variant_id:variant.id, product_id:productId,
             variation_group_id:option?.variation_group_id, option_id:optionId
