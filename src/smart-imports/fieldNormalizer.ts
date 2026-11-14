@@ -4,7 +4,7 @@ function normalizeHeaderKey(header: string): string {
   // Normalise headers from Excel, Google Sheets, accounting exports and supplier
   // systems. Ignore BOMs, punctuation, currency symbols and unit annotations.
   const clean = header
-    .replace(/^\\uFEFF/, '')
+    .replace(/^\uFEFF/, '')
     .trim()
     .toLowerCase()
     .replace(/&/g, 'and')
