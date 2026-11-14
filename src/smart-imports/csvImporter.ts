@@ -38,11 +38,15 @@ function parseBoolean(value: unknown): boolean | null {
 function scoreHeaderRow(row: string[]): number {
   const headers = fieldNormalizer.normalizeHeaders(row);
   const hasName = headers.includes('productName');
+  const isLegacyRivoLayout =
+    headers.includes('subcategory') &&
+    headers.includes('category') &&
+    headers.includes('productCategory');
   const hasPriceOrQuantity = headers.some(header =>
     ['quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(header)
   );
   const recognized = headers.filter(header => header !== '').length;
-  return hasName && hasPriceOrQuantity ? 100 + recognized : 0;
+  return (hasName || isLegacyRivoLayout) && hasPriceOrQuantity ? 100 + recognized : 0;
 }
 
 export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
@@ -95,7 +99,12 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         }
 
         const headers = Object.keys(parsed.data[0] || {});
-        const hasNameHeader = headers.includes('productName');
+        const isLegacyRivoLayout =
+          !headers.includes('productName') &&
+          headers.includes('subcategory') &&
+          headers.includes('category') &&
+          headers.includes('productCategory');
+        const hasNameHeader = headers.includes('productName') || isLegacyRivoLayout;
         const hasUsefulHeader = headers.some(header =>
           ['quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(header)
         );
@@ -109,7 +118,9 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         const products: ParsedProduct[] = [];
         for (const row of parsed.data) {
           const normalized = fieldNormalizer.normalizeInvoiceRow(row);
-          const name = String(normalized.productName ?? '').trim();
+          const name = String(
+            normalized.productName ?? (isLegacyRivoLayout ? normalized.subcategory : '') ?? ''
+          ).trim();
           if (!name) continue;
 
           const quantity = parseNumber(normalized.quantity);
@@ -121,7 +132,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
           const gst = parseNumber(normalized.gst);
           const category = String(normalized.category ?? '').trim() || null;
           const productCategory = String(normalized.productCategory ?? '').trim() || null;
-          const subcategory = String(normalized.subcategory ?? '').trim() || null;
+          const subcategory = isLegacyRivoLayout ? null : (String(normalized.subcategory ?? '').trim() || null);
           const variant = String(normalized.variant ?? '').trim() || null;
           const batch = String(normalized.batch ?? '').trim() || null;
           const manufacturer = String(normalized.manufacturer ?? '').trim() || null;
