@@ -193,7 +193,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     setItems(prev =>
       prev.map(item => ({
         ...item,
-        selected: checked
+        selected: item.status === "Needs Review" ? false : checked
       }))
     );
   };
@@ -516,7 +516,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
 
   const handleImportSelected = async () => {
     const selectedItems =
-      items.filter(item => item.selected);
+      items.filter(item => item.selected && item.status !== "Needs Review");
 
     if (selectedItems.length === 0) {
       return;
@@ -558,7 +558,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
       }
 
       for (const item of selectedItems) {
-        if (!item.name?.trim()) {
+        if (!item.name?.trim() || item.status === "Needs Review") {
           failedCount++;
           continue;
         }
@@ -932,8 +932,8 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                       <input
                         type="checkbox"
                         checked={
-                          items.length > 0 &&
-                          items.every(
+                          items.some(i => i.status !== "Needs Review") &&
+                          items.filter(i => i.status !== "Needs Review").every(
                             i => i.selected
                           )
                         }
@@ -1000,7 +1000,9 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                       <td className="px-4 py-2 sticky left-0 z-20 bg-card border-r border-border">
                         <input
                           type="checkbox"
-                          checked={item.selected}
+                          checked={item.status === "Needs Review" ? false : item.selected}
+                          disabled={item.status === "Needs Review"}
+                          title={item.status === "Needs Review" ? "Add a valid selling price, MRP or purchase rate before importing" : "Select product for import"}
                           onChange={e =>
                             updateItemField(
                               item.id,
@@ -1008,7 +1010,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                               e.target.checked
                             )
                           }
-                          className="rounded border-border text-[#10B981]"
+                          className="rounded border-border text-[#10B981] disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </td>
 
