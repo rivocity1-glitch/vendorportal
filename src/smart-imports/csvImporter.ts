@@ -6,16 +6,16 @@ function normalizeDate(value: unknown): string | null {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const input = String(value).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
-  const dmy = input.match(/^(\d{1,2})[/.\\-](\d{1,2})[/.\\-](\d{4})$/);
+  const dmy = input.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
   if (dmy) {
     const [, day, month, year] = dmy;
     const d = Number(day), m = Number(month);
-    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) return \`\${year}-\${String(m).padStart(2, '0')}-\${String(d).padStart(2, '0')}\`;
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) return `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   }
   const parsed = Date.parse(input);
   if (Number.isFinite(parsed)) {
     const date = new Date(parsed);
-    return \`\${date.getFullYear()}-\${String(date.getMonth() + 1).padStart(2, '0')}-\${String(date.getDate()).padStart(2, '0')}\`;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   }
   return null;
 }
@@ -64,7 +64,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         );
         if (!hasProductName || !hasUsefulField) {
           throw new Error(
-            \`CSV headers not recognised. Detected: \${headers.join(', ') || 'none'}. Required: Product Name and at least one of Quantity, Purchase Rate, Selling Price or MRP.\`
+            `CSV headers not recognised. Detected: ${headers.join(', ') || 'none'}. Required: Product Name and at least one of Quantity, Purchase Rate, Selling Price or MRP.`
           );
         }
 
@@ -107,7 +107,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
             barcode: String(normalized.barcode ?? '').trim() || null,
             sku: String(normalized.sku ?? '').trim() || null,
             gstRate: gst,
-            gstSlab: gst !== null ? \`\${gst}%\` : null,
+            gstSlab: gst !== null ? `${gst}%` : null,
             gstPercent: gst,
             hsnCode: String(normalized.hsn ?? '').trim() || null,
             weight: String(normalized.weight ?? '').trim() || null,
