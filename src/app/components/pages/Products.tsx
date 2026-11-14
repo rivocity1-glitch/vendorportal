@@ -1069,6 +1069,16 @@ export function Products({
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
 
+                        <button
+                          type="button"
+                          onClick={() => onNavigate("product-variants", { product: p })}
+                          title="Manage product variants"
+                          aria-label={`Manage variants for ${p.name}`}
+                          className="h-7 px-2 rounded-md text-[10px] font-semibold border border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                        >
+                          Variants
+                        </button>
+
                         <div className="relative">
                           <button
                             type="button"
