@@ -89,6 +89,8 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
   const [imageSearchMessage, setImageSearchMessage] = useState("");
   const [manualImageUrl, setManualImageUrl] = useState("");
   const [selectedImageSource, setSelectedImageSource] = useState<{ source: string; sourceUrl: string; license: string } | null>(null);
+  const [sharedImages, setSharedImages] = useState<Array<{ id: string; image_url: string; is_primary: boolean; source: string }>>([]);
+  const [isUpdatingPrimaryImage, setIsUpdatingPrimaryImage] = useState(false);
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
@@ -137,6 +139,55 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     fetchCategories();
     return () => { cancelled = true; };
   }, []);
+
+  const loadSharedImages = async (productId: string) => {
+    const { data: resolverData, error: resolverError } = await supabase.rpc(
+      "resolve_product_master",
+      { p_product_id: productId }
+    );
+    if (resolverError) {
+      console.warn("Could not resolve shared product images:", resolverError.message);
+      setSharedImages([]);
+      return;
+    }
+    const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
+    const universalId = resolverResult?.universal_product_id;
+    if (!universalId) {
+      setSharedImages([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("universal_product_images")
+      .select("id, image_url, is_primary, source")
+      .eq("universal_product_id", universalId)
+      .order("created_at", { ascending: true });
+    if (error) {
+      console.warn("Could not load shared product gallery:", error.message);
+      setSharedImages([]);
+      return;
+    }
+    setSharedImages(data || []);
+  };
+
+  const makeSharedImagePrimary = async (imageId: string, imageUrl: string) => {
+    setIsUpdatingPrimaryImage(true);
+    try {
+      const { error } = await supabase.rpc("set_universal_product_primary_image", {
+        p_image_id: imageId
+      });
+      if (error) throw error;
+      if (product?.id) await loadSharedImages(product.id);
+      setImageUrl(imageUrl);
+      setIsImageError(false);
+      setImageSearchMessage("Shared catalogue primary image updated.");
+    } catch (error: any) {
+      console.error("Primary image update failed:", error);
+      alert(error?.message || "Could not update the shared catalogue image.");
+    } finally {
+      setIsUpdatingPrimaryImage(false);
+    }
+  };
 
   const parseImageUrls = (value: unknown): string[] => {
     if (!value) return [];
@@ -195,6 +246,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
       supabase.from("products").select("image_url").eq("id", product.id).maybeSingle().then(({ data }) => {
         if (data?.image_url) setExistingImageUrls(parseImageUrls(data.image_url));
       });
+      void loadSharedImages(product.id);
       setImageFile(null);
       setImageFiles([]);
       setIsImageError(false);
@@ -222,6 +274,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         loose_unit: "Pcs"
       });
       setExistingImageUrls([]);
+      setSharedImages([]);
       setImageUrl("");
       setImageFile(null);
       setImageFiles([]);
@@ -686,6 +739,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         uploadedVendorImageUrls,
         imageFiles.length > 0 ? "" : imageUrl
       );
+      await loadSharedImages(savedProductId);
       onNavigate("products");
     } catch (err: any) {
       console.error("Product preservation exception:", err);
@@ -815,6 +869,34 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
             ) : (
               <div onDragEnter={handleDrag} onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()} className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors flex flex-col items-center justify-center gap-2 ${isDragActive ? "border-[#10B981] bg-[#10B981]/5" : "border-border hover:border-[#10B981]"}`}>
                 {isUploading ? <Loader2 className="w-6 h-6 animate-spin text-[#10B981]" /> : <><Upload className="w-6 h-6 text-muted-foreground" /><div><p className="text-xs font-medium text-foreground">Click to upload up to 5 images</p><p className="text-[10px] text-muted-foreground mt-0.5">JPG, JPEG, PNG, WEBP • Max 5MB each</p></div></>}
+              </div>
+            )}
+
+            {sharedImages.length > 0 && (
+              <div className="border-t border-border pt-3 space-y-2">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Shared catalogue gallery</p>
+                  <p className="text-[10px] text-muted-foreground">Changing the primary image updates the shared image used by matching vendors.</p>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {sharedImages.map((image) => (
+                    <div key={image.id} className={`rounded-lg border p-1.5 space-y-1 ${image.is_primary ? "border-[#10B981] bg-[#10B981]/5" : "border-border"}`}>
+                      <img src={image.image_url} alt="Shared catalogue product" loading="lazy" className="w-full h-20 rounded object-contain bg-white" />
+                      {image.is_primary ? (
+                        <span className="block text-center text-[9px] font-semibold text-[#059669]">Primary</span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isUpdatingPrimaryImage || isSubmitting}
+                          onClick={() => void makeSharedImagePrimary(image.id, image.image_url)}
+                          className="w-full rounded bg-[#10B981] px-1 py-1 text-[9px] font-semibold text-white disabled:opacity-50"
+                        >
+                          {isUpdatingPrimaryImage ? "Updating…" : "Make primary"}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
