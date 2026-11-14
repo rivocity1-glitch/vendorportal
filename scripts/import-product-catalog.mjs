@@ -9,6 +9,7 @@ const val = (x, d='') => { const i=args.indexOf(x); return i<0?d:args[i+1]; };
 const limit = Number(val('--limit','0')) || 0;
 const dry = has('--dry-run');
 const includeGlobal = has('--include-global');
+const imageOnly = has('--image-only');
 const offPath = val('--off-jsonl');
 const doOpenMrp = has('--openmrp');
 const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -212,16 +213,29 @@ async function openFoodFacts() {
       stats.indiaSkipped++;
       continue;
     }
+    const barcode = s(product.code || product._id);
+    const productName = s(product.product_name || product.product_name_en);
+    const imageUrl = imageOfOff(product);
+    // In image-only mode, count only records that can actually enter the catalogue.
+    // Continue scanning the dump until the requested number of image-bearing products is reached.
+    if (imageOnly && !productName) {
+      stats.missingName++;
+      continue;
+    }
+    if (imageOnly && !imageUrl) {
+      stats.noImage++;
+      if (samples.noImage.length < 5) samples.noImage.push({ name: productName, barcode });
+      continue;
+    }
     if (limit && eligible >= limit) break;
     eligible++;
     stats.eligible++;
-    const barcode = s(product.code || product._id);
     const record = {
       code: barcode,
-      product_name: product.product_name || product.product_name_en,
+      product_name: productName,
       brands: product.brands,
       quantity: product.quantity,
-      image_url: imageOfOff(product),
+      image_url: imageUrl,
       generic_name: product.generic_name,
       _source: 'openfoodfacts',
       _source_url: product.url || 'https://world.openfoodfacts.org/product/' + barcode,
