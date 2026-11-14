@@ -146,7 +146,8 @@ export async function runImportPipeline(file: File, existingProducts: ExistingPr
     const reviewItem: ReviewItem = {
       ...product,
       id: `rev-${i}-${Date.now()}`,
-      selected: true,
+      // Products missing a usable price require manual correction before import.
+      selected: status !== IMPORT_STATUS.NEEDS_REVIEW,
       category: finalCategory,
       stock: finalStock,
       unit: product.unit ?? null,
