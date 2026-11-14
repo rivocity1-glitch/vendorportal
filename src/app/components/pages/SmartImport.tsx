@@ -178,14 +178,24 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     value: any
   ) => {
     setItems(prev =>
-      prev.map(item =>
-        item.id === id
-          ? {
-              ...item,
-              [field]: value
-            }
-          : item
-      )
+      prev.map(item => {
+        if (item.id !== id) return item;
+
+        const updated = { ...item, [field]: value };
+        const isPriceField = ["sellingPrice", "mrp", "costPrice", "purchaseRate"].includes(String(field));
+        if (isPriceField && updated.status === "Needs Review") {
+          const hasUsablePrice = [
+            updated.sellingPrice,
+            updated.mrp,
+            updated.costPrice,
+            updated.purchaseRate
+          ].some(price => price !== null && price !== undefined && Number(price) > 0);
+
+          if (hasUsablePrice) updated.status = "New";
+        }
+
+        return updated;
+      })
     );
   };
 
@@ -232,7 +242,10 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
           : item.costPrice != null &&
               Number(item.costPrice) > 0
             ? Number(item.costPrice)
-            : null;
+            : item.purchaseRate != null &&
+                Number(item.purchaseRate) > 0
+              ? Number(item.purchaseRate)
+              : null;
 
     return {
       vendor_id: vendorId,
