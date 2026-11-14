@@ -5,17 +5,17 @@ import * as fieldNormalizer from './fieldNormalizer';
 function normalizeDate(value: unknown): string | null {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const input = String(value).trim();
-  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(input)) return input;
-  const dmy = input.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})[\\/.\\-](\\d{4})$/);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+  const dmy = input.match(/^(\d{1,2})[/.\\-](\d{1,2})[/.\\-](\d{4})$/);
   if (dmy) {
     const [, day, month, year] = dmy;
     const d = Number(day), m = Number(month);
-    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) return `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (d >= 1 && d <= 31 && m >= 1 && m <= 12) return \`\${year}-\${String(m).padStart(2, '0')}-\${String(d).padStart(2, '0')}\`;
   }
   const parsed = Date.parse(input);
   if (Number.isFinite(parsed)) {
     const date = new Date(parsed);
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    return \`\${date.getFullYear()}-\${String(date.getMonth() + 1).padStart(2, '0')}-\${String(date.getDate()).padStart(2, '0')}\`;
   }
   return null;
 }
@@ -40,37 +40,13 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
 
     reader.onload = (event: ProgressEvent<FileReader>) => {
       try {
-        const text = String(event.target?.result ?? '').replace(/^\\uFEFF/, '');
-        if (!text.trim()) return resolve([]);
+        const text = String(event.target?.result ?? '').replace(/^\uFEFF/, '');
+        if (!text.trim()) throw new Error('The selected CSV file is empty.');
 
-        const preliminary = Papa.parse<string[]>(text, {
-          header: false,
-          skipEmptyLines: 'greedy',
-          delimiter: ''
-        });
-        const rawRows = preliminary.data;
-        const supportedHeaders = new Set([
-          'productName', 'quantity', 'unit', 'purchasePrice', 'sellingPrice',
-          'mrp', 'barcode', 'batch', 'expiry', 'gst', 'sku', 'manufacturer',
-          'category', 'productCategory', 'subcategory', 'variant'
-        ]);
-
-        let headerRowIndex = -1;
-        for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
-          const normalizedHeaders = fieldNormalizer.normalizeHeaders(rawRows[i] || []);
-          const matches = normalizedHeaders.filter(header => supportedHeaders.has(header)).length;
-          if (matches >= 2 && normalizedHeaders.includes('productName')) {
-            headerRowIndex = i;
-            break;
-          }
-        }
-
-        if (headerRowIndex < 0) {
-          throw new Error('CSV headers were not recognised. Include at least Product Name, Quantity, Purchase Rate, Selling Price or MRP columns.');
-        }
-
-        const csvFromHeader = Papa.unparse(rawRows.slice(headerRowIndex));
-        const parsed = Papa.parse<Record<string, unknown>>(csvFromHeader, {
+        // Let Papa Parse detect comma, semicolon or tab delimiters.
+        // Do not pre-parse and re-serialize the file: that can corrupt quoted fields
+        // and is unnecessary when the CSV starts with its header row.
+        const parsed = Papa.parse<Record<string, unknown>>(text, {
           header: true,
           skipEmptyLines: 'greedy',
           transformHeader: (header: string) =>
@@ -79,6 +55,17 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
 
         if (parsed.errors.length > 0) {
           console.warn('CSV parse warnings:', parsed.errors);
+        }
+
+        const headers = Object.keys(parsed.data[0] || {});
+        const hasProductName = headers.includes('productName');
+        const hasUsefulField = headers.some(header =>
+          ['quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(header)
+        );
+        if (!hasProductName || !hasUsefulField) {
+          throw new Error(
+            \`CSV headers not recognised. Detected: \${headers.join(', ') || 'none'}. Required: Product Name and at least one of Quantity, Purchase Rate, Selling Price or MRP.\`
+          );
         }
 
         const products: ParsedProduct[] = [];
@@ -120,7 +107,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
             barcode: String(normalized.barcode ?? '').trim() || null,
             sku: String(normalized.sku ?? '').trim() || null,
             gstRate: gst,
-            gstSlab: gst !== null ? `${gst}%` : null,
+            gstSlab: gst !== null ? \`\${gst}%\` : null,
             gstPercent: gst,
             hsnCode: String(normalized.hsn ?? '').trim() || null,
             weight: String(normalized.weight ?? '').trim() || null,
@@ -135,7 +122,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         }
 
         if (products.length === 0) {
-          throw new Error('The CSV was read, but no product rows were found. Check that each row has a Product Name and at least one of Quantity, Purchase Rate, Selling Price or MRP.');
+          throw new Error('The CSV headers were recognised, but no product rows were valid. Each row needs a Product Name and at least one of Quantity, Purchase Rate, Selling Price or MRP.');
         }
 
         resolve(products);
