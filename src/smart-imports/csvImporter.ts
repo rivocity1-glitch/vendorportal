@@ -5,8 +5,8 @@ import * as fieldNormalizer from './fieldNormalizer';
 function normalizeDate(value: unknown): string | null {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const input = String(value).trim();
-  if (/^\\d{4}-\\d{2}-\\d{2}$/.test(input)) return input;
-  const dmy = input.match(/^(\\d{1,2})[\\/.-](\\d{1,2})[\\/.-](\\d{4})$/);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+  const dmy = input.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
   if (dmy) {
     const [, day, month, year] = dmy;
     const d = Number(day), m = Number(month);
@@ -22,7 +22,7 @@ function normalizeDate(value: unknown): string | null {
 
 function parseNumber(value: unknown): number | null {
   if (value === null || value === undefined || String(value).trim() === '') return null;
-  const cleaned = String(value).replace(/[,₹$€£%]/g, '').replace(/\\s/g, '').trim();
+  const cleaned = String(value).replace(/[,₹$€£%]/g, '').replace(/\s/g, '').trim();
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -51,7 +51,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
 
     reader.onload = (event: ProgressEvent<FileReader>) => {
       try {
-        const text = String(event.target?.result ?? '').replace(/^\\uFEFF/, '');
+        const text = String(event.target?.result ?? '').replace(/^\uFEFF/, '');
         if (!text.trim()) throw new Error('The selected CSV file is empty.');
 
         // First parse without headers so we can locate a real header row even
