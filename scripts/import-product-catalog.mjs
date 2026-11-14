@@ -71,8 +71,7 @@ async function ingest(r) {
   if (!barcode && !brand) {
     stats.missingBarcodeAndBrand++;
     if (samples.missingIdentity.length < 5) samples.missingIdentity.push({ name, weight, code: r.code || '' });
-    // Name-only products are not imported automatically: matching them safely is ambiguous.
-    return;
+    // Continue: exact name + NULL brand + exact/null weight matching is used below.
   }
   if (!image) {
     stats.noImage++;
