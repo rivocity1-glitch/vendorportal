@@ -1,34 +1,69 @@
 import Papa from 'papaparse';
 
 function normalizeHeaderKey(header: string): string {
-  const clean = header.replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[_\s-]+/g, '');
+  // Normalise headers from Excel, Google Sheets, accounting exports and supplier
+  // systems. Ignore BOMs, punctuation, currency symbols and unit annotations.
+  const clean = header
+    .replace(/^\\uFEFF/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]/g, '');
 
-  if (['product', 'item', 'name', 'description', 'itemname', 'productname', 'particulars'].includes(clean)) return 'productName';
-  if (['hsn', 'hsncode', 'sac', 'saccode'].includes(clean)) return 'hsn';
-  if (['barcode', 'upc', 'ean'].includes(clean)) return 'barcode';
-  if (['batch', 'batchno', 'batchnumber', 'lot'].includes(clean)) return 'batch';
-  if (['exp', 'expiry', 'expdate', 'expirydate', 'bestbefore'].includes(clean)) return 'expiry';
-  if (['manufacturingdate', 'mfgdate', 'manufacturedate'].includes(clean)) return 'manufacturingDate';
-  if (['gst', 'gst%', 'gstrate', 'gstpercent', 'tax', 'tax%'].includes(clean)) return 'gst';
-  if (['quantity', 'qty', 'stock', 'units', 'count', 'stockquantity', 'stockqty', 'quantityavailable', 'availablequantity'].includes(clean)) return 'quantity';
-  if (['unit', 'uom', 'pack', 'packing', 'packsize'].includes(clean)) return 'unit';
-  if (['cost', 'costprice', 'purchaseprice', 'purchaserate', 'buyrate', 'wholesalerate', 'rate', 'unitprice', 'buyprice', 'cp', 'ptr', 'pts', 'netrate'].includes(clean)) return 'purchasePrice';
-  if (['price', 'priceinr', 'price(inr)', 'price(rs)', 'pricers', 'sellingprice', 'sellingrate', 'sellprice', 'retailprice', 'sp'].includes(clean)) return 'sellingPrice';
-  if (['mrp', 'mrpinr', 'mrp(inr)', 'mrprs', 'maximumretailprice', 'maxretailprice'].includes(clean)) return 'mrp';
-  if (['sku', 'itemcode', 'code'].includes(clean)) return 'sku';
+  // Product identity
+  if ([
+    'product', 'item', 'name', 'description', 'itemname', 'productname',
+    'particulars', 'itemdescription', 'productdescription', 'producttitle',
+    'itemtitle', 'nameofproduct', 'nameofitem', 'productservice',
+    'goodsdescription', 'materialdescription'
+  ].includes(clean)) return 'productName';
+
+  // Tax, identifiers and traceability
+  if (['hsn', 'hsncode', 'sac', 'saccode', 'hsnsac'].includes(clean)) return 'hsn';
+  if (['barcode', 'upc', 'ean', 'ean13', 'gtin', 'itembarcode'].includes(clean)) return 'barcode';
+  if (['sku', 'itemcode', 'productcode', 'stockcode', 'code', 'materialcode'].includes(clean)) return 'sku';
+  if (['batch', 'batchno', 'batchnumber', 'lot', 'lotno', 'lotnumber'].includes(clean)) return 'batch';
+  if (['exp', 'expiry', 'expdate', 'expirydate', 'bestbefore', 'bestbeforedate'].includes(clean)) return 'expiry';
+  if (['manufacturingdate', 'mfgdate', 'manufacturedate', 'productiondate'].includes(clean)) return 'manufacturingDate';
+  if (['gst', 'gstpercent', 'gstrate', 'tax', 'taxpercent', 'vat', 'vatpercent', 'igstpercent'].includes(clean) || clean.startsWith('gst')) return 'gst';
+
+  // Stock and packaging
+  if (['quantity', 'qty', 'qtypcs', 'stock', 'units', 'count', 'stockquantity', 'stockqty', 'quantityavailable', 'availablequantity', 'closingstock', 'openingstock', 'onhand', 'onhandquantity'].includes(clean)) return 'quantity';
+  if (['unit', 'uom', 'pack', 'packing', 'packsize', 'unitofmeasure', 'measurementunit'].includes(clean)) return 'unit';
+  if (['lowstockthreshold', 'lowstock', 'reorderlevel', 'reorderpoint', 'minimumstock'].includes(clean)) return 'lowStockThreshold';
+
+  // Purchase / cost price
+  if ([
+    'cost', 'costprice', 'purchaseprice', 'purchaserate', 'buyrate',
+    'wholesalerate', 'rate', 'unitprice', 'buyprice', 'cp', 'ptr', 'pts',
+    'netrate', 'landingcost', 'landedcost', 'basicrate', 'vendorprice',
+    'supplierprice', 'purchasecost', 'costperunit'
+  ].includes(clean)) return 'purchasePrice';
+  if (clean.startsWith('purchase') || clean.startsWith('costprice') || clean === 'ptr' || clean === 'pts') return 'purchasePrice';
+
+  // Customer-facing selling price
+  if ([
+    'price', 'priceinr', 'pricers', 'sellingprice', 'sellingrate',
+    'sellprice', 'retailprice', 'sp', 'unitretailprice', 'salesprice',
+    'saleprice', 'unit selling price', 'mrpvalue'
+  ].includes(clean)) return 'sellingPrice';
+  if (clean.startsWith('selling') || clean.startsWith('retail') || clean.startsWith('saleprice')) return 'sellingPrice';
+
+  // MRP is separate from selling price
+  if (['mrp', 'maximumretailprice', 'maxretailprice', 'listprice', 'markedprice'].includes(clean) || clean.startsWith('mrp')) return 'mrp';
+
   if (['scheme', 'schemepct', 'sch'].includes(clean)) return 'scheme';
   if (['schemedisc', 'schemediscount'].includes(clean)) return 'schemeDiscount';
-  if (['manufacturer', 'mfg', 'company', 'brand'].includes(clean)) return 'manufacturer';
+  if (['manufacturer', 'mfg', 'company', 'brand', 'brandname', 'make'].includes(clean)) return 'manufacturer';
 
-  // Keep the two CSV category concepts separate. Vendor Category is the
-  // top-level catalog category; Product Category is a product classification.
-  if (['vendorcategory', 'category', 'cat', 'group'].includes(clean)) return 'category';
+  // Keep vendor/category/subcategory fields distinct.
+  if (['vendorcategory', 'category', 'cat', 'group', 'department', 'productgroup'].includes(clean)) return 'category';
   if (['productcategory', 'productcat', 'category1'].includes(clean)) return 'productCategory';
   if (['subcategory', 'subcat', 'productsubcategory'].includes(clean)) return 'subcategory';
-  if (['lowstockthreshold', 'lowstock', 'reorderlevel', 'reorderpoint'].includes(clean)) return 'lowStockThreshold';
-  if (['variant', 'variantname', 'size', 'flavour', 'flavor'].includes(clean)) return 'variant';
-  if (['shelf/location', 'shelf', 'location', 'shelflocation', 'storelocation'].includes(clean)) return 'shelfLocation';
-  if (['notes', 'remarks', 'note'].includes(clean)) return 'notes';
+  if (['variant', 'variantname', 'size', 'flavour', 'flavor', 'colour', 'color'].includes(clean)) return 'variant';
+  if (['weight', 'netweight', 'grossweight'].includes(clean)) return 'weight';
+  if (['shelf', 'location', 'shelflocation', 'storelocation', 'binlocation'].includes(clean)) return 'shelfLocation';
+  if (['notes', 'remarks', 'note', 'comments'].includes(clean)) return 'notes';
   if (['prescriptionrequired', 'prescription', 'rxrequired'].includes(clean)) return 'prescriptionRequired';
 
   return clean;
