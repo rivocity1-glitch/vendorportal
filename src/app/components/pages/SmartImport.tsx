@@ -527,6 +527,64 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     return changes;
   };
 
+  /**
+   * Resolve an imported vendor product to the shared catalogue and reuse its
+   * existing primary image. The image file is not copied; the vendor listing
+   * references the canonical image URL, matching the manual product flow.
+   * Image lookup is best-effort and never invalidates a successful import.
+   */
+  const attachSharedCatalogueImage = async (productId: string): Promise<boolean> => {
+    try {
+      const { data: resolverData, error: resolverError } = await supabase.rpc(
+        "resolve_product_master",
+        { p_product_id: productId }
+      );
+      if (resolverError) {
+        console.warn("Shared image resolution failed:", resolverError.message);
+        return false;
+      }
+      const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
+      const universalId = resolverResult?.universal_product_id;
+      if (!universalId) return false;
+
+      const { data: universalProduct, error: universalError } = await supabase
+        .from("universal_products")
+        .select("image_url")
+        .eq("id", universalId)
+        .maybeSingle();
+      if (universalError) console.warn("Could not read canonical image:", universalError.message);
+
+      let imageUrl = typeof universalProduct?.image_url === "string" ? universalProduct.image_url.trim() : "";
+      if (!imageUrl) {
+        const { data: gallery, error: galleryError } = await supabase
+          .from("universal_product_images")
+          .select("image_url, is_primary, created_at")
+          .eq("universal_product_id", universalId)
+          .order("is_primary", { ascending: false })
+          .order("created_at", { ascending: true })
+          .limit(1);
+        if (galleryError) {
+          console.warn("Could not read shared image gallery:", galleryError.message);
+          return false;
+        }
+        imageUrl = typeof gallery?.[0]?.image_url === "string" ? gallery[0].image_url.trim() : "";
+      }
+      if (!imageUrl) return false;
+
+      const { error: imageUpdateError } = await supabase
+        .from("products")
+        .update({ image_url: imageUrl })
+        .eq("id", productId);
+      if (imageUpdateError) {
+        console.warn("Shared image found but could not attach it:", imageUpdateError.message);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.warn("Unexpected shared image lookup error:", error);
+      return false;
+    }
+  };
   const handleImportSelected = async () => {
     const selectedItems =
       items.filter(item => item.selected && item.status !== "Needs Review");
@@ -542,6 +600,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     let updatedCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
+    let sharedImageCount = 0;
 
     try {
       const {
@@ -615,6 +674,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
             }
 
             addedCount++;
+            if (await attachSharedCatalogueImage(insertedProduct.id)) sharedImageCount++;
             continue;
           }
 
@@ -636,6 +696,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
             Object.keys(changes).length === 0
           ) {
             skippedCount++;
+            if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id)) sharedImageCount++;
             continue;
           }
 
@@ -671,6 +732,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
           }
 
           updatedCount++;
+          if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id)) sharedImageCount++;
         } catch (itemErr) {
           failedCount++;
 
@@ -687,7 +749,8 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
         `- Added ${addedCount} new products\n` +
         `- Updated ${updatedCount} existing products\n` +
         `- Skipped ${skippedCount} unchanged products\n` +
-        `- Failed ${failedCount} products`
+        `- Failed ${failedCount} products\n` +
+        `- Shared catalogue images attached: ${sharedImageCount}`
       );
 
       handleCancel();
