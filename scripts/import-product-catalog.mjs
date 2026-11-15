@@ -103,7 +103,39 @@ function firstImageUrl(value, depth = 0) {
   return '';
 }
 
+function offImageUrl(barcodeValue, language, revision, size = '400') {
+  const barcode = s(barcodeValue).replace(/\D/g, '');
+  const rev = s(revision);
+  if (!/^\d{8,14}$/.test(barcode) || !/^\d+$/.test(rev)) return '';
+  // Open Food Facts stores product images in three-digit barcode directory segments.
+  const folder = barcode.match(/\d{1,3}|\d{1,3}(?=\d)/g);
+  const parts = [];
+  for (let i = 0; i < barcode.length; i += 3) parts.push(barcode.slice(i, i + 3));
+  const imageLanguage = /^[a-z]{2,3}$/.test(s(language)) ? s(language) : 'en';
+  return `https://images.openfoodfacts.org/images/products/${parts.join('/')}/front_${imageLanguage}.${rev}.${size}.jpg`;
+}
+
 function imageOfOff(p) {
+  // Current OFF JSONL exports store image metadata (imgid/rev/sizes), not URLs.
+  // Prefer the selected English front image, then any selected front language.
+  const selectedFront = p.images?.selected?.front || p.selected_images?.front;
+  if (selectedFront && typeof selectedFront === 'object') {
+    const languageEntries = Object.entries(selectedFront);
+    const ordered = [
+      ...languageEntries.filter(([language]) => language === 'en'),
+      ...languageEntries.filter(([language]) => language !== 'en')
+    ];
+    for (const [language, metadata] of ordered) {
+      const revision = metadata?.rev;
+      if (revision != null) {
+        const size = metadata?.sizes?.['400'] ? '400' : metadata?.sizes?.full ? 'full' : '400';
+        const constructed = offImageUrl(p.code || p._id, language, revision, size);
+        if (constructed) return constructed;
+      }
+    }
+  }
+
+  // Retain compatibility with older exports that contain direct image URLs.
   const front = p.selected_images?.front;
   const imagesFront = p.images?.front;
   const candidates = [
