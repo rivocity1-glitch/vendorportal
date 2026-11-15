@@ -5,7 +5,7 @@ This importer runs locally with a Supabase service-role key for database access.
 ## Sources and licensing
 
 - OpenMRP publishes a public weekly dump (products, variants, brands) without an API key. Its product database is ODbL-1.0; contributed media is CC-BY-SA-4.0.
-- Open Food Facts asks bulk users to download the product CSV/JSONL export and use its AWS image dataset for large image volumes. Product data is ODbL; images are CC-BY-SA. This initial importer reads the local JSONL/JSONL.GZ export and downloads the selected front image URL carried by each record.
+- Open Food Facts asks bulk users to download the product CSV/JSONL export and use its AWS image dataset for large image volumes. Product data is ODbL; images are CC-BY-SA. This initial importer reads the local JSONL/JSONL.GZ export and downloads the selected front image URL carried by each record. Image detection supports selected_images.front variants, images.front size maps/URLs, and legacy image_front_* / image_url fields.
 - The importer registers rows in the existing universal_products and universal_product_images tables and stores a per-image attribution JSON object alongside each image. Supabase Storage is the default. With Cloudflare R2, the same object paths are uploaded to an R2 bucket and the configured public URL is saved in universal_products.image_url / universal_product_images.image_url. The database stores URLs, not image binaries.
 
 ## PowerShell setup
@@ -31,7 +31,7 @@ npm run catalog:import -- --off-jsonl "D:\data\openfoodfacts-products.jsonl.gz" 
 npm run catalog:import -- --off-jsonl "D:\data\openfoodfacts-products.jsonl.gz" --limit 1000
 ```
 
-By default OFF rows are filtered to India. Use --include-global to import all countries. --limit is a per-source cap.
+By default OFF rows are filtered to India; this is the intended initial RivoCity catalogue scope. Do not use --include-global for the launch catalogue. Use --limit as a per-source cap. During OFF scans, progress is printed every 100,000 records with India counts, image-bearing India records, and scan speed.
 
 ## Safety
 
