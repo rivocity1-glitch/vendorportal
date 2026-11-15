@@ -15,6 +15,48 @@ const doOpenMrp = has('--openmrp');
 const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const bucket = process.env.SUPABASE_PRODUCT_IMAGE_BUCKET || 'product-images';
+const storageProvider = (process.env.RIVO_STORAGE_PROVIDER || 'supabase').toLowerCase();
+const storagePublicUrl = (process.env.RIVO_STORAGE_PUBLIC_URL || '').replace(/\/$/, '');
+let r2Client;
+let PutObjectCommand;
+
+async function uploadObject(path, body, contentType) {
+  if (storageProvider === 'supabase') {
+    const { error } = await db.storage.from(bucket).upload(path, body, {
+      contentType, upsert: true, cacheControl: '31536000'
+    });
+    if (error) throw error;
+    return db.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+  }
+  if (storageProvider === 'r2') {
+    if (!storagePublicUrl) throw new Error('Set RIVO_STORAGE_PUBLIC_URL to the public R2 custom-domain base URL.');
+    if (!r2Client) {
+      const { S3Client, PutObjectCommand: Put } = await import('@aws-sdk/client-s3');
+      PutObjectCommand = Put;
+      const accountId = process.env.R2_ACCOUNT_ID;
+      const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+      const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+      const bucketName = process.env.R2_BUCKET_NAME;
+      if (!accountId || !accessKeyId || !secretAccessKey || !bucketName) {
+        throw new Error('R2 requires R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME.');
+      }
+      r2Client = new S3Client({
+        region: 'auto',
+        endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+        credentials: { accessKeyId, secretAccessKey }
+      });
+    }
+    await r2Client.send(new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME,
+      Key: path,
+      Body: body,
+      ContentType: contentType,
+      CacheControl: 'public, max-age=31536000, immutable'
+    }));
+    return `${storagePublicUrl}/${path.split('/').map(encodeURIComponent).join('/')}`;
+  }
+  throw new Error(`Unsupported RIVO_STORAGE_PROVIDER: ${storageProvider}. Use supabase or r2.`);
+}
 
 if (!url || !key || (!doOpenMrp && !offPath)) {
   console.error('Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY; choose --openmrp and/or --off-jsonl <file>.');
@@ -128,11 +170,7 @@ async function ingest(r) {
   const source = r._source || 'openfoodfacts';
   const objectName = slug(barcode || product.id);
   const path = 'catalogue/' + source + '/' + objectName + '.' + ext;
-  const { error: uploadError } = await db.storage.from(bucket).upload(path, bytes, {
-    contentType: type, upsert: true, cacheControl: '31536000'
-  });
-  if (uploadError) throw uploadError;
-  const publicUrl = db.storage.from(bucket).getPublicUrl(path).data.publicUrl;
+  const publicUrl = await uploadObject(path, bytes, type);
 
   const attribution = {
     source: source === 'openmrp' ? 'OpenMRP' : 'Open Food Facts',
@@ -148,11 +186,7 @@ async function ingest(r) {
     retrieved_at: new Date().toISOString()
   };
   const attributionPath = 'catalogue-attribution/' + source + '/' + objectName + '.json';
-  const { error: attributionError } = await db.storage.from(bucket).upload(
-    attributionPath, Buffer.from(JSON.stringify(attribution, null, 2)),
-    { contentType: 'application/json', upsert: true }
-  );
-  if (attributionError) throw attributionError;
+  await uploadObject(attributionPath, Buffer.from(JSON.stringify(attribution, null, 2)), 'application/json');
 
   const primary = !product.image_url && !gallery?.some(x => x.is_primary);
   const { error: imageRowError } = await db.from('universal_product_images').insert({
