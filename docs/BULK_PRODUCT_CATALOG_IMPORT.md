@@ -5,7 +5,7 @@ This importer runs locally with a Supabase service-role key for database access.
 ## Sources and licensing
 
 - OpenMRP publishes a public weekly dump (products, variants, brands) without an API key. Its product database is ODbL-1.0; contributed media is CC-BY-SA-4.0.
-- Open Food Facts asks bulk users to download the product CSV/JSONL export and use its AWS image dataset for large image volumes. Product data is ODbL; images are CC-BY-SA. This initial importer reads the local JSONL/JSONL.GZ export and downloads the selected front image URL carried by each record. Image detection supports selected_images.front variants, images.front size maps/URLs, and legacy image_front_* / image_url fields.
+- Open Food Facts asks bulk users to download the product CSV/JSONL export and use its AWS image dataset for large image volumes. Product data is ODbL; images are CC-BY-SA. This importer reads the local JSONL/JSONL.GZ export. For current exports, it builds the selected front image URL from images.selected.front language metadata and its revision; it also supports older exports containing direct image URLs.
 - The importer registers rows in the existing universal_products and universal_product_images tables and stores a per-image attribution JSON object alongside each image. Supabase Storage is the default. With Cloudflare R2, the same object paths are uploaded to an R2 bucket and the configured public URL is saved in universal_products.image_url / universal_product_images.image_url. The database stores URLs, not image binaries.
 
 ## PowerShell setup
@@ -32,6 +32,14 @@ npm run catalog:import -- --off-jsonl "D:\data\openfoodfacts-products.jsonl.gz" 
 ```
 
 By default OFF rows are filtered to India; this is the intended initial RivoCity catalogue scope. Do not use --include-global for the launch catalogue. Use --limit as a per-source cap. During OFF scans, progress is printed every 100,000 records with India counts, image-bearing India records, and scan speed.
+
+Before any live import, validate real image downloads without writing to Supabase:
+
+```powershell
+npm run catalog:import -- --off-jsonl "D:\data\openfoodfacts-products.jsonl.gz" --dry-run --image-only --validate-images --limit 10
+```
+
+The validation mode requires both --dry-run and --image-only. It downloads each selected candidate, checks HTTP status, image content type, file signature, and the 8 MB size limit, then reports imagesValidated, imageDownloadFailed, and imageBytesValidated. It does not upload files or modify database rows.
 
 ## Safety
 
