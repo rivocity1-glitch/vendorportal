@@ -108,7 +108,6 @@ function offImageUrl(barcodeValue, language, revision, size = '400') {
   const rev = s(revision);
   if (!/^\d{8,14}$/.test(barcode) || !/^\d+$/.test(rev)) return '';
   // Open Food Facts stores product images in three-digit barcode directory segments.
-  const folder = barcode.match(/\d{1,3}|\d{1,3}(?=\d)/g);
   const parts = [];
   for (let i = 0; i < barcode.length; i += 3) parts.push(barcode.slice(i, i + 3));
   const imageLanguage = /^[a-z]{2,3}$/.test(s(language)) ? s(language) : 'en';
