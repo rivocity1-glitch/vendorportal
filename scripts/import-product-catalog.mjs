@@ -67,11 +67,11 @@ if (validateImages && !imageOnly) {
   console.error('--validate-images requires --image-only.');
   process.exit(1);
 }
-if (!url || !key || (!doOpenMrp && !offPath)) {
+if ((!validateImages && (!url || !key)) || (!doOpenMrp && !offPath)) {
   console.error('Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY; choose --openmrp and/or --off-jsonl <file>.');
   process.exit(1);
 }
-const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+const db = validateImages ? null : createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 const stats = {
   recordsScanned: 0, indiaSkipped: 0, indiaRecords: 0, indiaWithName: 0, indiaWithImage: 0, eligible: 0, missingName: 0,
   missingBarcodeAndBrand: 0, noImage: 0, invalidImageUrl: 0,
@@ -259,6 +259,8 @@ async function ingest(r) {
 
   if (validateImages) {
     await validateImageDownload(image);
+    // Validation mode is deliberately network-only: no Supabase client reads or writes.
+    return;
   }
 
   let product = await findProduct({ name, brand, barcode, weight });
