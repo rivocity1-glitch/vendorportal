@@ -39,7 +39,7 @@ Before any live import, validate real image downloads without writing to Supabas
 npm run catalog:import -- --off-jsonl "D:\data\openfoodfacts-products.jsonl.gz" --dry-run --image-only --validate-images --limit 10
 ```
 
-The validation mode requires both --dry-run and --image-only. It downloads each selected candidate, checks HTTP status, image content type, file signature, and the 8 MB size limit, then reports imagesValidated, imageDownloadFailed, and imageBytesValidated. It does not upload files or modify database rows.
+The validation mode requires both --dry-run and --image-only. It downloads each selected candidate, checks HTTP status, image content type, file signature, and the 8 MB size limit, then reports imagesValidated, imageDownloadFailed, and imageBytesValidated. It does not upload files or modify database rows. Products whose images fail validation are skipped and counted in imageValidationSkipped; the failure details appear in the invalidImage samples. Live imports now perform the same validation before creating or updating any catalogue records, then reuse the validated bytes for upload (no second source download). This prevents a failed source image from leaving a newly-created catalogue product without its image.
 
 ## Safety
 
