@@ -6,7 +6,6 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
-    "catalog:import": "node scripts/import-product-catalog.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
