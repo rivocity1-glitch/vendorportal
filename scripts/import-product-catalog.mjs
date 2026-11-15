@@ -104,9 +104,11 @@ function firstImageUrl(value, depth = 0) {
 }
 
 function offImageUrl(barcodeValue, language, revision, size = '400') {
-  const barcode = s(barcodeValue).replace(/\D/g, '');
+  let barcode = s(barcodeValue).replace(/\D/g, '');
   const rev = s(revision);
   if (!/^\d{8,14}$/.test(barcode) || !/^\d+$/.test(rev)) return '';
+  // OFF pads barcodes shorter than 13 digits before deriving the image directory.
+  if (barcode.length < 13) barcode = barcode.padStart(13, '0');
   // Open Food Facts stores product images in three-digit barcode directory segments.
   const parts = [];
   for (let i = 0; i < barcode.length; i += 3) parts.push(barcode.slice(i, i + 3));
