@@ -29,6 +29,24 @@ interface StoreCategory {
   name: string;
 }
 
+function getPrimaryProductImage(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const raw = value.trim();
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const firstUrl = parsed.find(
+        (item): item is string =>
+          typeof item === "string" && /^https?:\/\//i.test(item.trim())
+      );
+      return firstUrl?.trim() || null;
+    }
+  } catch {
+    // A normal URL is stored as a plain string.
+  }
+  return /^https?:\/\//i.test(raw) ? raw : null;
+}
+
 const statusStyles: Record<string, string> = {
   Active: "bg-[#D1FAE5] text-[#065F46]",
   "Low Stock": "bg-[#FEF3C7] text-[#92400E]",
@@ -480,6 +498,8 @@ export function Products({
                       p.category_id
                   )?.name || "Other";
 
+                const productImageUrl = getPrimaryProductImage(p.image_url);
+
                 const expiryLabel =
                   p.expiry_date
                     ? new Date(
@@ -502,9 +522,9 @@ export function Products({
                     {/* PRODUCT */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        {p.image_url ? (
+                        {productImageUrl ? (
                           <img
-                            src={p.image_url}
+                            src={productImageUrl || undefined}
                             alt={p.name}
                             className="w-9 h-9 rounded-lg object-cover border border-border"
                             loading="lazy"
@@ -527,7 +547,7 @@ export function Products({
                         <div
                           className="w-9 h-9 rounded-lg bg-muted border border-border flex items-center justify-center shrink-0"
                           style={{
-                            display: p.image_url
+                            display: productImageUrl
                               ? "none"
                               : "flex",
                           }}
