@@ -91,15 +91,15 @@ const INDIAN_BRANDS = new Set([
   'aachimasala','aavin','amul','amulya','aashirvaad','adaniwilmar','fortune',
   'bajaj','balajiwafers','bikaji','bikanervala','britannia','britanniaindustries',
   'catch','cavin s','cavinsk','cavins','ceat','cello','chandrika','chik',
-  'dabur','dabar','dettol', // Dettol intentionally excluded below; retained only as a non-match guard is not needed.
+  'dabur','dabar',
   'everest','everestspices','fena','fevicol','godrej','haldirams','haldiram',
-  'india gate','indiagate','itc','jaguar', // Jaguar is not an Indian brand; do not add aliases without ownership review.
+  'indiagate','itc',
   'jyothylabs','marico','mdh','mtr','motherdairy','nandini','organicindia',
   'parle','parleproducts','parleg','parleagro','patanjali','pidilite',
   'priya','saffola','sundrop','tata','tataconsumer','tataconsumerproducts',
   'tatasalt','tatatea','tatasampann','tatasoulfull','tata coffee',
   'waghbakri','vijaya','zoff','badshah','aachi','b natural','bnatural',
-  'paperboat','paper boat','frooti','maaza', // Indian-owned Parle Agro / acquired Indian portfolio.
+  'paperboat','paper boat','frooti',
   'real','hajmola','daburreal','vatika','himalaya','emami','boroplus',
   'navratna','zandu','himalayawellness','bajajalmond drops','bajajalmond',
   'parachute','setwet','livon','mediker','beardo','trueelements',
