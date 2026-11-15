@@ -431,6 +431,11 @@ async function openFoodFacts() {
     const barcode = s(product.code || product._id);
     const productName = s(product.product_name || product.product_name_en);
     const imageUrl = imageOfOff(product);
+    const brandName = s(product.brands).split(',')[0].trim();
+    if (!isIndianOwnedBrand(brandName)) {
+      stats.nonIndianBrandSkipped++;
+      continue;
+    }
     if (productName) stats.indiaWithName++;
     if (imageUrl) stats.indiaWithImage++;
     // In image-only mode, count only records that can actually enter the catalogue.
