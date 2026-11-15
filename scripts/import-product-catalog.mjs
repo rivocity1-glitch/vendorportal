@@ -10,6 +10,7 @@ const limit = Number(val('--limit','0')) || 0;
 const dry = has('--dry-run');
 const includeGlobal = has('--include-global');
 const imageOnly = has('--image-only');
+const validateImages = has('--validate-images');
 const offPath = val('--off-jsonl');
 const doOpenMrp = has('--openmrp');
 const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -58,6 +59,14 @@ async function uploadObject(path, body, contentType) {
   throw new Error(`Unsupported RIVO_STORAGE_PROVIDER: ${storageProvider}. Use supabase or r2.`);
 }
 
+if (validateImages && !dry) {
+  console.error('--validate-images requires --dry-run; image validation must never write to Supabase.');
+  process.exit(1);
+}
+if (validateImages && !imageOnly) {
+  console.error('--validate-images requires --image-only.');
+  process.exit(1);
+}
 if (!url || !key || (!doOpenMrp && !offPath)) {
   console.error('Set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY; choose --openmrp and/or --off-jsonl <file>.');
   process.exit(1);
@@ -67,7 +76,8 @@ const stats = {
   recordsScanned: 0, indiaSkipped: 0, indiaRecords: 0, indiaWithName: 0, indiaWithImage: 0, eligible: 0, missingName: 0,
   missingBarcodeAndBrand: 0, noImage: 0, invalidImageUrl: 0,
   matchedExisting: 0, wouldCreate: 0, created: 0, wouldUpload: 0,
-  uploaded: 0, existingImage: 0, failed: 0
+  uploaded: 0, existingImage: 0, imagesValidated: 0, imageDownloadFailed: 0,
+  imageBytesValidated: 0, failed: 0
 };
 const samples = { missingIdentity: [], noImage: [], invalidImage: [] };
 const s = v => String(v ?? '').trim();
@@ -152,6 +162,60 @@ function imageOfOff(p) {
   return '';
 }
 
+async function validateImageDownload(imageUrl) {
+  let response;
+  try {
+    response = await fetch(imageUrl, {
+      headers: { 'user-agent': 'RivoCity-Catalog-Importer/1.0' },
+      signal: AbortSignal.timeout(20000)
+    });
+  } catch (error) {
+    stats.imageDownloadFailed++;
+    throw new Error('Image download failed: ' + error.message);
+  }
+  if (!response.ok) {
+    stats.imageDownloadFailed++;
+    throw new Error('Image download HTTP ' + response.status);
+  }
+
+  const contentType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (!contentType.startsWith('image/')) {
+    stats.imageDownloadFailed++;
+    throw new Error('Source response is not an image (' + (contentType || 'unknown content type') + ')');
+  }
+
+  const declaredLength = Number(response.headers.get('content-length') || 0);
+  if (declaredLength > 8 * 1024 * 1024) {
+    stats.imageDownloadFailed++;
+    throw new Error('Image exceeds 8 MB (Content-Length)');
+  }
+
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (!bytes.length || bytes.length > 8 * 1024 * 1024) {
+    stats.imageDownloadFailed++;
+    throw new Error('Image is empty or exceeds 8 MB');
+  }
+
+  const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isPng = bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const isGif = bytes.length >= 6 && ['GIF87a', 'GIF89a'].includes(bytes.subarray(0, 6).toString('ascii'));
+  const isWebp = bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+  const detectedType = isJpeg ? 'image/jpeg' : isPng ? 'image/png' : isGif ? 'image/gif' : isWebp ? 'image/webp' : '';
+
+  if (!detectedType) {
+    stats.imageDownloadFailed++;
+    throw new Error('Downloaded file does not have a supported image signature');
+  }
+  if (contentType !== detectedType && !(contentType === 'image/jpg' && detectedType === 'image/jpeg')) {
+    stats.imageDownloadFailed++;
+    throw new Error('Image content-type mismatch: header ' + contentType + ', file ' + detectedType);
+  }
+
+  stats.imagesValidated++;
+  stats.imageBytesValidated += bytes.length;
+  return { bytes, contentType: detectedType };
+}
+
 async function findProduct({ name, brand, barcode, weight }) {
   if (barcode) {
     const { data, error } = await db.from('universal_products').select('id,image_url').eq('barcode', barcode).limit(2);
@@ -191,6 +255,10 @@ async function ingest(r) {
     stats.invalidImageUrl++;
     if (samples.invalidImage.length < 5) samples.invalidImage.push({ name, image });
     return;
+  }
+
+  if (validateImages) {
+    await validateImageDownload(image);
   }
 
   let product = await findProduct({ name, brand, barcode, weight });
@@ -360,7 +428,9 @@ async function openFoodFacts() {
   }
 }
 
-console.log(dry ? 'DRY RUN — no writes (database reads only)' : 'LIVE IMPORT — writing to Supabase');
+console.log(validateImages
+  ? 'IMAGE VALIDATION — downloads and validates files; no Supabase writes'
+  : dry ? 'DRY RUN — no writes (database reads only)' : 'LIVE IMPORT — writing to Supabase');
 try {
   if (doOpenMrp) await openMrp();
   if (offPath) await openFoodFacts();
