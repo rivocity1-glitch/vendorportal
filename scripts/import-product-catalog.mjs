@@ -109,9 +109,8 @@ function offImageUrl(barcodeValue, language, revision, size = '400') {
   if (!/^\d{8,14}$/.test(barcode) || !/^\d+$/.test(rev)) return '';
   // OFF pads barcodes shorter than 13 digits before deriving the image directory.
   if (barcode.length < 13) barcode = barcode.padStart(13, '0');
-  // Open Food Facts stores product images in three-digit barcode directory segments.
-  const parts = [];
-  for (let i = 0; i < barcode.length; i += 3) parts.push(barcode.slice(i, i + 3));
+  // OFF uses the first 9 digits as three directory segments; the remaining digits form the final segment.
+  const parts = [barcode.slice(0, 3), barcode.slice(3, 6), barcode.slice(6, 9), barcode.slice(9)];
   const imageLanguage = /^[a-z]{2,3}$/.test(s(language)) ? s(language) : 'en';
   return `https://images.openfoodfacts.org/images/products/${parts.join('/')}/front_${imageLanguage}.${rev}.${size}.jpg`;
 }
