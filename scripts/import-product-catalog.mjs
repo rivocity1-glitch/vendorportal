@@ -78,7 +78,7 @@ function firstImageUrl(value, depth = 0) {
   if (depth > 6 || value == null) return '';
   if (typeof value === 'string') {
     const candidate = value.startsWith('//') ? 'https:' + value : value;
-    return /^https?:\\/\\//i.test(candidate) ? candidate : '';
+    return /^https?:\/\//i.test(candidate) ? candidate : '';
   }
   if (Array.isArray(value)) {
     for (const item of value) {
