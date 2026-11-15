@@ -129,7 +129,6 @@ const INDIAN_BRANDS = new Set([
   '24mantra','organic tattva','organic india','pro nature',
   'pro nature organic','nutrela','ruchi soya','patanjali foods',
   'jivo wellness','jivo','sresta natural bioproducts',
-  'mccain india' // McCain is foreign-owned; deliberately do not add it.
 ].map(normalizeBrand));
 
 function isIndianOwnedBrand(brand) {
@@ -459,6 +458,7 @@ async function openFoodFacts() {
     const brandName = s(product.brands).split(',')[0].trim();
     if (!isIndianOwnedBrand(brandName)) {
       stats.nonIndianBrandSkipped++;
+      if (samples.rejectedBrands.length < 10) samples.rejectedBrands.push({ name: productName || '(missing name)', brand: brandName || '(blank)', barcode, reason: brandName ? 'Brand not in verified Indian-owned allowlist' : 'Missing brand; ownership cannot be verified' });
       continue;
     }
     if (productName) stats.indiaWithName++;
