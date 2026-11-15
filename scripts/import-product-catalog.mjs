@@ -73,13 +73,14 @@ if ((!validateImages && (!url || !key)) || (!doOpenMrp && !offPath)) {
 }
 const db = validateImages ? null : createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 const stats = {
-  recordsScanned: 0, indiaSkipped: 0, indiaRecords: 0, indiaWithName: 0, indiaWithImage: 0, eligible: 0, missingName: 0, nonIndianBrandSkipped: 0,
+  recordsScanned: 0, indiaSkipped: 0, indiaRecords: 0, indiaWithName: 0, indiaWithImage: 0, eligible: 0, missingName: 0, indianBrandMatched: 0, nonIndianBrandSkipped: 0,
   missingBarcodeAndBrand: 0, noImage: 0, invalidImageUrl: 0,
   matchedExisting: 0, wouldCreate: 0, created: 0, wouldUpload: 0,
   uploaded: 0, existingImage: 0, imagesValidated: 0, imageDownloadFailed: 0,
   imageBytesValidated: 0, failed: 0
 };
-const samples = { missingIdentity: [], noImage: [], invalidImage: [] };
+const samples = { missingIdentity: [], noImage: [], invalidImage: [], rejectedBrands: [] };
+const selectedPreview = [];
 const s = v => String(v ?? '').trim();
 const slug = v => s(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'product';
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -109,7 +110,26 @@ const INDIAN_BRANDS = new Set([
   'lt foods','ltfoods','india gate basmati rice','fortune foods','awlagribusiness',
   'haldirams nagpur','bikano','haldiram bhujiawala','balaji snacks',
   'sosyo','bisleri','parle agro','rasna','paperboat','tata gluco',
-  'tata copper','tata himalayan','tata tea gold','tetley india' // Tetley is owned by Tata Consumer Products.
+  'tata copper','tata himalayan','tata tea gold','tetley india',
+  // Additional established Indian-owned food and beverage brands.
+  'gits','gits food','gits foods','eastern','eastern condiments','gryb',
+  'grb','grb dairy foods','mothers recipe','mother recipe','chings','chings secret',
+  'smith and jones','veeba','wingreens','id fresh','id fresh food',
+  'milky mist','hatsun','arun icecreams','heritage foods','gowardhan',
+  'chitale','chitale bandhu','katraj dairy','prabhat dairy','kwality walls india',
+  'slurrp farm','wholsum foods','yogabar','yoga bar','the whole truth',
+  'country delight','countrydelight','sleepy owl','rage coffee','rage',
+  'chaayos','chaipoint','chaipoint','raw pressery','rawpressery',
+  'capital foods','bikano','bikaji foods','haldiram foods',
+  'mala s','malas','desai foods','suhana','suhana masala',
+  'sankalp','sankalp foods','jain farm fresh','jain farm fresh foods',
+  'mapro','malas fruit products','kissan india','madhur sugar',
+  'dhampur green','dhampur bio organics','shree renuka sugars',
+  'sugar free natura','zandu real','praakritik','24 mantra organic',
+  '24mantra','organic tattva','organic india','pro nature',
+  'pro nature organic','nutrela','ruchi soya','patanjali foods',
+  'jivo wellness','jivo','sresta natural bioproducts',
+  'mccain india' // McCain is foreign-owned; deliberately do not add it.
 ].map(normalizeBrand));
 
 function isIndianOwnedBrand(brand) {
@@ -274,7 +294,12 @@ async function ingest(r) {
   const image = s(r.image_url || r.image_front_url);
 
   if (!name) { stats.missingName++; return; }
-  if (!isIndianOwnedBrand(brand)) { stats.nonIndianBrandSkipped++; return; }
+  if (!isIndianOwnedBrand(brand)) {
+    stats.nonIndianBrandSkipped++;
+    if (samples.rejectedBrands.length < 10) samples.rejectedBrands.push({ name, brand: brand || '(blank)', barcode, reason: brand ? 'Brand not in verified Indian-owned allowlist' : 'Missing brand; ownership cannot be verified' });
+    return;
+  }
+  stats.indianBrandMatched++;
   if (!barcode && !brand) {
     stats.missingBarcodeAndBrand++;
     if (samples.missingIdentity.length < 5) samples.missingIdentity.push({ name, weight, code: r.code || '' });
@@ -463,6 +488,13 @@ async function openFoodFacts() {
       _source_url: product.url || 'https://world.openfoodfacts.org/product/' + barcode,
       _contributor: product.image_uploader || product.creator || ''
     };
+    if (selectedPreview.length < 30) selectedPreview.push({
+      name: productName,
+      brand: brandName,
+      barcode,
+      hasImage: Boolean(imageUrl),
+      decision: 'ACCEPTED — Indian-owned brand allowlist match'
+    });
     try { await ingest(record); }
     catch (error) { stats.failed++; console.error('Open Food Facts', barcode, error.message); }
     if (!dry) await wait(25);
@@ -476,6 +508,7 @@ try {
   if (doOpenMrp) await openMrp();
   if (offPath) await openFoodFacts();
   console.log('Finished', stats);
+  console.log('Selected product preview:', JSON.stringify(selectedPreview, null, 2));
   console.log('Skipped samples:', JSON.stringify(samples, null, 2));
 } catch (error) {
   console.error(error);
