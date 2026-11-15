@@ -64,7 +64,7 @@ if (!url || !key || (!doOpenMrp && !offPath)) {
 }
 const db = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 const stats = {
-  recordsScanned: 0, indiaSkipped: 0, eligible: 0, missingName: 0,
+  recordsScanned: 0, indiaSkipped: 0, indiaRecords: 0, indiaWithName: 0, indiaWithImage: 0, eligible: 0, missingName: 0,
   missingBarcodeAndBrand: 0, noImage: 0, invalidImageUrl: 0,
   matchedExisting: 0, wouldCreate: 0, created: 0, wouldUpload: 0,
   uploaded: 0, existingImage: 0, failed: 0
@@ -74,16 +74,50 @@ const s = v => String(v ?? '').trim();
 const slug = v => s(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'product';
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-function imageOfOff(p) {
-  const front = p.selected_images?.front || {};
-  for (const candidate of [front.display, front.small, front.thumb]) {
-    if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate)) return candidate;
-    if (candidate && typeof candidate === 'object') {
-      const value = candidate.en || candidate.hi || Object.values(candidate).find(v => typeof v === 'string' && /^https?:\/\//i.test(v));
-      if (typeof value === 'string' && /^https?:\/\//i.test(value)) return value;
+function firstImageUrl(value, depth = 0) {
+  if (depth > 6 || value == null) return '';
+  if (typeof value === 'string') {
+    const candidate = value.startsWith('//') ? 'https:' + value : value;
+    return /^https?:\\/\\//i.test(candidate) ? candidate : '';
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = firstImageUrl(item, depth + 1);
+      if (found) return found;
+    }
+    return '';
+  }
+  if (typeof value === 'object') {
+    const preferred = ['en', 'display', 'small', 'thumb', 'url', '400', '200', '100', 'full', 'original'];
+    for (const key of preferred) {
+      if (key in value) {
+        const found = firstImageUrl(value[key], depth + 1);
+        if (found) return found;
+      }
+    }
+    for (const nested of Object.values(value)) {
+      const found = firstImageUrl(nested, depth + 1);
+      if (found) return found;
     }
   }
-  return s(p.image_front_url || p.image_url || p.image_url_display);
+  return '';
+}
+
+function imageOfOff(p) {
+  const front = p.selected_images?.front;
+  const imagesFront = p.images?.front;
+  const candidates = [
+    front?.display, front?.small, front?.thumb,
+    imagesFront?.sizes, imagesFront?.url, imagesFront,
+    p.image_front_url, p.image_front_display_url,
+    p.image_front_small_url, p.image_front_thumb_url,
+    p.image_url, p.image_url_display
+  ];
+  for (const candidate of candidates) {
+    const found = firstImageUrl(candidate);
+    if (found) return found;
+  }
+  return '';
 }
 
 async function findProduct({ name, brand, barcode, weight }) {
@@ -238,18 +272,31 @@ async function openFoodFacts() {
   const stream = offPath.endsWith('.gz') ? input.pipe(createGunzip()) : input;
   const lines = createInterface({ input: stream, crlfDelay: Infinity });
   let eligible = 0;
+  const scanStartedAt = Date.now();
   for await (const line of lines) {
     if (!line.trim()) continue;
     stats.recordsScanned++;
+    if (stats.recordsScanned % 100000 === 0) {
+      console.log('OFF scan progress', {
+        recordsScanned: stats.recordsScanned,
+        indiaRecords: stats.indiaRecords,
+        indiaWithName: stats.indiaWithName,
+        indiaWithImage: stats.indiaWithImage,
+        recordsPerSecond: Math.round(stats.recordsScanned / Math.max(1, (Date.now() - scanStartedAt) / 1000))
+      });
+    }
     let product;
     try { product = JSON.parse(line); } catch { continue; }
     if (!includeGlobal && !/india|en:india|in:india/i.test([product.countries, ...(product.countries_tags || [])].join(' '))) {
       stats.indiaSkipped++;
       continue;
     }
+    stats.indiaRecords++;
     const barcode = s(product.code || product._id);
     const productName = s(product.product_name || product.product_name_en);
     const imageUrl = imageOfOff(product);
+    if (productName) stats.indiaWithName++;
+    if (imageUrl) stats.indiaWithImage++;
     // In image-only mode, count only records that can actually enter the catalogue.
     // Continue scanning the dump until the requested number of image-bearing products is reached.
     if (imageOnly && !productName) {
@@ -277,8 +324,7 @@ async function openFoodFacts() {
     };
     try { await ingest(record); }
     catch (error) { stats.failed++; console.error('Open Food Facts', barcode, error.message); }
-    if (eligible % 100 === 0) console.log('Open Food Facts', eligible, stats);
-    await wait(25);
+    if (!dry) await wait(25);
   }
 }
 
