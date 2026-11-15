@@ -31,7 +31,7 @@ npm run catalog:import -- --off-jsonl "D:\data\openfoodfacts-products.jsonl.gz" 
 npm run catalog:import -- --off-jsonl "D:\data\openfoodfacts-products.jsonl.gz" --limit 1000
 ```
 
-By default OFF rows are filtered to India; this is the intended initial RivoCity catalogue scope. Do not use --include-global for the launch catalogue. Use --limit as a per-source cap. During OFF scans, progress is printed every 100,000 records with India counts, image-bearing India records, and scan speed.
+By default OFF rows are first filtered to products tagged as sold in India. **A second strict filter now requires an exact brand match in the importer’s curated Indian-owned brand allowlist.** Unknown, blank, and foreign-owned brands are skipped; manufacturing or sale in India alone does not qualify. The allowlist is intentionally conservative: add a brand only after verifying its controlling company is Indian-owned. The summary reports `nonIndianBrandSkipped`. Do not use --include-global for the launch catalogue. Use --limit as a per-source cap. During OFF scans, progress is printed every 100,000 records with India counts, image-bearing India records, and scan speed.
 
 Before any live import, validate real image downloads without writing to Supabase:
 
