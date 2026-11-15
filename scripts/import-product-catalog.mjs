@@ -76,7 +76,7 @@ const stats = {
   recordsScanned: 0, indiaSkipped: 0, indiaRecords: 0, indiaWithName: 0, indiaWithImage: 0, eligible: 0, missingName: 0, indianBrandMatched: 0, nonIndianBrandSkipped: 0,
   missingBarcodeAndBrand: 0, noImage: 0, invalidImageUrl: 0,
   matchedExisting: 0, wouldCreate: 0, created: 0, wouldUpload: 0,
-  uploaded: 0, existingImage: 0, imagesValidated: 0, imageDownloadFailed: 0,
+  uploaded: 0, existingImage: 0, imagesValidated: 0, imageDownloadFailed: 0, imageValidationSkipped: 0,
   imageBytesValidated: 0, failed: 0
 };
 const samples = { missingIdentity: [], noImage: [], invalidImage: [], rejectedBrands: [] };
@@ -315,8 +315,21 @@ async function ingest(r) {
     return;
   }
 
+  // Validate every image before any catalogue mutation. In validation mode this is
+  // network-only; in live mode the validated bytes are reused for upload so a
+  // transient/bad source image cannot leave a newly-created product without its image.
+  let validatedImage = null;
+  if (validateImages || !dry) {
+    try {
+      validatedImage = await validateImageDownload(image);
+    } catch (error) {
+      stats.imageValidationSkipped++;
+      if (samples.invalidImage.length < 10) samples.invalidImage.push({ name, brand, barcode, image, reason: error.message });
+      console.error('Skipping product because image validation failed:', barcode, error.message);
+      return;
+    }
+  }
   if (validateImages) {
-    await validateImageDownload(image);
     // Validation mode is deliberately network-only: no Supabase client reads or writes.
     return;
   }
@@ -354,12 +367,8 @@ async function ingest(r) {
     return;
   }
 
-  const response = await fetch(image, { headers: { 'user-agent': 'RivoCity-Catalog-Importer/1.0' } });
-  if (!response.ok) throw new Error('Image download HTTP ' + response.status);
-  const type = (response.headers.get('content-type') || '').split(';')[0].toLowerCase();
-  if (!type.startsWith('image/')) throw new Error('Source response is not an image (' + (type || 'unknown content type') + ')');
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (!bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error('Image is empty or exceeds 8 MB');
+  // Reuse the already-validated response bytes; do not download the source twice.
+  const { bytes, contentType: type } = validatedImage;
   const ext = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : type.includes('gif') ? 'gif' : 'jpg';
   const source = r._source || 'openfoodfacts';
   const objectName = slug(barcode || product.id);
