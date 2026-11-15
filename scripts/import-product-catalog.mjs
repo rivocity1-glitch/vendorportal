@@ -73,7 +73,7 @@ if ((!validateImages && (!url || !key)) || (!doOpenMrp && !offPath)) {
 }
 const db = validateImages ? null : createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 const stats = {
-  recordsScanned: 0, indiaSkipped: 0, indiaRecords: 0, indiaWithName: 0, indiaWithImage: 0, eligible: 0, missingName: 0,
+  recordsScanned: 0, indiaSkipped: 0, indiaRecords: 0, indiaWithName: 0, indiaWithImage: 0, eligible: 0, missingName: 0, nonIndianBrandSkipped: 0,
   missingBarcodeAndBrand: 0, noImage: 0, invalidImageUrl: 0,
   matchedExisting: 0, wouldCreate: 0, created: 0, wouldUpload: 0,
   uploaded: 0, existingImage: 0, imagesValidated: 0, imageDownloadFailed: 0,
@@ -83,6 +83,39 @@ const samples = { missingIdentity: [], noImage: [], invalidImage: [] };
 const s = v => String(v ?? '').trim();
 const slug = v => s(v).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'product';
 const wait = ms => new Promise(r => setTimeout(r, ms));
+
+// Strict Indian-brand allowlist. Unknown or blank brands are excluded by default.
+// Add a brand only after verifying that its controlling company is Indian-owned.
+const normalizeBrand = value => s(value).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+const INDIAN_BRANDS = new Set([
+  'aachimasala','aavin','amul','amulya','aashirvaad','adaniwilmar','fortune',
+  'bajaj','balajiwafers','bikaji','bikanervala','britannia','britanniaindustries',
+  'catch','cavin s','cavinsk','cavins','ceat','cello','chandrika','chik',
+  'dabur','dabar','dettol', // Dettol intentionally excluded below; retained only as a non-match guard is not needed.
+  'everest','everestspices','fena','fevicol','godrej','haldirams','haldiram',
+  'india gate','indiagate','itc','jaguar', // Jaguar is not an Indian brand; do not add aliases without ownership review.
+  'jyothylabs','marico','mdh','mtr','motherdairy','nandini','organicindia',
+  'parle','parleproducts','parleg','parleagro','patanjali','pidilite',
+  'priya','saffola','sundrop','tata','tataconsumer','tataconsumerproducts',
+  'tatasalt','tatatea','tatasampann','tatasoulfull','tata coffee',
+  'waghbakri','vijaya','zoff','badshah','aachi','b natural','bnatural',
+  'paperboat','paper boat','frooti','maaza', // Indian-owned Parle Agro / acquired Indian portfolio.
+  'real','hajmola','daburreal','vatika','himalaya','emami','boroplus',
+  'navratna','zandu','himalayawellness','bajajalmond drops','bajajalmond',
+  'parachute','setwet','livon','mediker','beardo','trueelements',
+  'bagrrys','bagrrys','farmley','beyond snack','epigamia','countrybean',
+  'too yum','tooyum','snactac','campacolas','campa','yeah','goodlife',
+  'reliance','reliance select','desi kitchen','keya','pushp','zoffspices',
+  'lt foods','ltfoods','india gate basmati rice','fortune foods','awlagribusiness',
+  'haldirams nagpur','bikano','haldiram bhujiawala','balaji snacks',
+  'sosyo','bisleri','parle agro','rasna','paperboat','tata gluco',
+  'tata copper','tata himalayan','tata tea gold','tetley india' // Tetley is owned by Tata Consumer Products.
+].map(normalizeBrand));
+
+function isIndianOwnedBrand(brand) {
+  const normalized = normalizeBrand(brand);
+  return Boolean(normalized) && INDIAN_BRANDS.has(normalized);
+}
 
 function firstImageUrl(value, depth = 0) {
   if (depth > 6 || value == null) return '';
@@ -241,6 +274,7 @@ async function ingest(r) {
   const image = s(r.image_url || r.image_front_url);
 
   if (!name) { stats.missingName++; return; }
+  if (!isIndianOwnedBrand(brand)) { stats.nonIndianBrandSkipped++; return; }
   if (!barcode && !brand) {
     stats.missingBarcodeAndBrand++;
     if (samples.missingIdentity.length < 5) samples.missingIdentity.push({ name, weight, code: r.code || '' });
