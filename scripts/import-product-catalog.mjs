@@ -95,7 +95,7 @@ const INDIAN_BRANDS = new Set([
   'dabur',
   'everest','everestspices','fena','fevicol','godrej','haldirams','haldiram',
   'indiagate','itc',
-  'jyothylabs','marico','mdh','mtr','motherdairy','nandini','organicindia',
+  'jyothylabs','marico','mdh','motherdairy','nandini','organicindia',
   'parle','parleproducts','parleg','parleagro','patanjali','pidilite',
   'priya','saffola','tata','tataconsumer','tataconsumerproducts',
   'tatasalt','tatatea','tatasampann','tatasoulfull','tata coffee',
