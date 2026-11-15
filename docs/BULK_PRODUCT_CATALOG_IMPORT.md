@@ -1,12 +1,12 @@
 # RivoCity bulk catalogue image import
 
-This importer runs locally with a Supabase service-role key. Never put that key in Vite client variables or commit it.
+This importer runs locally with a Supabase service-role key for database access. Never put that key in Vite client variables or commit it. Product image files can be stored in Supabase Storage (default) or Cloudflare R2; only public image URLs are stored in the catalogue database.
 
 ## Sources and licensing
 
 - OpenMRP publishes a public weekly dump (products, variants, brands) without an API key. Its product database is ODbL-1.0; contributed media is CC-BY-SA-4.0.
 - Open Food Facts asks bulk users to download the product CSV/JSONL export and use its AWS image dataset for large image volumes. Product data is ODbL; images are CC-BY-SA. This initial importer reads the local JSONL/JSONL.GZ export and downloads the selected front image URL carried by each record.
-- The importer writes image files to the existing product-images Storage bucket and registers rows in the existing universal_products and universal_product_images tables. It stores a per-image attribution JSON file in product-images/catalogue-attribution/.
+- The importer registers rows in the existing universal_products and universal_product_images tables and stores a per-image attribution JSON object alongside each image. Supabase Storage is the default. With Cloudflare R2, the same object paths are uploaded to an R2 bucket and the configured public URL is saved in universal_products.image_url / universal_product_images.image_url. The database stores URLs, not image binaries.
 
 ## PowerShell setup
 
@@ -47,3 +47,27 @@ https://github.com/openmrp-in/openmrp
 https://world.openfoodfacts.org/data
 https://github.com/openfoodfacts/openfoodfacts-server/blob/main/docs/api/how-to-download-images.md
 https://openfoodfacts.github.io/documentation/docs/Product-Opener/api/tutorials/license-be-on-the-legal-side/
+## Optional Cloudflare R2 storage
+
+R2 is an alternative object store and CDN origin. Create an R2 bucket, create an S3 API token with Object Read & Write for that bucket, and attach a public custom domain to the bucket. Keep Supabase as the database; do not store image binaries in Postgres.
+
+After pulling the branch, install dependencies:
+
+```powershell
+npm install
+```
+
+Set these variables in the current PowerShell session (never commit them):
+
+```powershell
+$env:RIVO_STORAGE_PROVIDER="r2"
+$env:R2_ACCOUNT_ID="YOUR_CLOUDFLARE_ACCOUNT_ID"
+$env:R2_ACCESS_KEY_ID="YOUR_R2_ACCESS_KEY_ID"
+$env:R2_SECRET_ACCESS_KEY="YOUR_R2_SECRET_ACCESS_KEY"
+$env:R2_BUCKET_NAME="YOUR_R2_BUCKET_NAME"
+$env:RIVO_STORAGE_PUBLIC_URL="https://images.yourdomain.com"
+```
+
+For Supabase Storage, leave RIVO_STORAGE_PROVIDER unset or set it to supabase. RIVO_STORAGE_PUBLIC_URL must be the public base URL attached to the R2 bucket, without a trailing slash. The S3 API endpoint is for uploads, not the public image URL.
+
+The app continues reading ordinary HTTPS image URLs from the existing catalogue tables, so it does not need to know which provider hosts the file. Changing providers later requires migrating objects and updating their URLs, not redesigning the product schema.
