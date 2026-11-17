@@ -291,12 +291,44 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     const timer = window.setTimeout(async () => {
       setMasterReferenceLoading(true);
       try {
-        let query = supabase.from("universal_products").select("id,name,brand,barcode,weight,image_url,category_id");
-        if (barcode) query = query.eq("barcode", barcode);
-        else query = query.ilike("name", name);
-        const { data, error } = await query.limit(1).maybeSingle();
-        if (error) throw error;
-        setMasterReference(data || null);
+        let match: any = null;
+        if (barcode) {
+          const { data, error } = await supabase.from("universal_products")
+            .select("id,name,brand,barcode,weight,image_url,category_id")
+            .eq("barcode", barcode).limit(1).maybeSingle();
+          if (error) throw error;
+          match = data;
+        }
+        if (!match && name) {
+          const { data, error } = await supabase.from("universal_products")
+            .select("id,name,brand,barcode,weight,image_url,category_id")
+            .ilike("name", name).limit(1).maybeSingle();
+          if (error) throw error;
+          match = data;
+        }
+        if (!match && name) {
+          const { data: aliasRows, error: aliasError } = await supabase
+            .from("universal_product_aliases")
+            .select("universal_product_id")
+            .ilike("alias", name)
+            .limit(1);
+          if (aliasError) throw aliasError;
+          const masterId = aliasRows?.[0]?.universal_product_id;
+          if (masterId) {
+            const { data, error } = await supabase.from("universal_products")
+              .select("id,name,brand,barcode,weight,image_url,category_id")
+              .eq("id", masterId).maybeSingle();
+            if (error) throw error;
+            match = data;
+          }
+        }
+        if (match?.id && !match.image_url) {
+          const { data: primaryImage } = await supabase.from("universal_product_images")
+            .select("image_url").eq("universal_product_id", match.id)
+            .eq("is_primary", true).limit(1).maybeSingle();
+          if (primaryImage?.image_url) match = { ...match, image_url: primaryImage.image_url };
+        }
+        setMasterReference(match);
       } catch (error) {
         console.warn("Could not load master catalogue reference:", error);
         setMasterReference(null);
@@ -567,17 +599,16 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         : ""
     );
 
-    // A canonical image already exists: reuse it and do not replace it with
-    // another vendor's product photo.
+    // Admin catalogue image is canonical. When a matching master image exists,
+    // always use it on this vendor listing, even if the vendor uploaded a photo.
     if (currentCanonicalUrl) {
-      if (vendorImageUrls.length === 0) {
-        const { error } = await supabase
-          .from("products")
-          .update({ image_url: currentCanonicalUrl })
-          .eq("id", productId);
-        if (error) throw error;
-        setImageUrl(currentCanonicalUrl);
-      }
+      const { error } = await supabase
+        .from("products")
+        .update({ image_url: currentCanonicalUrl })
+        .eq("id", productId);
+      if (error) throw error;
+      setImageUrl(currentCanonicalUrl);
+      setIsImageError(false);
       return;
     }
 
