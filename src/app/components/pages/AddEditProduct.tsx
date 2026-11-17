@@ -90,6 +90,8 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
   const [manualImageUrl, setManualImageUrl] = useState("");
   const [selectedImageSource, setSelectedImageSource] = useState<{ source: string; sourceUrl: string; license: string } | null>(null);
   const [sharedImages, setSharedImages] = useState<Array<{ id: string; image_url: string; is_primary: boolean; source: string }>>([]);
+  const [masterReference, setMasterReference] = useState<any>(null);
+  const [masterReferenceLoading, setMasterReferenceLoading] = useState(false);
   const [isUpdatingPrimaryImage, setIsUpdatingPrimaryImage] = useState(false);
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
@@ -281,6 +283,27 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
       setIsImageError(false);
     }
   }, [product]);
+
+  useEffect(() => {
+    const name = form.name.trim();
+    const barcode = form.barcode.trim();
+    if (!name && !barcode) { setMasterReference(null); return; }
+    const timer = window.setTimeout(async () => {
+      setMasterReferenceLoading(true);
+      try {
+        let query = supabase.from("universal_products").select("id,name,brand,barcode,weight,image_url,category_id");
+        if (barcode) query = query.eq("barcode", barcode);
+        else query = query.ilike("name", name);
+        const { data, error } = await query.limit(1).maybeSingle();
+        if (error) throw error;
+        setMasterReference(data || null);
+      } catch (error) {
+        console.warn("Could not load master catalogue reference:", error);
+        setMasterReference(null);
+      } finally { setMasterReferenceLoading(false); }
+    }, 350);
+    return () => window.clearTimeout(timer);
+  }, [form.name, form.barcode]);
 
   const searchProductImages = async () => {
     const query = (imageSearchQuery || form.name).trim();
@@ -788,6 +811,16 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
             <div>
               <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Product Name *</label>
               <input type="text" required placeholder="e.g., Amul Full Cream Milk 1L" value={form.name} onChange={e => handleField("name", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981] focus:ring-2 focus:ring-[#10B981]/10" />
+            </div>
+            <div className="rounded-xl border border-[#10B981]/30 bg-[#10B981]/5 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#047857]">Shared catalogue reference</p>
+                <span className="text-[10px] text-muted-foreground">{masterReferenceLoading ? "Checking…" : masterReference ? "Possible match found" : "No exact reference yet"}</span>
+              </div>
+              {masterReference ? <div className="flex items-center gap-3">
+                <div className="h-14 w-14 shrink-0 rounded-lg border bg-white overflow-hidden">{masterReference.image_url ? <img src={masterReference.image_url} alt="" className="h-full w-full object-contain"/> : <div className="h-full flex items-center justify-center text-[9px] text-muted-foreground">No image</div>}</div>
+                <div className="min-w-0"><p className="text-xs font-semibold text-foreground truncate">{masterReference.name}</p><p className="text-[10px] text-muted-foreground truncate">{masterReference.brand || "No brand"} {masterReference.weight || ""}</p><p className="text-[10px] text-[#047857]">Reference only. Saving the vendor product runs the shared catalogue matcher and links or creates its master record.</p></div>
+              </div> : <p className="text-[10px] text-muted-foreground">Enter a product name or barcode to check the shared catalogue. If no match exists, the save process can create a master record.</p>}
             </div>
             <div>
               <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Category *</label>
