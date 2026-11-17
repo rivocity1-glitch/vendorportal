@@ -731,7 +731,9 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         loose_unit: form.allow_loose_quantity ? form.loose_unit : null,
         vendor_id: vendor.id,
         sku: form.sku || null,
-        barcode: form.barcode || null
+        barcode: form.barcode || null,
+        // A confirmed Admin catalogue reference takes precedence over fuzzy RPC matching.
+        universal_product_id: masterReference?.id || null
       };
 
       let savedProductId: string;
