@@ -52,7 +52,7 @@ export default function VendorLiteApp() {
       setVendor(vendorRow as VendorInfo);
       const { data: orderRows, error: orderError } = await supabase
         .from("orders")
-        .select("id, order_number, order_status, total_amount, vendor_earning, payment_method, created_at")
+        .select("id, order_number, order_status, total_amount, vendor_earning, payment_method, created_at, delivered_at")
         .eq("vendor_id", vendorRow.id)
         .order("created_at", { ascending: false })
         .limit(100);
@@ -100,7 +100,7 @@ export default function VendorLiteApp() {
   const metrics = useMemo(() => {
     const delivered = orders.filter(order => order.order_status.toLowerCase() === "delivered");
     const today = new Date().toLocaleDateString("en-CA");
-    const todayDelivered = delivered.filter(order => new Date(order.created_at).toLocaleDateString("en-CA") === today);
+    const todayDelivered = delivered.filter(order => new Date(order.delivered_at || order.created_at).toLocaleDateString("en-CA") === today);
     return {
       todayEarnings: todayDelivered.reduce((sum, order) => sum + Number(order.vendor_earning || 0), 0),
       totalEarnings: delivered.reduce((sum, order) => sum + Number(order.vendor_earning || 0), 0),
