@@ -115,6 +115,39 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     loose_unit: "Pcs"
   });
 
+  // Hydrate the form whenever the selected product changes, including Previous/Next navigation.
+  useEffect(() => {
+    if (!product?.id) {
+      setForm({ name: "", category_id: "", price: "", cost_price: "", mrp: "", gst_slab: "5", batch_number: "", expiry_date: "", weightValue: "", weightUnit: "Pcs", description: "", stock: "", sku: "", barcode: "", is_exclusive: false, allow_loose_quantity: false, loose_min_quantity: "100", loose_max_quantity: "5000", loose_step_quantity: "100", loose_unit: "Pcs" });
+      setImageUrl(""); setImageFiles([]); setImageFile(null); setExistingImageUrls([]); setSelectedImageSource(null);
+      return;
+    }
+    const rawWeight = String(product.weight || "").trim();
+    const weightMatch = rawWeight.match(/^(.+?)\s+(Pcs|Bottle|Pack|Unit|Set|Dozen|Gm|Kg|Ml|Ltr)$/i);
+    const rawImages = product.image_url;
+    let imageUrls: string[] = [];
+    if (typeof rawImages === "string" && rawImages.trim()) {
+      try { const parsed = JSON.parse(rawImages); imageUrls = Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string" && /^https?:\/\//i.test(value)) : []; }
+      catch { if (/^https?:\/\//i.test(rawImages.trim())) imageUrls = [rawImages.trim()]; }
+    } else if (Array.isArray(rawImages)) {
+      imageUrls = rawImages.filter((value): value is string => typeof value === "string" && /^https?:\/\//i.test(value));
+    }
+    setForm({
+      name: String(product.name || ""), category_id: String(product.category_id || ""),
+      price: product.price == null ? "" : String(product.price), cost_price: product.cost_price == null ? "" : String(product.cost_price), mrp: product.mrp == null ? "" : String(product.mrp),
+      gst_slab: String(product.gst_slab ?? "5").replace(/%/g, "").trim() || "5",
+      batch_number: String(product.batch_number || ""), expiry_date: product.expiry_date ? String(product.expiry_date).slice(0, 10) : "",
+      weightValue: weightMatch ? weightMatch[1].trim() : rawWeight,
+      weightUnit: weightMatch ? (unitOptions.find(unit => unit.toLowerCase() === weightMatch[2].toLowerCase()) || "Pcs") : "Pcs",
+      description: String(product.description || ""), stock: product.stock == null ? "" : String(product.stock), sku: String(product.sku || ""), barcode: String(product.barcode || ""),
+      is_exclusive: product.is_exclusive === true, allow_loose_quantity: product.allow_loose_quantity === true,
+      loose_min_quantity: product.loose_min_quantity == null ? "100" : String(product.loose_min_quantity),
+      loose_max_quantity: product.loose_max_quantity == null ? "5000" : String(product.loose_max_quantity),
+      loose_step_quantity: product.loose_step_quantity == null ? "100" : String(product.loose_step_quantity), loose_unit: String(product.loose_unit || "Pcs")
+    });
+    setExistingImageUrls(imageUrls); setImageUrl(imageUrls[0] || ""); setImageFiles([]); setImageFile(null);
+    setImageSearchQuery(""); setImageSearchResults([]); setImageSearchMessage(""); setManualImageUrl(""); setSelectedImageSource(null); setIsImageError(false);
+  }, [product?.id]);
   useEffect(() => {
     let cancelled = false;
     const fetchCategories = async () => {
