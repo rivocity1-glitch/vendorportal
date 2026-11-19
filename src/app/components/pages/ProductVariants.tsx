@@ -33,12 +33,15 @@ export function ProductVariants({ onNavigate, initialProduct }: { onNavigate: (p
       if (vendorError) throw vendorError;
       if (!vendor?.id) throw new Error("Vendor profile was not found.");
       setVendorId(vendor.id);
-      const { data, error } = await supabase.from("products")
-        .select("id,name,category_id,price,mrp,stock,sku")
-        .eq("vendor_id", vendor.id).order("name");
+      const { data: categoryRows, error: categoryError } = await supabase.from("product_categories").select("id,name").eq("status", "active");
+      if (categoryError) throw categoryError;
+      const fashionCategory = (categoryRows || []).find((category: any) => String(category.name || "").trim().toLowerCase() === "fashion");
+      if (!fashionCategory) { setProducts([]); setProductId(""); setNotice({type:"info", text:"Fashion category is not configured yet. Add an active Fashion category in the Admin catalogue before creating variants."}); return; }
+      const { data, error } = await supabase.from("products").select("id,name,category_id,price,mrp,stock,sku").eq("vendor_id", vendor.id).eq("category_id", fashionCategory.id).order("name");
       if (error) throw error;
       setProducts((data || []) as Product[]);
-      if (!productId && data?.length) setProductId(initialProduct?.id || data[0].id);
+      if (initialProduct && initialProduct.category_id !== fashionCategory.id) { setProductId(""); setNotice({type:"error", text:"Variants are available only for products in the Fashion category."}); }
+      else if (!productId && data?.length) setProductId(initialProduct?.id || data[0].id);
     } catch (error: any) {
       setNotice({type:"error", text:error?.message || "Could not load your products."});
     } finally { setLoading(false); }
