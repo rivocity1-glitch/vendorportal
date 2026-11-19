@@ -89,10 +89,6 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
   const [imageSearchMessage, setImageSearchMessage] = useState("");
   const [manualImageUrl, setManualImageUrl] = useState("");
   const [selectedImageSource, setSelectedImageSource] = useState<{ source: string; sourceUrl: string; license: string } | null>(null);
-  const [sharedImages, setSharedImages] = useState<Array<{ id: string; image_url: string; is_primary: boolean; source: string }>>([]);
-  const [masterReference, setMasterReference] = useState<any>(null);
-  const [masterReferenceLoading, setMasterReferenceLoading] = useState(false);
-  const [isUpdatingPrimaryImage, setIsUpdatingPrimaryImage] = useState(false);
 
   const [categories, setCategories] = useState<StoreCategory[]>([]);
 
@@ -141,201 +137,6 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     fetchCategories();
     return () => { cancelled = true; };
   }, []);
-
-  const loadSharedImages = async (productId: string) => {
-    const { data: resolverData, error: resolverError } = await supabase.rpc(
-      "resolve_product_master",
-      { p_product_id: productId }
-    );
-    if (resolverError) {
-      console.warn("Could not resolve shared product images:", resolverError.message);
-      setSharedImages([]);
-      return;
-    }
-    const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
-    const universalId = resolverResult?.universal_product_id;
-    if (!universalId) {
-      setSharedImages([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("universal_product_images")
-      .select("id, image_url, is_primary, source")
-      .eq("universal_product_id", universalId)
-      .order("created_at", { ascending: true });
-    if (error) {
-      console.warn("Could not load shared product gallery:", error.message);
-      setSharedImages([]);
-      return;
-    }
-    setSharedImages(data || []);
-  };
-
-  const makeSharedImagePrimary = async (imageId: string, imageUrl: string) => {
-    setIsUpdatingPrimaryImage(true);
-    try {
-      const { error } = await supabase.rpc("set_universal_product_primary_image", {
-        p_image_id: imageId
-      });
-      if (error) throw error;
-      if (product?.id) await loadSharedImages(product.id);
-      setImageUrl(imageUrl);
-      setIsImageError(false);
-      setImageSearchMessage("Shared catalogue primary image updated.");
-    } catch (error: any) {
-      console.error("Primary image update failed:", error);
-      alert(error?.message || "Could not update the shared catalogue image.");
-    } finally {
-      setIsUpdatingPrimaryImage(false);
-    }
-  };
-
-  const parseImageUrls = (value: unknown): string[] => {
-    if (!value) return [];
-    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && !!item);
-    if (typeof value !== "string") return [];
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string" && !!item);
-    } catch {}
-    return [value];
-  };
-
-  useEffect(() => {
-    if (product) {
-      let parsedWeightVal = "";
-      let parsedWeightUnit = "Pcs";
-      if (product.weight) {
-        const weightStr = product.weight.toString().trim();
-        const numericMatch = weightStr.match(/^[\d.]+/);
-        if (numericMatch) {
-          parsedWeightVal = numericMatch[0];
-          const unitMatch = weightStr.replace(parsedWeightVal, "").trim();
-          if (unitOptions.includes(unitMatch)) parsedWeightUnit = unitMatch;
-        } else {
-          parsedWeightVal = weightStr;
-        }
-      }
-
-      setForm({
-        name: product.name || "",
-        category_id: product.category_id || "",
-        price: product.price !== undefined && product.price !== null ? String(product.price) : "",
-        cost_price: product.cost_price !== undefined && product.cost_price !== null ? String(product.cost_price) : "",
-        mrp: product.mrp !== undefined && product.mrp !== null ? String(product.mrp) : "",
-        gst_slab: product.gst_slab !== undefined && product.gst_slab !== null ? String(product.gst_slab).replace("%", "").trim() : "5",
-        batch_number: product.batch_number || "",
-        expiry_date: product.expiry_date || "",
-        weightValue: parsedWeightVal,
-        weightUnit: parsedWeightUnit,
-        description: product.description || "",
-        stock: product.stock !== undefined && product.stock !== null ? String(product.stock) : "",
-        sku: product.sku || "",
-        barcode: product.barcode || "",
-        is_exclusive: product.is_exclusive === true,
-        allow_loose_quantity: product.allow_loose_quantity === true,
-        loose_min_quantity: product.loose_min_quantity != null ? String(product.loose_min_quantity) : "100",
-        loose_max_quantity: product.loose_max_quantity != null ? String(product.loose_max_quantity) : "5000",
-        loose_step_quantity: product.loose_step_quantity != null ? String(product.loose_step_quantity) : "100",
-        loose_unit: product.loose_unit || "Pcs"
-      });
-
-      const urls = parseImageUrls(product.image_url);
-      setExistingImageUrls(urls);
-      setImageUrl(urls[0] || "");
-      // Vendor-specific gallery is stored on the product row, while the shared catalogue remains canonical.
-      supabase.from("products").select("image_url").eq("id", product.id).maybeSingle().then(({ data }) => {
-        if (data?.image_url) setExistingImageUrls(parseImageUrls(data.image_url));
-      });
-      void loadSharedImages(product.id);
-      setImageFile(null);
-      setImageFiles([]);
-      setIsImageError(false);
-    } else {
-      setForm({
-        name: "",
-        category_id: "",
-        price: "",
-        cost_price: "",
-        mrp: "",
-        gst_slab: "5",
-        batch_number: "",
-        expiry_date: "",
-        weightValue: "",
-        weightUnit: "Pcs",
-        description: "",
-        stock: "",
-        sku: "",
-        barcode: "",
-        is_exclusive: false,
-        allow_loose_quantity: false,
-        loose_min_quantity: "100",
-        loose_max_quantity: "5000",
-        loose_step_quantity: "100",
-        loose_unit: "Pcs"
-      });
-      setExistingImageUrls([]);
-      setSharedImages([]);
-      setImageUrl("");
-      setImageFile(null);
-      setImageFiles([]);
-      setIsImageError(false);
-    }
-  }, [product]);
-
-  useEffect(() => {
-    const name = form.name.trim();
-    const barcode = form.barcode.trim();
-    if (!name && !barcode) { setMasterReference(null); return; }
-    const timer = window.setTimeout(async () => {
-      setMasterReferenceLoading(true);
-      try {
-        let match: any = null;
-        if (barcode) {
-          const { data, error } = await supabase.from("universal_products")
-            .select("id,name,brand,barcode,weight,image_url,category_id")
-            .eq("barcode", barcode).limit(1).maybeSingle();
-          if (error) throw error;
-          match = data;
-        }
-        if (!match && name) {
-          const { data, error } = await supabase.from("universal_products")
-            .select("id,name,brand,barcode,weight,image_url,category_id")
-            .ilike("name", name).limit(1).maybeSingle();
-          if (error) throw error;
-          match = data;
-        }
-        if (!match && name) {
-          const { data: aliasRows, error: aliasError } = await supabase
-            .from("universal_product_aliases")
-            .select("universal_product_id")
-            .ilike("alias", name)
-            .limit(1);
-          if (aliasError) throw aliasError;
-          const masterId = aliasRows?.[0]?.universal_product_id;
-          if (masterId) {
-            const { data, error } = await supabase.from("universal_products")
-              .select("id,name,brand,barcode,weight,image_url,category_id")
-              .eq("id", masterId).maybeSingle();
-            if (error) throw error;
-            match = data;
-          }
-        }
-        if (match?.id && !match.image_url) {
-          const { data: primaryImage } = await supabase.from("universal_product_images")
-            .select("image_url").eq("universal_product_id", match.id)
-            .eq("is_primary", true).limit(1).maybeSingle();
-          if (primaryImage?.image_url) match = { ...match, image_url: primaryImage.image_url };
-        }
-        setMasterReference(match);
-      } catch (error) {
-        console.warn("Could not load master catalogue reference:", error);
-        setMasterReference(null);
-      } finally { setMasterReferenceLoading(false); }
-    }, 350);
-    return () => window.clearTimeout(timer);
-  }, [form.name, form.barcode]);
 
   const searchProductImages = async () => {
     const query = (imageSearchQuery || form.name).trim();
@@ -568,80 +369,17 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
    * shared primary image. Existing canonical images are never overwritten by
    * another vendor's upload.
    */
-  const resolveUniversalProduct = async (
-    productId: string,
-    vendorImageUrls: string[],
-    requestedImageUrl: string
-  ) => {
-    const { data: resolverData, error: resolverError } = await supabase.rpc(
-      "resolve_product_master",
-      { p_product_id: productId }
-    );
-    if (resolverError) {
-      throw new Error(`Product saved, but universal matching failed: ${resolverError.message}`);
-    }
-
-    const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
-    const universalId = resolverResult?.universal_product_id;
-    if (!universalId) return;
-
-    const { data: universalProduct, error: universalError } = await supabase
-      .from("universal_products")
-      .select("id, image_url")
-      .eq("id", universalId)
-      .maybeSingle();
-    if (universalError) throw universalError;
-
-    const currentCanonicalUrl = universalProduct?.image_url || "";
-    const candidateUrl = vendorImageUrls[0] || (
-      requestedImageUrl && !requestedImageUrl.startsWith("blob:")
-        ? requestedImageUrl
-        : ""
-    );
-
-    // Admin catalogue image is canonical. When a matching master image exists,
-    // always use it on this vendor listing, even if the vendor uploaded a photo.
-    if (currentCanonicalUrl) {
-      const { error } = await supabase
-        .from("products")
-        .update({ image_url: currentCanonicalUrl })
-        .eq("id", productId);
-      if (error) throw error;
-      setImageUrl(currentCanonicalUrl);
-      setIsImageError(false);
-      return;
-    }
-
-    if (!candidateUrl) return;
-
-    // Use only allowed source values from universal_product_images_source_check.
-    // Provenance text is not written to non-existent columns.
-    const imageRows = (vendorImageUrls.length ? vendorImageUrls : [candidateUrl]).map(
-      (url, index) => ({
-        universal_product_id: universalId,
-        image_url: url,
-        is_primary: index === 0,
-        source: "vendor"
-      })
-    );
-
-    const { error: insertError } = await supabase
-      .from("universal_product_images")
-      .insert(imageRows);
-    if (insertError) throw insertError;
-
-    // The database trigger synchronizes universal_products.image_url from the
-    // primary gallery row. Do not update the canonical column independently.
-    if (vendorImageUrls.length === 0) {
-      const { error: vendorImageError } = await supabase
-        .from("products")
-        .update({ image_url: candidateUrl })
-        .eq("id", productId);
-      if (vendorImageError) throw vendorImageError;
-      setImageUrl(candidateUrl);
-      setIsImageError(false);
+  // Link the vendor listing to the master catalogue. Product photos remain
+  // vendor-owned and are stored only on the vendor product listing.
+  const resolveUniversalProduct = async (productId: string) => {
+    const { error } = await supabase.rpc("resolve_product_master", {
+      p_product_id: productId
+    });
+    if (error) {
+      throw new Error(`Product saved, but catalogue matching failed: ${error.message}`);
     }
   };
+
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -732,8 +470,6 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         vendor_id: vendor.id,
         sku: form.sku || null,
         barcode: form.barcode || null,
-        // A confirmed Admin catalogue reference takes precedence over fuzzy RPC matching.
-        universal_product_id: masterReference?.id || null
       };
 
       let savedProductId: string;
@@ -790,12 +526,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         setImageUrl(uploadedVendorImageUrls[0] || "");
       }
 
-      await resolveUniversalProduct(
-        savedProductId,
-        uploadedVendorImageUrls,
-        imageFiles.length > 0 ? "" : imageUrl
-      );
-      await loadSharedImages(savedProductId);
+      await resolveUniversalProduct(savedProductId);
       onNavigate("products");
     } catch (err: any) {
       console.error("Product preservation exception:", err);
@@ -844,16 +575,6 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
             <div>
               <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Product Name *</label>
               <input type="text" required placeholder="e.g., Amul Full Cream Milk 1L" value={form.name} onChange={e => handleField("name", e.target.value)} className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-[#10B981] focus:ring-2 focus:ring-[#10B981]/10" />
-            </div>
-            <div className="rounded-xl border border-[#10B981]/30 bg-[#10B981]/5 p-3 space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-[#047857]">Shared catalogue reference</p>
-                <span className="text-[10px] text-muted-foreground">{masterReferenceLoading ? "Checking…" : masterReference ? "Possible match found" : "No exact reference yet"}</span>
-              </div>
-              {masterReference ? <div className="flex items-center gap-3">
-                <div className="h-14 w-14 shrink-0 rounded-lg border bg-white overflow-hidden">{masterReference.image_url ? <img src={masterReference.image_url} alt="" className="h-full w-full object-contain"/> : <div className="h-full flex items-center justify-center text-[9px] text-muted-foreground">No image</div>}</div>
-                <div className="min-w-0"><p className="text-xs font-semibold text-foreground truncate">{masterReference.name}</p><p className="text-[10px] text-muted-foreground truncate">{masterReference.brand || "No brand"} {masterReference.weight || ""}</p><p className="text-[10px] text-[#047857]">Reference only. Saving the vendor product runs the shared catalogue matcher and links or creates its master record.</p></div>
-              </div> : <p className="text-[10px] text-muted-foreground">Enter a product name or barcode to check the shared catalogue. If no match exists, the save process can create a master record.</p>}
             </div>
             <div>
               <label className="block text-xs font-semibold text-muted-foreground mb-1 uppercase tracking-wider">Category *</label>
@@ -938,28 +659,6 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
               </div>
             )}
 
-            {sharedImages.length > 0 && (
-              <div className="border-t border-border pt-3 space-y-2">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Shared catalogue gallery</p>
-                  <p className="text-[10px] text-muted-foreground">Changing the primary image updates the shared image used by matching vendors.</p>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {sharedImages.map((image) => (
-                    <div key={image.id} className={`rounded-lg border p-1.5 space-y-1 ${image.is_primary ? "border-[#10B981] bg-[#10B981]/5" : "border-border"}`}>
-                      <img src={image.image_url} alt="Shared catalogue product" loading="lazy" className="w-full h-20 rounded object-contain bg-white" />
-                      {image.is_primary ? (
-                        <span className="block text-center text-[9px] font-semibold text-[#059669]">Primary</span>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={isUpdatingPrimaryImage || isSubmitting}
-                          onClick={() => void makeSharedImagePrimary(image.id, image.image_url)}
-                          className="w-full rounded bg-[#10B981] px-1 py-1 text-[9px] font-semibold text-white disabled:opacity-50"
-                        >
-                          {isUpdatingPrimaryImage ? "Updating…" : "Make primary"}
-                        </button>
-                      )}
                     </div>
                   ))}
                 </div>
