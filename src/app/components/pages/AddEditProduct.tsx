@@ -648,13 +648,68 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
             <div className="rounded-xl border border-border p-3 space-y-3">
               <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.is_exclusive} onChange={e => setForm(current => ({ ...current, is_exclusive: e.target.checked }))} /> Mark as RivoCity Exclusive</label>
               <p className="text-[10px] text-muted-foreground">Exclusive products receive a visible badge on customer product cards and details.</p>
-              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.allow_loose_quantity} onChange={e => setForm(current => ({ ...current, allow_loose_quantity: e.target.checked }))} /> Allow loose quantity ordering</label>
-              {form.allow_loose_quantity && <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum quantity</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum quantity</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Increment / step</label><input type="number" min="0.001" step="any" value={form.loose_step_quantity} onChange={e => handleField("loose_step_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Measured quantity unit</label><select value={form.loose_unit} onChange={e => handleField("loose_unit", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background"><option value="Pcs">Pieces</option><option value="Bottle">Bottles</option><option value="Pack">Packs</option><option value="Unit">Units</option><option value="Set">Sets</option><option value="Dozen">Dozen</option><option value="Gm">Grams</option><option value="Kg">Kilograms</option><option value="Ml">Millilitres</option><option value="Ltr">Litres</option></select></div>
-              </div>}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900 p-3 space-y-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.allow_loose_quantity}
+                    onChange={e => setForm(current => ({ ...current, allow_loose_quantity: e.target.checked }))}
+                    className="mt-0.5 accent-emerald-600"
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-foreground">Let customers choose the quantity</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">For loose items like wheat, rice, dal, oil or products sold by measure.</span>
+                  </span>
+                </label>
+                {form.allow_loose_quantity && <>
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5">Sell this product by</label>
+                    <select
+                      value={form.loose_unit}
+                      onChange={e => {
+                        const unit = e.target.value;
+                        const presets: Record<string, { min: string; max: string; step: string }> = {
+                          Gm: { min: "250", max: "5000", step: "250" },
+                          Kg: { min: "0.25", max: "5", step: "0.25" },
+                          Ml: { min: "250", max: "5000", step: "250" },
+                          Ltr: { min: "0.25", max: "5", step: "0.25" },
+                          Pcs: { min: "1", max: "100", step: "1" },
+                          Bottle: { min: "1", max: "100", step: "1" },
+                          Pack: { min: "1", max: "100", step: "1" },
+                          Unit: { min: "1", max: "100", step: "1" },
+                          Set: { min: "1", max: "100", step: "1" },
+                          Dozen: { min: "1", max: "20", step: "1" }
+                        };
+                        setForm(current => ({ ...current, loose_unit: unit, loose_min_quantity: presets[unit].min, loose_max_quantity: presets[unit].max, loose_step_quantity: presets[unit].step }));
+                      }}
+                      className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background"
+                    >
+                      <option value="Gm">Weight — grams (g)</option>
+                      <option value="Kg">Weight — kilograms (kg)</option>
+                      <option value="Ml">Volume — millilitres (ml)</option>
+                      <option value="Ltr">Volume — litres (L)</option>
+                      <option value="Pcs">Pieces</option>
+                      <option value="Bottle">Bottles</option>
+                      <option value="Pack">Packs</option>
+                      <option value="Unit">Units</option>
+                      <option value="Set">Sets</option>
+                      <option value="Dozen">Dozen</option>
+                    </select>
+                  </div>
+                  <div className="rounded-lg bg-white/80 dark:bg-slate-900/70 border border-emerald-100 dark:border-emerald-900 px-3 py-2.5">
+                    <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Ready to sell by {form.loose_unit === "Gm" ? "grams" : form.loose_unit === "Kg" ? "kilograms" : form.loose_unit === "Ml" ? "millilitres" : form.loose_unit === "Ltr" ? "litres" : form.loose_unit.toLowerCase()}.</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">Customers can choose from {form.loose_min_quantity} to {form.loose_max_quantity} {form.loose_unit}, in steps of {form.loose_step_quantity} {form.loose_unit}.</p>
+                  </div>
+                  <details className="group">
+                    <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground">More quantity settings</summary>
+                    <div className="grid grid-cols-2 gap-2 pt-3">
+                      <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                      <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                      <div><label className="block text-[10px] text-muted-foreground mb-1">Quantity increase by</label><input type="number" min="0.001" step="any" value={form.loose_step_quantity} onChange={e => handleField("loose_step_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
+                    </div>
+                  </details>
+                </>}
+              </div>
             </div>
             <div><label className="block text-xs font-medium text-muted-foreground mb-1">Description</label><textarea rows={2} placeholder="Describe the product..." value={form.description} onChange={e => handleField("description", e.target.value)} className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none" /></div>
           </div>
