@@ -659,12 +659,6 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
               </div>
             )}
 
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="border-t border-border pt-3 space-y-2">
               <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Find a packaged product image</label>
               <div className="flex gap-2">
