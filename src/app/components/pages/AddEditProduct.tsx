@@ -30,6 +30,19 @@ interface Props {
 const gstOptions = [0, 5, 12, 18, 28];
 const unitOptions = ["Pcs", "Bottle", "Pack", "Unit", "Set", "Dozen", "Gm", "Kg", "Ml", "Ltr"];
 
+const looseQuantityPresets: Record<string, { min: number; max: number; step: number; label: string }> = {
+  Gm: { min: 250, max: 5000, step: 250, label: "grams" },
+  Kg: { min: 0.25, max: 5, step: 0.25, label: "kilograms" },
+  Ml: { min: 250, max: 5000, step: 250, label: "millilitres" },
+  Ltr: { min: 0.25, max: 5, step: 0.25, label: "litres" },
+  Pcs: { min: 1, max: 100, step: 1, label: "pieces" },
+  Bottle: { min: 1, max: 100, step: 1, label: "bottles" },
+  Pack: { min: 1, max: 100, step: 1, label: "packs" },
+  Unit: { min: 1, max: 100, step: 1, label: "units" },
+  Set: { min: 1, max: 100, step: 1, label: "sets" },
+  Dozen: { min: 1, max: 20, step: 1, label: "dozen" }
+};
+
 /**
  * Product photos are resized and encoded as WebP in the browser before upload.
  * This reduces Supabase Storage usage while preserving a practical catalogue
@@ -483,13 +496,10 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
 
       const finalWeightString = form.weightValue.trim() ? `${form.weightValue.trim()} ${form.weightUnit}` : null;
       const numericGst = parseFloat(form.gst_slab) || 0;
-      const looseMin = Number(form.loose_min_quantity);
-      const looseMax = Number(form.loose_max_quantity);
-      const looseStep = Number(form.loose_step_quantity);
-      if (form.allow_loose_quantity && (!Number.isFinite(looseMin) || !Number.isFinite(looseMax) || !Number.isFinite(looseStep) || looseMin <= 0 || looseMax < looseMin || looseStep <= 0)) {
-        alert("Enter valid loose quantity limits. Minimum must be positive, maximum must be at least the minimum, and step must be positive.");
-        return;
-      }
+      const loosePreset = looseQuantityPresets[form.loose_unit] || looseQuantityPresets.Pcs;
+      const looseMin = loosePreset.min;
+      const looseMax = loosePreset.max;
+      const looseStep = loosePreset.step;
 
       const productPayload = {
         name: form.name.trim(),
@@ -653,41 +663,48 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
                   <input
                     type="checkbox"
                     checked={form.allow_loose_quantity}
-                    onChange={e => setForm(current => ({ ...current, allow_loose_quantity: e.target.checked }))}
+                    onChange={e => {
+                      const enabled = e.target.checked;
+                      const preset = looseQuantityPresets[form.loose_unit] || looseQuantityPresets.Pcs;
+                      setForm(current => ({
+                        ...current,
+                        allow_loose_quantity: enabled,
+                        ...(enabled ? {
+                          loose_min_quantity: String(preset.min),
+                          loose_max_quantity: String(preset.max),
+                          loose_step_quantity: String(preset.step)
+                        } : {})
+                      }));
+                    }}
                     className="mt-0.5 accent-emerald-600"
                   />
                   <span>
                     <span className="block text-sm font-bold text-foreground">Let customers choose the quantity</span>
-                    <span className="block text-xs text-muted-foreground mt-0.5">For loose items like wheat, rice, dal, oil or products sold by measure.</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">For loose items like wheat, rice, dal and oil.</span>
                   </span>
                 </label>
                 {form.allow_loose_quantity && <>
                   <div>
-                    <label className="block text-xs font-semibold text-foreground mb-1.5">Sell this product by</label>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5">Sell by</label>
                     <select
                       value={form.loose_unit}
                       onChange={e => {
                         const unit = e.target.value;
-                        const presets: Record<string, { min: string; max: string; step: string }> = {
-                          Gm: { min: "250", max: "5000", step: "250" },
-                          Kg: { min: "0.25", max: "5", step: "0.25" },
-                          Ml: { min: "250", max: "5000", step: "250" },
-                          Ltr: { min: "0.25", max: "5", step: "0.25" },
-                          Pcs: { min: "1", max: "100", step: "1" },
-                          Bottle: { min: "1", max: "100", step: "1" },
-                          Pack: { min: "1", max: "100", step: "1" },
-                          Unit: { min: "1", max: "100", step: "1" },
-                          Set: { min: "1", max: "100", step: "1" },
-                          Dozen: { min: "1", max: "20", step: "1" }
-                        };
-                        setForm(current => ({ ...current, loose_unit: unit, loose_min_quantity: presets[unit].min, loose_max_quantity: presets[unit].max, loose_step_quantity: presets[unit].step }));
+                        const preset = looseQuantityPresets[unit] || looseQuantityPresets.Pcs;
+                        setForm(current => ({
+                          ...current,
+                          loose_unit: unit,
+                          loose_min_quantity: String(preset.min),
+                          loose_max_quantity: String(preset.max),
+                          loose_step_quantity: String(preset.step)
+                        }));
                       }}
                       className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background"
                     >
-                      <option value="Gm">Weight — grams (g)</option>
-                      <option value="Kg">Weight — kilograms (kg)</option>
-                      <option value="Ml">Volume — millilitres (ml)</option>
-                      <option value="Ltr">Volume — litres (L)</option>
+                      <option value="Gm">Grams (g)</option>
+                      <option value="Kg">Kilograms (kg)</option>
+                      <option value="Ml">Millilitres (ml)</option>
+                      <option value="Ltr">Litres (L)</option>
                       <option value="Pcs">Pieces</option>
                       <option value="Bottle">Bottles</option>
                       <option value="Pack">Packs</option>
@@ -696,18 +713,9 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
                       <option value="Dozen">Dozen</option>
                     </select>
                   </div>
-                  <div className="rounded-lg bg-white/80 dark:bg-slate-900/70 border border-emerald-100 dark:border-emerald-900 px-3 py-2.5">
-                    <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Ready to sell by {form.loose_unit === "Gm" ? "grams" : form.loose_unit === "Kg" ? "kilograms" : form.loose_unit === "Ml" ? "millilitres" : form.loose_unit === "Ltr" ? "litres" : form.loose_unit.toLowerCase()}.</p>
-                    <p className="text-[11px] text-muted-foreground mt-1">Customers can choose from {form.loose_min_quantity} to {form.loose_max_quantity} {form.loose_unit}, in steps of {form.loose_step_quantity} {form.loose_unit}.</p>
-                  </div>
-                  <details className="group">
-                    <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground">More quantity settings</summary>
-                    <div className="grid grid-cols-2 gap-2 pt-3">
-                      <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                      <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                      <div><label className="block text-[10px] text-muted-foreground mb-1">Quantity increase by</label><input type="number" min="0.001" step="any" value={form.loose_step_quantity} onChange={e => handleField("loose_step_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                    </div>
-                  </details>
+                  <p className="text-xs text-emerald-800 dark:text-emerald-300">
+                    Customers can order {looseQuantityPresets[form.loose_unit]?.min}–{looseQuantityPresets[form.loose_unit]?.max} {looseQuantityPresets[form.loose_unit]?.label}, with automatic quantity steps. You can change this later by selecting a different unit.
+                  </p>
                 </>}
               </div>
             </div>
