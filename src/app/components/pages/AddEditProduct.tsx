@@ -123,7 +123,18 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
       return;
     }
     const rawWeight = String(product.weight || "").trim();
-    const weightMatch = rawWeight.match(/^(.+?)\s+(Pcs|Bottle|Pack|Unit|Set|Dozen|Gm|Kg|Ml|Ltr)$/i);
+    // Legacy catalogue values may contain units in several formats (for example
+    // "250 g", "100gm", or "1.5 kg"). Keep the numeric value separate from its unit
+    // because weightValue is bound to an HTML number input.
+    const weightMatch = rawWeight.match(/^([0-9]+(?:\\.[0-9]+)?)\\s*(kg|g|gm|ml|ltr|l|pcs|bottle|pack|unit|set|dozen)?$/i);
+    const weightUnitAliases: Record<string, string> = {
+      g: "Gm", gm: "Gm", kg: "Kg", ml: "Ml", l: "Ltr", ltr: "Ltr",
+      pcs: "Pcs", bottle: "Bottle", pack: "Pack", unit: "Unit", set: "Set", dozen: "Dozen"
+    };
+    const parsedWeightValue = weightMatch ? weightMatch[1] : rawWeight.match(/[0-9]+(?:\\.[0-9]+)?/)?.[0] || "";
+    const parsedWeightUnit = weightMatch?.[2]
+      ? weightUnitAliases[weightMatch[2].toLowerCase()] || "Pcs"
+      : "Pcs";
     const rawImages = product.image_url;
     let imageUrls: string[] = [];
     if (typeof rawImages === "string" && rawImages.trim()) {
@@ -137,8 +148,8 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
       price: product.price == null ? "" : String(product.price), cost_price: product.cost_price == null ? "" : String(product.cost_price), mrp: product.mrp == null ? "" : String(product.mrp),
       gst_slab: String(product.gst_slab ?? "5").replace(/%/g, "").trim() || "5",
       batch_number: String(product.batch_number || ""), expiry_date: product.expiry_date ? String(product.expiry_date).slice(0, 10) : "",
-      weightValue: weightMatch ? weightMatch[1].trim() : rawWeight,
-      weightUnit: weightMatch ? (unitOptions.find(unit => unit.toLowerCase() === weightMatch[2].toLowerCase()) || "Pcs") : "Pcs",
+      weightValue: parsedWeightValue,
+      weightUnit: parsedWeightUnit,
       description: String(product.description || ""), stock: product.stock == null ? "" : String(product.stock), sku: String(product.sku || ""), barcode: String(product.barcode || ""),
       is_exclusive: product.is_exclusive === true, allow_loose_quantity: product.allow_loose_quantity === true,
       loose_min_quantity: product.loose_min_quantity == null ? "100" : String(product.loose_min_quantity),
