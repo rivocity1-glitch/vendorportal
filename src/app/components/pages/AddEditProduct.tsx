@@ -30,6 +30,38 @@ interface Props {
 const gstOptions = [0, 5, 12, 18, 28];
 const unitOptions = ["Pcs", "Bottle", "Pack", "Unit", "Set", "Dozen", "Gm", "Kg", "Ml", "Ltr"];
 
+/**
+ * Product photos are resized and encoded as WebP in the browser before upload.
+ * This reduces Supabase Storage usage while preserving a practical catalogue
+ * image resolution. Original files are never modified.
+ */
+async function compressProductImage(file: File): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const maxDimension = 1400;
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not prepare product image for upload.");
+    context.drawImage(bitmap, 0, 0, width, height);
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        result => result ? resolve(result) : reject(new Error("Product image compression failed.")),
+        "image/webp",
+        0.82
+      );
+    });
+    return blob;
+  } finally {
+    bitmap.close();
+  }
+}
+
 export function AddEditProduct({ onNavigate, product, navigationProducts = [], productIndex = 0 }: Props) {
   const hasProductNavigation = Boolean(product && navigationProducts.length > 1);
   const navigateProduct = (nextIndex: number) => {
@@ -105,97 +137,6 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     fetchCategories();
     return () => { cancelled = true; };
   }, []);
-
-  const parseImageUrls = (value: unknown): string[] => {
-    if (!value) return [];
-    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && !!item);
-    if (typeof value !== "string") return [];
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string" && !!item);
-    } catch {}
-    return [value];
-  };
-
-  useEffect(() => {
-    if (product) {
-      let parsedWeightVal = "";
-      let parsedWeightUnit = "Pcs";
-      if (product.weight) {
-        const weightStr = product.weight.toString().trim();
-        const numericMatch = weightStr.match(/^[\d.]+/);
-        if (numericMatch) {
-          parsedWeightVal = numericMatch[0];
-          const unitMatch = weightStr.replace(parsedWeightVal, "").trim();
-          if (unitOptions.includes(unitMatch)) parsedWeightUnit = unitMatch;
-        } else {
-          parsedWeightVal = weightStr;
-        }
-      }
-
-      setForm({
-        name: product.name || "",
-        category_id: product.category_id || "",
-        price: product.price !== undefined && product.price !== null ? String(product.price) : "",
-        cost_price: product.cost_price !== undefined && product.cost_price !== null ? String(product.cost_price) : "",
-        mrp: product.mrp !== undefined && product.mrp !== null ? String(product.mrp) : "",
-        gst_slab: product.gst_slab !== undefined && product.gst_slab !== null ? String(product.gst_slab).replace("%", "").trim() : "5",
-        batch_number: product.batch_number || "",
-        expiry_date: product.expiry_date || "",
-        weightValue: parsedWeightVal,
-        weightUnit: parsedWeightUnit,
-        description: product.description || "",
-        stock: product.stock !== undefined && product.stock !== null ? String(product.stock) : "",
-        sku: product.sku || "",
-        barcode: product.barcode || "",
-        is_exclusive: product.is_exclusive === true,
-        allow_loose_quantity: product.allow_loose_quantity === true,
-        loose_min_quantity: product.loose_min_quantity != null ? String(product.loose_min_quantity) : "100",
-        loose_max_quantity: product.loose_max_quantity != null ? String(product.loose_max_quantity) : "5000",
-        loose_step_quantity: product.loose_step_quantity != null ? String(product.loose_step_quantity) : "100",
-        loose_unit: product.loose_unit || "Pcs"
-      });
-
-      const urls = parseImageUrls(product.image_url);
-      setExistingImageUrls(urls);
-      setImageUrl(urls[0] || "");
-      // Vendor-specific gallery is stored on the product row, while the shared catalogue remains canonical.
-      supabase.from("products").select("image_url").eq("id", product.id).maybeSingle().then(({ data }) => {
-        if (data?.image_url) setExistingImageUrls(parseImageUrls(data.image_url));
-      });
-      setImageFile(null);
-      setImageFiles([]);
-      setIsImageError(false);
-    } else {
-      setForm({
-        name: "",
-        category_id: "",
-        price: "",
-        cost_price: "",
-        mrp: "",
-        gst_slab: "5",
-        batch_number: "",
-        expiry_date: "",
-        weightValue: "",
-        weightUnit: "Pcs",
-        description: "",
-        stock: "",
-        sku: "",
-        barcode: "",
-        is_exclusive: false,
-        allow_loose_quantity: false,
-        loose_min_quantity: "100",
-        loose_max_quantity: "5000",
-        loose_step_quantity: "100",
-        loose_unit: "Pcs"
-      });
-      setExistingImageUrls([]);
-      setImageUrl("");
-      setImageFile(null);
-      setImageFiles([]);
-      setIsImageError(false);
-    }
-  }, [product]);
 
   const searchProductImages = async () => {
     const query = (imageSearchQuery || form.name).trim();
@@ -423,89 +364,22 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
   };
 
   /**
-   * Resolve the vendor listing to the shared catalogue first. The canonical image
-   * is then attached to universal_products, not uploaded once per vendor listing.
+   * Keep each vendor's own gallery on products.image_url. When the shared
+   * catalogue has no image, register the vendor's first image as its initial
+   * shared primary image. Existing canonical images are never overwritten by
+   * another vendor's upload.
    */
-  const resolveUniversalProduct = async (
-    productId: string,
-    authUserId: string,
-    pendingFiles: File[],
-    requestedImageUrl: string,
-    imageSource: { source: string; sourceUrl: string; license: string } | null
-  ) => {
-    const { data: resolverData, error: resolverError } = await supabase.rpc("resolve_product_master", { p_product_id: productId });
-    if (resolverError) throw new Error(`Product saved, but universal matching failed: ${resolverError.message}`);
-    const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
-    const universalId = resolverResult?.universal_product_id;
-    if (!universalId) return;
-
-    const { data: universalProduct, error: universalError } = await supabase
-      .from("universal_products")
-      .select("id, image_url")
-      .eq("id", universalId)
-      .maybeSingle();
-    if (universalError) throw universalError;
-
-    // Reuse an existing shared image. A vendor listing must never replace a
-    // catalogue image simply because that vendor selected a different picture.
-    let canonicalImageUrl = universalProduct?.image_url || "";
-    let sharedImageUrls: string[] = [];
-
-    if (!canonicalImageUrl && pendingFiles.length) {
-      setIsUploading(true);
-      for (const [index, file] of pendingFiles.slice(0, 5).entries()) {
-        const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
-        const objectPath = `universal-products/${universalId}/${crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, {
-          upsert: false,
-          contentType: file.type
-        });
-        if (uploadError) throw uploadError;
-        sharedImageUrls.push(supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl);
-      }
-      canonicalImageUrl = sharedImageUrls[0] || "";
-    } else if (!canonicalImageUrl && requestedImageUrl && !requestedImageUrl.startsWith("blob:")) {
-      canonicalImageUrl = requestedImageUrl;
-      sharedImageUrls = [canonicalImageUrl];
-    }
-
-    if (canonicalImageUrl && !universalProduct?.image_url) {
-      const { error: updateUniversalError } = await supabase
-        .from("universal_products")
-        .update({ image_url: canonicalImageUrl })
-        .eq("id", universalId);
-      if (updateUniversalError) throw updateUniversalError;
-
-      // Store the canonical image and any additional vendor-uploaded angles once
-      // against the universal product. The primary URL remains universal_products.image_url.
-      const imageRows = (sharedImageUrls.length ? sharedImageUrls : [canonicalImageUrl]).map((url, index) => ({
-        universal_product_id: universalId,
-        image_url: url,
-        is_primary: index === 0,
-        source: imageSource
-          ? [imageSource.source, imageSource.license, imageSource.sourceUrl].filter(Boolean).join(" | ").slice(0, 500)
-          : pendingFiles.length ? "Vendor upload" : "External image",
-        created_by: authUserId
-      }));
-      const { error: imageInsertError } = await supabase
-        .from("universal_product_images")
-        .insert(imageRows);
-      if (imageInsertError) console.warn("Shared image saved, but image provenance rows were not created:", imageInsertError);
-    }
-
-    // When vendor-specific gallery files were uploaded, products.image_url
-    // already contains the gallery JSON. Do not replace it with the shared
-    // universal catalogue's single canonical image.
-    if (canonicalImageUrl && pendingFiles.length === 0) {
-      const { error: vendorImageError } = await supabase
-        .from("products")
-        .update({ image_url: canonicalImageUrl })
-        .eq("id", productId);
-      if (vendorImageError) throw vendorImageError;
-      setImageUrl(canonicalImageUrl);
-      setIsImageError(false);
+  // Link the vendor listing to the master catalogue. Product photos remain
+  // vendor-owned and are stored only on the vendor product listing.
+  const resolveUniversalProduct = async (productId: string) => {
+    const { error } = await supabase.rpc("resolve_product_master", {
+      p_product_id: productId
+    });
+    if (error) {
+      throw new Error(`Product saved, but catalogue matching failed: ${error.message}`);
     }
   };
+
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -595,7 +469,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         loose_unit: form.allow_loose_quantity ? form.loose_unit : null,
         vendor_id: vendor.id,
         sku: form.sku || null,
-        barcode: form.barcode || null
+        barcode: form.barcode || null,
       };
 
       let savedProductId: string;
@@ -624,22 +498,35 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         savedProductId = insertedProduct.id;
       }
 
+      let uploadedVendorImageUrls: string[] = [];
       if (imageFiles.length > 0) {
         setIsUploading(true);
-        const galleryUrls: string[] = [];
         for (const file of imageFiles.slice(0, 5)) {
-          const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
-          const objectPath = `vendor-products/${vendor.id}/${savedProductId}/${crypto.randomUUID()}.${extension}`;
-          const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, { upsert: false, contentType: file.type });
+          const optimizedFile = await compressProductImage(file);
+          const objectPath = `vendor-products/${vendor.id}/${savedProductId}/${crypto.randomUUID()}.webp`;
+          const { error: uploadError } = await supabase.storage
+            .from("product-images")
+            .upload(objectPath, optimizedFile, {
+              upsert: false,
+              contentType: "image/webp",
+              cacheControl: "31536000"
+            });
           if (uploadError) throw uploadError;
-          galleryUrls.push(supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl);
+          uploadedVendorImageUrls.push(
+            supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl
+          );
         }
-        const { error: galleryUpdateError } = await supabase.from("products").update({ image_url: JSON.stringify(galleryUrls) }).eq("id", savedProductId);
+
+        const { error: galleryUpdateError } = await supabase
+          .from("products")
+          .update({ image_url: JSON.stringify(uploadedVendorImageUrls) })
+          .eq("id", savedProductId);
         if (galleryUpdateError) throw galleryUpdateError;
-        setExistingImageUrls(galleryUrls);
-        setImageUrl(galleryUrls[0] || "");
+        setExistingImageUrls(uploadedVendorImageUrls);
+        setImageUrl(uploadedVendorImageUrls[0] || "");
       }
-      await resolveUniversalProduct(savedProductId, authData.user.id, imageFiles, imageUrl, selectedImageSource);
+
+      await resolveUniversalProduct(savedProductId);
       onNavigate("products");
     } catch (err: any) {
       console.error("Product preservation exception:", err);

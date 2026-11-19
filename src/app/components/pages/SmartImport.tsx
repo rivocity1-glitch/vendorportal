@@ -123,6 +123,9 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
 
     try {
       const result = await runImportPipeline(file);
+      if (result.items.length === 0) {
+        throw new Error('No products were detected. For CSV files, include a Product Name column and at least one price or quantity column.');
+      }
 
       setItems(result.items);
       setSummary(result.summary);
@@ -175,14 +178,24 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     value: any
   ) => {
     setItems(prev =>
-      prev.map(item =>
-        item.id === id
-          ? {
-              ...item,
-              [field]: value
-            }
-          : item
-      )
+      prev.map(item => {
+        if (item.id !== id) return item;
+
+        const updated = { ...item, [field]: value };
+        const isPriceField = ["sellingPrice", "mrp", "costPrice", "purchaseRate"].includes(String(field));
+        if (isPriceField && updated.status === "Needs Review") {
+          const hasUsablePrice = [
+            updated.sellingPrice,
+            updated.mrp,
+            updated.costPrice,
+            updated.purchaseRate
+          ].some(price => price !== null && price !== undefined && Number(price) > 0);
+
+          if (hasUsablePrice) updated.status = "New";
+        }
+
+        return updated;
+      })
     );
   };
 
@@ -190,7 +203,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     setItems(prev =>
       prev.map(item => ({
         ...item,
-        selected: checked
+        selected: item.status === "Needs Review" ? false : checked
       }))
     );
   };
@@ -229,7 +242,10 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
           : item.costPrice != null &&
               Number(item.costPrice) > 0
             ? Number(item.costPrice)
-            : null;
+            : item.purchaseRate != null &&
+                Number(item.purchaseRate) > 0
+              ? Number(item.purchaseRate)
+              : null;
 
     return {
       vendor_id: vendorId,
@@ -511,9 +527,67 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     return changes;
   };
 
+  /**
+   * Resolve an imported vendor product to the shared catalogue and reuse its
+   * existing primary image. The image file is not copied; the vendor listing
+   * references the canonical image URL, matching the manual product flow.
+   * Image lookup is best-effort and never invalidates a successful import.
+   */
+  const attachSharedCatalogueImage = async (productId: string): Promise<boolean> => {
+    try {
+      const { data: resolverData, error: resolverError } = await supabase.rpc(
+        "resolve_product_master",
+        { p_product_id: productId }
+      );
+      if (resolverError) {
+        console.warn("Shared image resolution failed:", resolverError.message);
+        return false;
+      }
+      const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
+      const universalId = resolverResult?.universal_product_id;
+      if (!universalId) return false;
+
+      const { data: universalProduct, error: universalError } = await supabase
+        .from("universal_products")
+        .select("image_url")
+        .eq("id", universalId)
+        .maybeSingle();
+      if (universalError) console.warn("Could not read canonical image:", universalError.message);
+
+      let imageUrl = typeof universalProduct?.image_url === "string" ? universalProduct.image_url.trim() : "";
+      if (!imageUrl) {
+        const { data: gallery, error: galleryError } = await supabase
+          .from("universal_product_images")
+          .select("image_url, is_primary, created_at")
+          .eq("universal_product_id", universalId)
+          .order("is_primary", { ascending: false })
+          .order("created_at", { ascending: true })
+          .limit(1);
+        if (galleryError) {
+          console.warn("Could not read shared image gallery:", galleryError.message);
+          return false;
+        }
+        imageUrl = typeof gallery?.[0]?.image_url === "string" ? gallery[0].image_url.trim() : "";
+      }
+      if (!imageUrl) return false;
+
+      const { error: imageUpdateError } = await supabase
+        .from("products")
+        .update({ image_url: imageUrl })
+        .eq("id", productId);
+      if (imageUpdateError) {
+        console.warn("Shared image found but could not attach it:", imageUpdateError.message);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.warn("Unexpected shared image lookup error:", error);
+      return false;
+    }
+  };
   const handleImportSelected = async () => {
     const selectedItems =
-      items.filter(item => item.selected);
+      items.filter(item => item.selected && item.status !== "Needs Review");
 
     if (selectedItems.length === 0) {
       return;
@@ -526,6 +600,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     let updatedCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
+    let sharedImageCount = 0;
 
     try {
       const {
@@ -555,7 +630,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
       }
 
       for (const item of selectedItems) {
-        if (!item.name?.trim()) {
+        if (!item.name?.trim() || item.status === "Needs Review") {
           failedCount++;
           continue;
         }
@@ -599,6 +674,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
             }
 
             addedCount++;
+            if (await attachSharedCatalogueImage(insertedProduct.id)) sharedImageCount++;
             continue;
           }
 
@@ -620,6 +696,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
             Object.keys(changes).length === 0
           ) {
             skippedCount++;
+            if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id)) sharedImageCount++;
             continue;
           }
 
@@ -655,6 +732,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
           }
 
           updatedCount++;
+          if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id)) sharedImageCount++;
         } catch (itemErr) {
           failedCount++;
 
@@ -671,7 +749,8 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
         `- Added ${addedCount} new products\n` +
         `- Updated ${updatedCount} existing products\n` +
         `- Skipped ${skippedCount} unchanged products\n` +
-        `- Failed ${failedCount} products`
+        `- Failed ${failedCount} products\n` +
+        `- Shared catalogue images attached: ${sharedImageCount}`
       );
 
       handleCancel();
@@ -929,8 +1008,8 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                       <input
                         type="checkbox"
                         checked={
-                          items.length > 0 &&
-                          items.every(
+                          items.some(i => i.status !== "Needs Review") &&
+                          items.filter(i => i.status !== "Needs Review").every(
                             i => i.selected
                           )
                         }
@@ -997,7 +1076,9 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                       <td className="px-4 py-2 sticky left-0 z-20 bg-card border-r border-border">
                         <input
                           type="checkbox"
-                          checked={item.selected}
+                          checked={item.status === "Needs Review" ? false : item.selected}
+                          disabled={item.status === "Needs Review"}
+                          title={item.status === "Needs Review" ? "Add a valid selling price, MRP or purchase rate before importing" : "Select product for import"}
                           onChange={e =>
                             updateItemField(
                               item.id,
@@ -1005,7 +1086,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                               e.target.checked
                             )
                           }
-                          className="rounded border-border text-[#10B981]"
+                          className="rounded border-border text-[#10B981] disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </td>
 
