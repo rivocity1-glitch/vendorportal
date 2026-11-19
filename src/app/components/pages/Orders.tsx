@@ -1409,9 +1409,8 @@ export function Orders() {
             `[Vendor Orders Realtime] ${channelName}: TIMED_OUT`
           );
         } else if (status === "CLOSED") {
-          console.warn(
-            `[Vendor Orders Realtime] ${channelName}: CLOSED`
-          );
+          // Expected when the component intentionally removes its channels.
+          // Do not report normal cleanup as a warning.
         }
       });
 
