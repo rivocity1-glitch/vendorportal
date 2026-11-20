@@ -2401,11 +2401,25 @@ export function Orders() {
 
         if (!assignedRider) {
           alert(
-            "No available rider assigned."
+            "Order packed. No available assigned rider is online, so the order remains packed until a rider becomes available."
           );
 
-          setActionLoading(null);
+          const { error: packedWithoutRiderError } = await supabase
+            .from("orders")
+            .update({ order_status: "packed", rider_id: null })
+            .eq("id", orderId);
+          if (packedWithoutRiderError) throw packedWithoutRiderError;
 
+          const { error: packedWithoutRiderTrackingError } = await supabase
+            .from("order_tracking")
+            .insert({
+              order_id: orderId,
+              status: "packed",
+              remarks: "Vendor packed order. Awaiting an available assigned rider.",
+            });
+          if (packedWithoutRiderTrackingError) throw packedWithoutRiderTrackingError;
+
+          await syncAllPortalData(false);
           return;
         }
 
@@ -2413,15 +2427,10 @@ export function Orders() {
           await supabase
             .from("orders")
             .update({
-              order_status:
-                "packed",
-              rider_id:
-                assignedRider.id,
+              order_status: "packed",
+              rider_id: assignedRider.id,
             })
-            .eq(
-              "id",
-              orderId
-            );
+            .eq("id", orderId);
 
         if (updateError) {
           throw updateError;
