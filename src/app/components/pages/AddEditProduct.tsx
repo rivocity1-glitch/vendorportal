@@ -426,8 +426,9 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
    * shared primary image. Existing canonical images are never overwritten by
    * another vendor's upload.
    */
-  // Link the vendor listing to the master catalogue. Product photos remain
-  // vendor-owned and are stored only on the vendor product listing.
+  // Link the vendor listing to the shared master catalogue. Vendor image URLs
+  // remain on the listing, while eligible Supabase product-image URLs are also
+  // referenced from the universal product's shared gallery.
   const resolveUniversalProduct = async (productId: string): Promise<string | null> => {
     const { error } = await supabase.rpc("resolve_product_master", {
       p_product_id: productId
