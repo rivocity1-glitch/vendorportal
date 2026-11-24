@@ -428,13 +428,23 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
    */
   // Link the vendor listing to the master catalogue. Product photos remain
   // vendor-owned and are stored only on the vendor product listing.
-  const resolveUniversalProduct = async (productId: string) => {
+  const resolveUniversalProduct = async (productId: string): Promise<string | null> => {
     const { error } = await supabase.rpc("resolve_product_master", {
       p_product_id: productId
     });
     if (error) {
       throw new Error(`Product saved, but catalogue matching failed: ${error.message}`);
     }
+
+    const { data, error: linkError } = await supabase
+      .from("products")
+      .select("universal_product_id")
+      .eq("id", productId)
+      .single();
+    if (linkError) {
+      throw new Error(`Product saved, but its shared catalogue link could not be loaded: ${linkError.message}`);
+    }
+    return data?.universal_product_id || null;
   };
 
 
@@ -490,9 +500,21 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         }
       }
 
-      // Do not upload here. First resolve the shared catalogue identity, then
-      // upload at most one canonical image only if that universal product lacks one.
-      const finalImageUrl = imageFiles.length ? null : (imageUrl || (existingImageUrls[0] || null));
+      // Keep the current vendor gallery intact when editing. A selected external
+      // image is represented as a one-image vendor gallery; uploaded files are
+      // handled after the universal product has been resolved.
+      const retainedImageUrls = imageFiles.length
+        ? []
+        : existingImageUrls.length
+          ? existingImageUrls
+          : imageUrl
+            ? [imageUrl]
+            : [];
+      const finalImageUrl = imageFiles.length
+        ? null
+        : retainedImageUrls.length
+          ? JSON.stringify(retainedImageUrls)
+          : null;
 
       const finalWeightString = form.weightValue.trim() ? `${form.weightValue.trim()} ${form.weightUnit}` : null;
       const numericGst = parseFloat(form.gst_slab) || 0;
@@ -552,6 +574,8 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         savedProductId = insertedProduct.id;
       }
 
+      const universalProductId = await resolveUniversalProduct(savedProductId);
+
       let uploadedVendorImageUrls: string[] = [];
       if (imageFiles.length > 0) {
         setIsUploading(true);
@@ -580,7 +604,89 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         setImageUrl(uploadedVendorImageUrls[0] || "");
       }
 
-      await resolveUniversalProduct(savedProductId);
+      // Publish URL references into the existing shared gallery. The physical
+      // files remain in Supabase Storage once; other vendors reuse these URLs.
+      if (universalProductId) {
+        try {
+          const { data: sharedRows, error: sharedReadError } = await supabase
+            .from("universal_product_images")
+            .select("image_url, is_primary, created_at")
+            .eq("universal_product_id", universalProductId)
+            .order("is_primary", { ascending: false })
+            .order("created_at", { ascending: true });
+
+          if (sharedReadError) throw sharedReadError;
+
+          const currentSharedRows = sharedRows || [];
+          const currentSharedUrls = currentSharedRows
+            .map((row: any) => String(row.image_url || "").trim())
+            .filter((url: string) => url.startsWith("https://") || url.startsWith("http://"));
+
+          const candidateUrls = imageFiles.length > 0
+            ? uploadedVendorImageUrls
+            : retainedImageUrls;
+
+          const newSharedUrls = candidateUrls.filter(
+            (url, index) =>
+              (url.startsWith("https://") || url.startsWith("http://")) &&
+              !currentSharedUrls.includes(url) &&
+              candidateUrls.indexOf(url) === index
+          );
+
+          const slotsAvailable = Math.max(0, 5 - currentSharedRows.length);
+          const urlsToShare = newSharedUrls.slice(0, slotsAvailable);
+
+          if (urlsToShare.length > 0) {
+            const hasPrimary = currentSharedRows.some((row: any) => row.is_primary === true);
+            const { error: sharedInsertError } = await supabase
+              .from("universal_product_images")
+              .insert(urlsToShare.map((url, index) => ({
+                universal_product_id: universalProductId,
+                image_url: url,
+                is_primary: !hasPrimary && index === 0,
+                source: "vendor",
+                created_by: authData.user.id
+              })));
+
+            if (sharedInsertError) throw sharedInsertError;
+          }
+
+          // When a vendor has not supplied an image, reuse the shared URLs.
+          // This stores only references in products.image_url, not duplicate files.
+          if (candidateUrls.length === 0) {
+            const { data: universalProductData, error: universalReadError } = await supabase
+              .from("universal_products")
+              .select("image_url")
+              .eq("id", universalProductId)
+              .maybeSingle();
+
+            if (universalReadError) throw universalReadError;
+
+            const refreshedUrls = [
+              ...currentSharedUrls,
+              ...urlsToShare
+            ].filter((url, index, all) => all.indexOf(url) === index);
+
+            const fallbackUrl = refreshedUrls.length
+              ? JSON.stringify(refreshedUrls.slice(0, 5))
+              : universalProductData?.image_url || null;
+
+            if (fallbackUrl) {
+              const { error: fallbackUpdateError } = await supabase
+                .from("products")
+                .update({ image_url: fallbackUrl })
+                .eq("id", savedProductId);
+              if (fallbackUpdateError) throw fallbackUpdateError;
+            }
+          }
+        } catch (sharedImageError: any) {
+          // Product data and the vendor upload remain saved if publishing the
+          // optional shared reference fails. Log clearly for follow-up.
+          console.error("Product saved, but shared image reuse could not be updated:", sharedImageError);
+          alert("Product saved, but its image could not be added to the shared catalogue. Edit and save the product again to retry.");
+        }
+      }
+
       onNavigate("products");
     } catch (err: any) {
       console.error("Product preservation exception:", err);
