@@ -622,9 +622,16 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
             .map((row: any) => String(row.image_url || "").trim())
             .filter((url: string) => url.startsWith("https://") || url.startsWith("http://"));
 
-          const candidateUrls = imageFiles.length > 0
+          const vendorHasImages = imageFiles.length > 0
+            ? uploadedVendorImageUrls.length > 0
+            : retainedImageUrls.length > 0;
+
+          // Only share files uploaded into Rivo's own product-images bucket.
+          // External catalogue/manual URLs remain vendor-specific unless separately approved.
+          const candidateUrls = (imageFiles.length > 0
             ? uploadedVendorImageUrls
-            : retainedImageUrls;
+            : retainedImageUrls
+          ).filter(url => url.includes("/object/public/product-images/"));
 
           const newSharedUrls = candidateUrls.filter(
             (url, index) =>
@@ -653,7 +660,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
 
           // When a vendor has not supplied an image, reuse the shared URLs.
           // This stores only references in products.image_url, not duplicate files.
-          if (candidateUrls.length === 0) {
+          if (!vendorHasImages) {
             const { data: universalProductData, error: universalReadError } = await supabase
               .from("universal_products")
               .select("image_url")
