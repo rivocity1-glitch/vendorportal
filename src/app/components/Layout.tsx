@@ -318,20 +318,21 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-dvh min-h-0 overflow-hidden bg-background">
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm lg:hidden touch-none"
+          aria-label="Close navigation"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-60 flex flex-col bg-[var(--sidebar)] border-r border-[var(--sidebar-border)] transition-transform duration-200 lg:translate-x-0 ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-[min(18rem,85vw)] lg:w-60 flex flex-col bg-[var(--sidebar)] border-r border-[var(--sidebar-border)] transition-transform duration-200 ease-out lg:translate-x-0 shadow-2xl lg:shadow-none ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <div className="flex items-center gap-3 px-4 py-4 border-b border-[var(--sidebar-border)]">
+        <div className="flex items-center gap-3 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-4 border-b border-[var(--sidebar-border)]">
           <div className="w-8 h-8 rounded-lg bg-[#10B981] flex items-center justify-center shadow-md shadow-[#10B981]/30">
             <Zap className="w-4 h-4 text-white" />
           </div>
@@ -391,7 +392,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
           )}
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-2 px-2">
+        <nav aria-label="Vendor navigation" className="flex-1 min-h-0 overflow-y-auto overscroll-contain py-2 px-2">
           {navItems
             .filter(item => item.visible)
             .map(item => {
@@ -426,7 +427,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
             })}
         </nav>
 
-        <div className="px-2 py-3 border-t border-[var(--sidebar-border)] space-y-1">
+        <div className="px-2 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t border-[var(--sidebar-border)] space-y-1">
           <div className="px-3 py-2 rounded-lg bg-[var(--muted)]/50 min-w-0">
             <p className="text-xs font-bold text-[var(--foreground)] truncate">
               {vendorMeta?.store_name || "Syncing Profile..."}
@@ -447,10 +448,10 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="h-14 flex items-center gap-4 px-4 lg:px-6 border-b border-border bg-card shrink-0">
+        <header className="min-h-14 flex items-center gap-3 px-3 sm:px-4 lg:px-6 pt-[env(safe-area-inset-top)] border-b border-border bg-card shrink-0">
           <button
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden text-muted-foreground hover:text-foreground transition-colors"
+            className="lg:hidden w-10 h-10 -ml-1 shrink-0 inline-flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted active:bg-muted transition-colors touch-manipulation"
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -459,7 +460,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
             <h1 className="text-base font-semibold text-foreground truncate">{pageLabels[currentPage]}</h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             <button
               onClick={onToggleTheme}
               className="w-8 h-8 rounded-lg flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
@@ -485,7 +486,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
               </button>
 
               {dropdownOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-card border border-border rounded-lg shadow-xl z-50 py-2">
+                <div className="absolute right-0 mt-2 w-[min(20rem,calc(100vw-1.5rem))] bg-card border border-border rounded-lg shadow-xl z-50 py-2">
                   <div className="px-4 py-2 border-b border-border font-semibold text-xs text-muted-foreground">
                     Recent Notifications
                   </div>
@@ -543,7 +544,7 @@ export function Layout({ currentPage, onNavigate, onLogout, isDark, onToggleThem
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main id="vendor-main-content" className="flex-1 min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-y-contain pb-[env(safe-area-inset-bottom)]">
           {children}
         </main>
       </div>

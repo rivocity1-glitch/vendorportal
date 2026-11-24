@@ -153,6 +153,8 @@ export default function StoreManagement() {
 
   const [isSavingAll, setIsSavingAll] = useState<boolean>(false);
   const [uploadingQr, setUploadingQr] = useState<boolean>(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState<boolean>(false);
+  const avatarFileInputRef = React.useRef<HTMLInputElement | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
   // ---------------------------------------------------------------------------
@@ -1314,6 +1316,51 @@ export default function StoreManagement() {
   // SAVE BANK DETAILS
   // ---------------------------------------------------------------------------
 
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !vendorId) return;
+
+    if (!file.type.startsWith('image/')) {
+      showToast('Please select a valid store image or logo.', 'error');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      showToast('Store image must be 5 MB or smaller.', 'error');
+      event.target.value = '';
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const filePath = `${vendorId}/store-avatar-${Date.now()}.${extension}`;
+      const { error: uploadError } = await supabase.storage
+        .from('vendor-avatars')
+        .upload(filePath, file, { upsert: true, contentType: file.type });
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('vendor-avatars').getPublicUrl(filePath);
+      const publicUrl = data?.publicUrl || '';
+      if (!publicUrl) throw new Error('Could not generate the store image URL.');
+
+      const { error: profileError } = await supabase
+        .from('vendor_profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('vendor_id', vendorId);
+      if (profileError) throw profileError;
+
+      setAvatarUrl(publicUrl);
+      showToast('Store image uploaded successfully.', 'success');
+    } catch (error: any) {
+      console.error('Store image upload error:', error);
+      showToast(error?.message || 'Failed to upload store image.', 'error');
+    } finally {
+      setUploadingAvatar(false);
+      event.target.value = '';
+    }
+  };
+
   const handleQrUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -1569,6 +1616,28 @@ export default function StoreManagement() {
           </div>
 
           <div className="space-y-5">
+
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/40 p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="w-24 h-24 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-emerald-500 flex items-center justify-center shrink-0">
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Store logo preview" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-3xl font-black text-white">{(storeName.trim().slice(0, 2) || 'ST').toUpperCase()}</span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-900 dark:text-white">Store image / logo</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Upload a square store photo or logo. This image appears on your RivoCity store tile.</p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => avatarFileInputRef.current?.click()} disabled={uploadingAvatar} className="h-10 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-2 disabled:opacity-50">
+                    {uploadingAvatar ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {uploadingAvatar ? 'Uploading…' : avatarUrl ? 'Change image' : 'Upload image'}
+                  </button>
+                  <input ref={avatarFileInputRef} type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">JPG, PNG or WebP · Max 5 MB</span>
+                </div>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 

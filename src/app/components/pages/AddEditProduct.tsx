@@ -30,6 +30,51 @@ interface Props {
 const gstOptions = [0, 5, 12, 18, 28];
 const unitOptions = ["Pcs", "Bottle", "Pack", "Unit", "Set", "Dozen", "Gm", "Kg", "Ml", "Ltr"];
 
+const looseQuantityPresets: Record<string, { min: number; max: number; step: number; label: string }> = {
+  Gm: { min: 250, max: 5000, step: 250, label: "grams" },
+  Kg: { min: 0.25, max: 5, step: 0.25, label: "kilograms" },
+  Ml: { min: 250, max: 5000, step: 250, label: "millilitres" },
+  Ltr: { min: 0.25, max: 5, step: 0.25, label: "litres" },
+  Pcs: { min: 1, max: 100, step: 1, label: "pieces" },
+  Bottle: { min: 1, max: 100, step: 1, label: "bottles" },
+  Pack: { min: 1, max: 100, step: 1, label: "packs" },
+  Unit: { min: 1, max: 100, step: 1, label: "units" },
+  Set: { min: 1, max: 100, step: 1, label: "sets" },
+  Dozen: { min: 1, max: 20, step: 1, label: "dozen" }
+};
+
+/**
+ * Product photos are resized and encoded as WebP in the browser before upload.
+ * This reduces Supabase Storage usage while preserving a practical catalogue
+ * image resolution. Original files are never modified.
+ */
+async function compressProductImage(file: File): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const maxDimension = 1400;
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not prepare product image for upload.");
+    context.drawImage(bitmap, 0, 0, width, height);
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        result => result ? resolve(result) : reject(new Error("Product image compression failed.")),
+        "image/webp",
+        0.82
+      );
+    });
+    return blob;
+  } finally {
+    bitmap.close();
+  }
+}
+
 export function AddEditProduct({ onNavigate, product, navigationProducts = [], productIndex = 0 }: Props) {
   const hasProductNavigation = Boolean(product && navigationProducts.length > 1);
   const navigateProduct = (nextIndex: number) => {
@@ -83,6 +128,50 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     loose_unit: "Pcs"
   });
 
+  // Hydrate the form whenever the selected product changes, including Previous/Next navigation.
+  useEffect(() => {
+    if (!product?.id) {
+      setForm({ name: "", category_id: "", price: "", cost_price: "", mrp: "", gst_slab: "5", batch_number: "", expiry_date: "", weightValue: "", weightUnit: "Pcs", description: "", stock: "", sku: "", barcode: "", is_exclusive: false, allow_loose_quantity: false, loose_min_quantity: "100", loose_max_quantity: "5000", loose_step_quantity: "100", loose_unit: "Pcs" });
+      setImageUrl(""); setImageFiles([]); setImageFile(null); setExistingImageUrls([]); setSelectedImageSource(null);
+      return;
+    }
+    const rawWeight = String(product.weight || "").trim();
+    // Legacy catalogue values may contain units in several formats (for example
+    // "250 g", "100gm", or "1.5 kg"). Keep the numeric value separate from its unit
+    // because weightValue is bound to an HTML number input.
+    const weightMatch = rawWeight.match(/^([0-9]+(?:\\.[0-9]+)?)\\s*(kg|g|gm|ml|ltr|l|pcs|bottle|pack|unit|set|dozen)?$/i);
+    const weightUnitAliases: Record<string, string> = {
+      g: "Gm", gm: "Gm", kg: "Kg", ml: "Ml", l: "Ltr", ltr: "Ltr",
+      pcs: "Pcs", bottle: "Bottle", pack: "Pack", unit: "Unit", set: "Set", dozen: "Dozen"
+    };
+    const parsedWeightValue = weightMatch ? weightMatch[1] : rawWeight.match(/[0-9]+(?:\\.[0-9]+)?/)?.[0] || "";
+    const parsedWeightUnit = weightMatch?.[2]
+      ? weightUnitAliases[weightMatch[2].toLowerCase()] || "Pcs"
+      : "Pcs";
+    const rawImages = product.image_url;
+    let imageUrls: string[] = [];
+    if (typeof rawImages === "string" && rawImages.trim()) {
+      try { const parsed = JSON.parse(rawImages); imageUrls = Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string" && /^https?:\/\//i.test(value)) : []; }
+      catch { if (/^https?:\/\//i.test(rawImages.trim())) imageUrls = [rawImages.trim()]; }
+    } else if (Array.isArray(rawImages)) {
+      imageUrls = rawImages.filter((value): value is string => typeof value === "string" && /^https?:\/\//i.test(value));
+    }
+    setForm({
+      name: String(product.name || ""), category_id: String(product.category_id || ""),
+      price: product.price == null ? "" : String(product.price), cost_price: product.cost_price == null ? "" : String(product.cost_price), mrp: product.mrp == null ? "" : String(product.mrp),
+      gst_slab: String(product.gst_slab ?? "5").replace(/%/g, "").trim() || "5",
+      batch_number: String(product.batch_number || ""), expiry_date: product.expiry_date ? String(product.expiry_date).slice(0, 10) : "",
+      weightValue: parsedWeightValue,
+      weightUnit: parsedWeightUnit,
+      description: String(product.description || ""), stock: product.stock == null ? "" : String(product.stock), sku: String(product.sku || ""), barcode: String(product.barcode || ""),
+      is_exclusive: product.is_exclusive === true, allow_loose_quantity: product.allow_loose_quantity === true,
+      loose_min_quantity: product.loose_min_quantity == null ? "100" : String(product.loose_min_quantity),
+      loose_max_quantity: product.loose_max_quantity == null ? "5000" : String(product.loose_max_quantity),
+      loose_step_quantity: product.loose_step_quantity == null ? "100" : String(product.loose_step_quantity), loose_unit: String(product.loose_unit || "Pcs")
+    });
+    setExistingImageUrls(imageUrls); setImageUrl(imageUrls[0] || ""); setImageFiles([]); setImageFile(null);
+    setImageSearchQuery(""); setImageSearchResults([]); setImageSearchMessage(""); setManualImageUrl(""); setSelectedImageSource(null); setIsImageError(false);
+  }, [product?.id]);
   useEffect(() => {
     let cancelled = false;
     const fetchCategories = async () => {
@@ -105,97 +194,6 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
     fetchCategories();
     return () => { cancelled = true; };
   }, []);
-
-  const parseImageUrls = (value: unknown): string[] => {
-    if (!value) return [];
-    if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && !!item);
-    if (typeof value !== "string") return [];
-    try {
-      const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string" && !!item);
-    } catch {}
-    return [value];
-  };
-
-  useEffect(() => {
-    if (product) {
-      let parsedWeightVal = "";
-      let parsedWeightUnit = "Pcs";
-      if (product.weight) {
-        const weightStr = product.weight.toString().trim();
-        const numericMatch = weightStr.match(/^[\d.]+/);
-        if (numericMatch) {
-          parsedWeightVal = numericMatch[0];
-          const unitMatch = weightStr.replace(parsedWeightVal, "").trim();
-          if (unitOptions.includes(unitMatch)) parsedWeightUnit = unitMatch;
-        } else {
-          parsedWeightVal = weightStr;
-        }
-      }
-
-      setForm({
-        name: product.name || "",
-        category_id: product.category_id || "",
-        price: product.price !== undefined && product.price !== null ? String(product.price) : "",
-        cost_price: product.cost_price !== undefined && product.cost_price !== null ? String(product.cost_price) : "",
-        mrp: product.mrp !== undefined && product.mrp !== null ? String(product.mrp) : "",
-        gst_slab: product.gst_slab !== undefined && product.gst_slab !== null ? String(product.gst_slab).replace("%", "").trim() : "5",
-        batch_number: product.batch_number || "",
-        expiry_date: product.expiry_date || "",
-        weightValue: parsedWeightVal,
-        weightUnit: parsedWeightUnit,
-        description: product.description || "",
-        stock: product.stock !== undefined && product.stock !== null ? String(product.stock) : "",
-        sku: product.sku || "",
-        barcode: product.barcode || "",
-        is_exclusive: product.is_exclusive === true,
-        allow_loose_quantity: product.allow_loose_quantity === true,
-        loose_min_quantity: product.loose_min_quantity != null ? String(product.loose_min_quantity) : "100",
-        loose_max_quantity: product.loose_max_quantity != null ? String(product.loose_max_quantity) : "5000",
-        loose_step_quantity: product.loose_step_quantity != null ? String(product.loose_step_quantity) : "100",
-        loose_unit: product.loose_unit || "Pcs"
-      });
-
-      const urls = parseImageUrls(product.image_url);
-      setExistingImageUrls(urls);
-      setImageUrl(urls[0] || "");
-      // Vendor-specific gallery is stored on the product row, while the shared catalogue remains canonical.
-      supabase.from("products").select("image_url").eq("id", product.id).maybeSingle().then(({ data }) => {
-        if (data?.image_url) setExistingImageUrls(parseImageUrls(data.image_url));
-      });
-      setImageFile(null);
-      setImageFiles([]);
-      setIsImageError(false);
-    } else {
-      setForm({
-        name: "",
-        category_id: "",
-        price: "",
-        cost_price: "",
-        mrp: "",
-        gst_slab: "5",
-        batch_number: "",
-        expiry_date: "",
-        weightValue: "",
-        weightUnit: "Pcs",
-        description: "",
-        stock: "",
-        sku: "",
-        barcode: "",
-        is_exclusive: false,
-        allow_loose_quantity: false,
-        loose_min_quantity: "100",
-        loose_max_quantity: "5000",
-        loose_step_quantity: "100",
-        loose_unit: "Pcs"
-      });
-      setExistingImageUrls([]);
-      setImageUrl("");
-      setImageFile(null);
-      setImageFiles([]);
-      setIsImageError(false);
-    }
-  }, [product]);
 
   const searchProductImages = async () => {
     const query = (imageSearchQuery || form.name).trim();
@@ -423,89 +421,22 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
   };
 
   /**
-   * Resolve the vendor listing to the shared catalogue first. The canonical image
-   * is then attached to universal_products, not uploaded once per vendor listing.
+   * Keep each vendor's own gallery on products.image_url. When the shared
+   * catalogue has no image, register the vendor's first image as its initial
+   * shared primary image. Existing canonical images are never overwritten by
+   * another vendor's upload.
    */
-  const resolveUniversalProduct = async (
-    productId: string,
-    authUserId: string,
-    pendingFiles: File[],
-    requestedImageUrl: string,
-    imageSource: { source: string; sourceUrl: string; license: string } | null
-  ) => {
-    const { data: resolverData, error: resolverError } = await supabase.rpc("resolve_product_master", { p_product_id: productId });
-    if (resolverError) throw new Error(`Product saved, but universal matching failed: ${resolverError.message}`);
-    const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
-    const universalId = resolverResult?.universal_product_id;
-    if (!universalId) return;
-
-    const { data: universalProduct, error: universalError } = await supabase
-      .from("universal_products")
-      .select("id, image_url")
-      .eq("id", universalId)
-      .maybeSingle();
-    if (universalError) throw universalError;
-
-    // Reuse an existing shared image. A vendor listing must never replace a
-    // catalogue image simply because that vendor selected a different picture.
-    let canonicalImageUrl = universalProduct?.image_url || "";
-    let sharedImageUrls: string[] = [];
-
-    if (!canonicalImageUrl && pendingFiles.length) {
-      setIsUploading(true);
-      for (const [index, file] of pendingFiles.slice(0, 5).entries()) {
-        const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
-        const objectPath = `universal-products/${universalId}/${crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, {
-          upsert: false,
-          contentType: file.type
-        });
-        if (uploadError) throw uploadError;
-        sharedImageUrls.push(supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl);
-      }
-      canonicalImageUrl = sharedImageUrls[0] || "";
-    } else if (!canonicalImageUrl && requestedImageUrl && !requestedImageUrl.startsWith("blob:")) {
-      canonicalImageUrl = requestedImageUrl;
-      sharedImageUrls = [canonicalImageUrl];
-    }
-
-    if (canonicalImageUrl && !universalProduct?.image_url) {
-      const { error: updateUniversalError } = await supabase
-        .from("universal_products")
-        .update({ image_url: canonicalImageUrl })
-        .eq("id", universalId);
-      if (updateUniversalError) throw updateUniversalError;
-
-      // Store the canonical image and any additional vendor-uploaded angles once
-      // against the universal product. The primary URL remains universal_products.image_url.
-      const imageRows = (sharedImageUrls.length ? sharedImageUrls : [canonicalImageUrl]).map((url, index) => ({
-        universal_product_id: universalId,
-        image_url: url,
-        is_primary: index === 0,
-        source: imageSource
-          ? [imageSource.source, imageSource.license, imageSource.sourceUrl].filter(Boolean).join(" | ").slice(0, 500)
-          : pendingFiles.length ? "Vendor upload" : "External image",
-        created_by: authUserId
-      }));
-      const { error: imageInsertError } = await supabase
-        .from("universal_product_images")
-        .insert(imageRows);
-      if (imageInsertError) console.warn("Shared image saved, but image provenance rows were not created:", imageInsertError);
-    }
-
-    // When vendor-specific gallery files were uploaded, products.image_url
-    // already contains the gallery JSON. Do not replace it with the shared
-    // universal catalogue's single canonical image.
-    if (canonicalImageUrl && pendingFiles.length === 0) {
-      const { error: vendorImageError } = await supabase
-        .from("products")
-        .update({ image_url: canonicalImageUrl })
-        .eq("id", productId);
-      if (vendorImageError) throw vendorImageError;
-      setImageUrl(canonicalImageUrl);
-      setIsImageError(false);
+  // Link the vendor listing to the master catalogue. Product photos remain
+  // vendor-owned and are stored only on the vendor product listing.
+  const resolveUniversalProduct = async (productId: string) => {
+    const { error } = await supabase.rpc("resolve_product_master", {
+      p_product_id: productId
+    });
+    if (error) {
+      throw new Error(`Product saved, but catalogue matching failed: ${error.message}`);
     }
   };
+
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -565,13 +496,10 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
 
       const finalWeightString = form.weightValue.trim() ? `${form.weightValue.trim()} ${form.weightUnit}` : null;
       const numericGst = parseFloat(form.gst_slab) || 0;
-      const looseMin = Number(form.loose_min_quantity);
-      const looseMax = Number(form.loose_max_quantity);
-      const looseStep = Number(form.loose_step_quantity);
-      if (form.allow_loose_quantity && (!Number.isFinite(looseMin) || !Number.isFinite(looseMax) || !Number.isFinite(looseStep) || looseMin <= 0 || looseMax < looseMin || looseStep <= 0)) {
-        alert("Enter valid loose quantity limits. Minimum must be positive, maximum must be at least the minimum, and step must be positive.");
-        return;
-      }
+      const loosePreset = looseQuantityPresets[form.loose_unit] || looseQuantityPresets.Pcs;
+      const looseMin = loosePreset.min;
+      const looseMax = loosePreset.max;
+      const looseStep = loosePreset.step;
 
       const productPayload = {
         name: form.name.trim(),
@@ -595,7 +523,7 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         loose_unit: form.allow_loose_quantity ? form.loose_unit : null,
         vendor_id: vendor.id,
         sku: form.sku || null,
-        barcode: form.barcode || null
+        barcode: form.barcode || null,
       };
 
       let savedProductId: string;
@@ -624,22 +552,35 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
         savedProductId = insertedProduct.id;
       }
 
+      let uploadedVendorImageUrls: string[] = [];
       if (imageFiles.length > 0) {
         setIsUploading(true);
-        const galleryUrls: string[] = [];
         for (const file of imageFiles.slice(0, 5)) {
-          const extension = (file.name.split(".").pop() || "jpg").toLowerCase();
-          const objectPath = `vendor-products/${vendor.id}/${savedProductId}/${crypto.randomUUID()}.${extension}`;
-          const { error: uploadError } = await supabase.storage.from("product-images").upload(objectPath, file, { upsert: false, contentType: file.type });
+          const optimizedFile = await compressProductImage(file);
+          const objectPath = `vendor-products/${vendor.id}/${savedProductId}/${crypto.randomUUID()}.webp`;
+          const { error: uploadError } = await supabase.storage
+            .from("product-images")
+            .upload(objectPath, optimizedFile, {
+              upsert: false,
+              contentType: "image/webp",
+              cacheControl: "31536000"
+            });
           if (uploadError) throw uploadError;
-          galleryUrls.push(supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl);
+          uploadedVendorImageUrls.push(
+            supabase.storage.from("product-images").getPublicUrl(objectPath).data.publicUrl
+          );
         }
-        const { error: galleryUpdateError } = await supabase.from("products").update({ image_url: JSON.stringify(galleryUrls) }).eq("id", savedProductId);
+
+        const { error: galleryUpdateError } = await supabase
+          .from("products")
+          .update({ image_url: JSON.stringify(uploadedVendorImageUrls) })
+          .eq("id", savedProductId);
         if (galleryUpdateError) throw galleryUpdateError;
-        setExistingImageUrls(galleryUrls);
-        setImageUrl(galleryUrls[0] || "");
+        setExistingImageUrls(uploadedVendorImageUrls);
+        setImageUrl(uploadedVendorImageUrls[0] || "");
       }
-      await resolveUniversalProduct(savedProductId, authData.user.id, imageFiles, imageUrl, selectedImageSource);
+
+      await resolveUniversalProduct(savedProductId);
       onNavigate("products");
     } catch (err: any) {
       console.error("Product preservation exception:", err);
@@ -717,13 +658,66 @@ export function AddEditProduct({ onNavigate, product, navigationProducts = [], p
             <div className="rounded-xl border border-border p-3 space-y-3">
               <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.is_exclusive} onChange={e => setForm(current => ({ ...current, is_exclusive: e.target.checked }))} /> Mark as RivoCity Exclusive</label>
               <p className="text-[10px] text-muted-foreground">Exclusive products receive a visible badge on customer product cards and details.</p>
-              <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={form.allow_loose_quantity} onChange={e => setForm(current => ({ ...current, allow_loose_quantity: e.target.checked }))} /> Allow loose quantity ordering</label>
-              {form.allow_loose_quantity && <div className="grid grid-cols-2 gap-2">
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Minimum quantity</label><input type="number" min="0.001" step="any" value={form.loose_min_quantity} onChange={e => handleField("loose_min_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Maximum quantity</label><input type="number" min="0.001" step="any" value={form.loose_max_quantity} onChange={e => handleField("loose_max_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Increment / step</label><input type="number" min="0.001" step="any" value={form.loose_step_quantity} onChange={e => handleField("loose_step_quantity", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background" /></div>
-                <div><label className="block text-[10px] text-muted-foreground mb-1">Measured quantity unit</label><select value={form.loose_unit} onChange={e => handleField("loose_unit", e.target.value)} className="w-full h-9 px-2 text-xs border border-border rounded-lg bg-background"><option value="Pcs">Pieces</option><option value="Bottle">Bottles</option><option value="Pack">Packs</option><option value="Unit">Units</option><option value="Set">Sets</option><option value="Dozen">Dozen</option><option value="Gm">Grams</option><option value="Kg">Kilograms</option><option value="Ml">Millilitres</option><option value="Ltr">Litres</option></select></div>
-              </div>}
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 dark:bg-emerald-950/20 dark:border-emerald-900 p-3 space-y-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.allow_loose_quantity}
+                    onChange={e => {
+                      const enabled = e.target.checked;
+                      const preset = looseQuantityPresets[form.loose_unit] || looseQuantityPresets.Pcs;
+                      setForm(current => ({
+                        ...current,
+                        allow_loose_quantity: enabled,
+                        ...(enabled ? {
+                          loose_min_quantity: String(preset.min),
+                          loose_max_quantity: String(preset.max),
+                          loose_step_quantity: String(preset.step)
+                        } : {})
+                      }));
+                    }}
+                    className="mt-0.5 accent-emerald-600"
+                  />
+                  <span>
+                    <span className="block text-sm font-bold text-foreground">Let customers choose the quantity</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">For loose items like wheat, rice, dal and oil.</span>
+                  </span>
+                </label>
+                {form.allow_loose_quantity && <>
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5">Sell by</label>
+                    <select
+                      value={form.loose_unit}
+                      onChange={e => {
+                        const unit = e.target.value;
+                        const preset = looseQuantityPresets[unit] || looseQuantityPresets.Pcs;
+                        setForm(current => ({
+                          ...current,
+                          loose_unit: unit,
+                          loose_min_quantity: String(preset.min),
+                          loose_max_quantity: String(preset.max),
+                          loose_step_quantity: String(preset.step)
+                        }));
+                      }}
+                      className="w-full h-10 px-3 text-sm border border-border rounded-lg bg-background"
+                    >
+                      <option value="Gm">Grams (g)</option>
+                      <option value="Kg">Kilograms (kg)</option>
+                      <option value="Ml">Millilitres (ml)</option>
+                      <option value="Ltr">Litres (L)</option>
+                      <option value="Pcs">Pieces</option>
+                      <option value="Bottle">Bottles</option>
+                      <option value="Pack">Packs</option>
+                      <option value="Unit">Units</option>
+                      <option value="Set">Sets</option>
+                      <option value="Dozen">Dozen</option>
+                    </select>
+                  </div>
+                  <p className="text-xs text-emerald-800 dark:text-emerald-300">
+                    Customers can order {looseQuantityPresets[form.loose_unit]?.min}–{looseQuantityPresets[form.loose_unit]?.max} {looseQuantityPresets[form.loose_unit]?.label}, with automatic quantity steps. You can change this later by selecting a different unit.
+                  </p>
+                </>}
+              </div>
             </div>
             <div><label className="block text-xs font-medium text-muted-foreground mb-1">Description</label><textarea rows={2} placeholder="Describe the product..." value={form.description} onChange={e => handleField("description", e.target.value)} className="w-full p-3 text-xs border border-border rounded-lg bg-background resize-none" /></div>
           </div>

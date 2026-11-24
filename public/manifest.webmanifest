@@ -1,0 +1,13 @@
+{
+  "name": "RivoCity Vendor Lite",
+  "short_name": "Vendor Lite",
+  "description": "Manage new orders and view your RivoCity vendor earnings.",
+  "start_url": "/?lite=1",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#10b981",
+  "icons": [
+    { "src": "/pwa-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
