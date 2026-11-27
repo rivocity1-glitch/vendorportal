@@ -137,6 +137,8 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
           const productCategory = String(normalized.productCategory ?? '').trim() || null;
           const subcategory = isLegacyRivoLayout ? null : (String(normalized.subcategory ?? '').trim() || null);
           const variant = String(normalized.variant ?? '').trim() || null;
+          const productDescription = String(normalized.description ?? '').trim() || null;
+          const packSize = String(normalized.packSize ?? normalized.unit ?? '').trim() || null;
           const batch = String(normalized.batch ?? '').trim() || null;
           const manufacturer = String(normalized.manufacturer ?? '').trim() || null;
           const brand = String(normalized.brand ?? '').trim() || null;
@@ -153,13 +155,17 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
             brand,
             catalogProductId: String(normalized.catalogProductId ?? '').trim() || null,
             imageUrl: String(normalized.imageUrl ?? '').trim() || null,
+            description: productDescription,
+            categoryId: String(normalized.categoryId ?? '').trim() || null,
+            verificationStatus: String(normalized.verificationStatus ?? '').trim() || null,
+            packSize,
             rawText: Object.values(row).filter(value => value !== null && value !== undefined && String(value).trim() !== '').join(' | '),
             category,
             sourceCategory: category,
             productCategory,
             subcategory,
             variant,
-            packSize: variant || String(normalized.unit ?? '').trim() || null,
+            packSize: packSize || variant,
             barcode: String(normalized.barcode ?? '').trim() || null,
             sku: String(normalized.sku ?? '').trim() || null,
             gstRate: gst,
