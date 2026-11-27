@@ -475,7 +475,6 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
       "name",
       "brand",
       "image_url",
-      "manufacturer",
       "description",
       "category_id",
       "subcategory",
