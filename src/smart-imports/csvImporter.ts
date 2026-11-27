@@ -109,9 +109,12 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
           ['quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(header)
         );
 
-        if (!hasNameHeader || !hasUsefulHeader) {
+        const isRivoCatalogueLayout = headers.some(header =>
+          ["brandid", "catalogProductId".toLowerCase(), "imageUrl".toLowerCase(), "categoryId".toLowerCase(), "verificationStatus".toLowerCase()].includes(header)
+        );
+        if (!hasNameHeader || (!hasUsefulHeader && !isRivoCatalogueLayout)) {
           throw new Error(
-            `CSV headers not recognised. Detected: ${headers.join(', ') || 'none'}. Include a product/item name and at least one quantity or price column.`
+            `CSV headers not recognised. Detected: ${headers.join(', ') || 'none'}. Include a product/item name and either a vendor quantity/price column or Rivo catalogue identifiers.`
           );
         }
 
