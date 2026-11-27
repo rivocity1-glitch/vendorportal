@@ -145,7 +145,7 @@ export async function runImportPipeline(file: File, existingProducts: ExistingPr
     brand: row.brand || null,
     category: categoryNames.get(row.category_id) || null,
     barcode: row.barcode || null,
-    sku: row.source_catalogue_id || null,
+    sku: null,
     weight: row.weight || null,
     aliases: aliasesByMaster.get(row.id) || []
   }));
