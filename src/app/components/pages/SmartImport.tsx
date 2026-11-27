@@ -254,7 +254,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
       brand: item.brand?.trim() || null,
       image_url: item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? item.imageUrl : null,
 
-      description: "",
+      description: item.description?.trim() || "",
 
       category_id: item.category || null,
 
