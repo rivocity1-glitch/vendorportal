@@ -129,7 +129,7 @@ DECLARE
   v_image_count integer := 0;
   v_mrp numeric;
 BEGIN
-  IF auth.role() <> 'service_role' AND NOT EXISTS (
+  IF auth.uid() IS NOT NULL AND coalesce(auth.role(),'') <> 'service_role' AND NOT EXISTS (
     SELECT 1 FROM public.admin_users au WHERE au.auth_user_id = auth.uid()
   ) THEN
     RAISE EXCEPTION 'Only an authorized administrator can import the master catalogue';
@@ -201,6 +201,7 @@ BEGIN
     ELSE
       UPDATE public.universal_products
       SET
+        brand = coalesce(nullif(trim(brand),''), nullif(trim(r.brand),'')),
         description = coalesce(nullif(trim(description),''), nullif(trim(r.product_description),'')),
         category_id = coalesce(category_id, v_category_id),
         manufacturer = coalesce(nullif(trim(manufacturer),''), nullif(trim(r.manufacturer),'')),
@@ -364,12 +365,18 @@ BEGIN
     AND (
       (v_barcode IS NOT NULL AND barcode = v_barcode)
       OR (v_sku IS NOT NULL AND sku = v_sku)
-      OR (lower(trim(name)) = lower(v_name))
+      OR (lower(trim(name)) = lower(v_name)
+          AND lower(trim(coalesce(brand,''))) = lower(coalesce(v_brand,'')))
     )
   ORDER BY created_at
   LIMIT 1;
 
-  v_status := CASE WHEN v_price IS NOT NULL AND v_price > 0 AND v_stock > 0 THEN 'active' ELSE 'inactive' END;
+  v_status := CASE
+    WHEN coalesce(v_price, v_existing.price) IS NOT NULL
+      AND coalesce(v_price, v_existing.price) > 0
+      AND v_stock > 0 THEN 'active'
+    ELSE 'inactive'
+  END;
 
   IF v_existing.id IS NULL THEN
     INSERT INTO public.products (
@@ -391,7 +398,7 @@ BEGIN
     UPDATE public.products
     SET universal_product_id = v_universal_id,
         name = v_name,
-        brand = v_brand,
+        brand = coalesce(v_brand, brand),
         description = coalesce(nullif(trim(p_product->>'description'),''), description),
         category_id = coalesce(v_category_id, category_id),
         price = coalesce(v_price, price),
