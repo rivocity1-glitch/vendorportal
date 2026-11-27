@@ -136,6 +136,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
           const variant = String(normalized.variant ?? '').trim() || null;
           const batch = String(normalized.batch ?? '').trim() || null;
           const manufacturer = String(normalized.manufacturer ?? '').trim() || null;
+          const brand = String(normalized.brand ?? '').trim() || null;
 
           products.push({
             name,
@@ -146,6 +147,9 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
             expiry: normalizeDate(normalized.expiry),
             batch,
             manufacturer,
+            brand,
+            catalogProductId: String(normalized.catalogProductId ?? '').trim() || null,
+            imageUrl: String(normalized.imageUrl ?? '').trim() || null,
             rawText: Object.values(row).filter(value => value !== null && value !== undefined && String(value).trim() !== '').join(' | '),
             category,
             sourceCategory: category,
