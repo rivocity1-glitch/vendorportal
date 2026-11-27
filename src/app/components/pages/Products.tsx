@@ -268,7 +268,8 @@ export function Products({
           };
         });
 
-        setProductList(mapped);
+        // Listings moved from Products are retained in the vendor inventory.
+        setProductList(mapped.filter((product: any) => String(product.status || "").toLowerCase() !== "inventory"));
       }
     } catch (err) {
       console.error("Failed to query records:", err);
@@ -319,29 +320,37 @@ export function Products({
     return matchedCategory?.id;
   };
 
-  const handleDelete = async (id: any) => {
+  const handleMoveToInventory = async (id: string) => {
     const confirmation = window.confirm(
-      "Are you sure you want to permanently delete this product listing?"
+      "Move this product out of Products and into Inventory? Its listing, stock, price and catalogue link will be retained. You can continue managing its stock in Inventory."
     );
 
     if (!confirmation) return;
 
     try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) throw authError || new Error("Vendor session not found.");
+
+      const { data: vendor, error: vendorError } = await supabase
+        .from("vendors")
+        .select("id")
+        .eq("auth_user_id", authData.user.id)
+        .single();
+      if (vendorError) throw vendorError;
+
       const { error } = await supabase
         .from("products")
-        .delete()
-        .eq("id", id);
+        .update({ status: "inventory", updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("vendor_id", vendor.id);
 
       if (error) throw error;
 
       setOpenMenu(null);
-
       await fetchLiveProducts();
     } catch (err) {
-      console.error(
-        "Delete sequence failed:",
-        err
-      );
+      console.error("Could not move product to inventory:", err);
+      window.alert("Could not move this product to Inventory. No product data was deleted.");
     }
   };
 
@@ -662,14 +671,14 @@ export function Products({
                               <button
                                 type="button"
                                 onClick={() =>
-                                  handleDelete(
+                                  handleMoveToInventory(
                                     p.id
                                   )
                                 }
                                 className="w-full text-left px-3 py-1.5 text-sm text-[#EF4444] hover:bg-[#FEF2F2] font-semibold flex items-center gap-1"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
-                                Delete
+                                <Package className="w-3.5 h-3.5" />
+                                Move to Inventory
                               </button>
                             </div>
                           )}
