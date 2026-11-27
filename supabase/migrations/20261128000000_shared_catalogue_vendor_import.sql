@@ -317,11 +317,11 @@ BEGIN
   IF v_universal_id IS NULL THEN
     INSERT INTO public.universal_products (
       name, brand, description, category_id, barcode, manufacturer, unit,
-      weight, image_url, status, product_variant, pack_size
+      weight, image_url, candidate_image_url, status, product_variant, pack_size
     ) VALUES (
       v_name, v_brand, nullif(trim(p_product->>'description'),''), v_category_id,
       v_barcode, nullif(trim(p_product->>'manufacturer'),''), nullif(trim(p_product->>'unit'),''),
-      nullif(trim(p_product->>'weight'),''), NULL, 'active',
+      nullif(trim(p_product->>'weight'),''), NULL, v_image, 'active',
       nullif(trim(p_product->>'productVariant'),''), nullif(trim(p_product->>'packSize'),'')
     ) RETURNING id INTO v_universal_id;
     v_created_catalogue := true;
