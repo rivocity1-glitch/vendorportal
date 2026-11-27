@@ -599,180 +599,88 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     }
   };
   const handleImportSelected = async () => {
-    const selectedItems =
-      items.filter(item => item.selected && item.status !== "Needs Review");
-
-    if (selectedItems.length === 0) {
-      return;
-    }
+    const selectedItems = items.filter(item => item.selected && item.status !== "Needs Review");
+    if (selectedItems.length === 0) return;
 
     setIsLoading(true);
     setError(null);
 
     let addedCount = 0;
     let updatedCount = 0;
-    let skippedCount = 0;
     let failedCount = 0;
-    let sharedImageCount = 0;
+    let inactiveCount = 0;
+    let catalogueCreatedCount = 0;
 
     try {
-      const {
-        data: { user },
-        error: authError
-      } = await supabase.auth.getUser();
-
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new Error(
-          "Authentication failed: No active profile session detected."
-        );
-      }
-
-      const {
-        data: vendor,
-        error: vendorError
-      } = await supabase
-        .from("vendors")
-        .select("id")
-        .eq("auth_user_id", user.id)
-        .single();
-
-      if (vendorError || !vendor) {
-        throw new Error(
-          "Failed to map inventory profile: Vendor catalog entry not found."
-        );
+        throw new Error("Authentication failed: no active vendor session was found.");
       }
 
       for (const item of selectedItems) {
-        if (!item.name?.trim() || item.status === "Needs Review") {
+        if (!item.name?.trim()) {
           failedCount++;
           continue;
         }
 
         try {
-          const existingProduct =
-            await findExistingProduct(
-              vendor.id,
-              item
-            );
-
-          const nextProduct =
-            buildProductPayload(
-              item,
-              vendor.id
-            );
-
-          /*
-           * -----------------------------------------------------
-           * NEW PRODUCT
-           * -----------------------------------------------------
-           */
-          if (!existingProduct) {
-            const {
-              data: insertedProduct,
-              error: insertError
-            } = await supabase
-              .from("products")
-              .insert(nextProduct)
-              .select("id")
-              .single();
-
-            if (insertError) {
-              throw insertError;
+          // The database function derives vendor_id from auth.uid(), resolves
+          // the shared universal product, then creates/updates only this
+          // vendor's offer. Never use MRP or purchase cost as selling price.
+          const { data, error: importError } = await supabase.rpc("import_vendor_product", {
+            p_product: {
+              name: item.name.trim(),
+              brand: item.brand?.trim() || null,
+              description: item.description?.trim() || null,
+              categoryId: item.category || item.categoryId || null,
+              sellingPrice: item.sellingPrice != null && Number(item.sellingPrice) > 0
+                ? Number(item.sellingPrice)
+                : null,
+              costPrice: item.costPrice != null ? Number(item.costPrice) : null,
+              purchaseRate: item.purchaseRate != null ? Number(item.purchaseRate) : null,
+              mrp: item.mrp != null ? Number(item.mrp) : null,
+              stock: item.stock != null ? Number(item.stock) : 0,
+              imageUrl: item.imageUrl?.trim() || null,
+              barcode: item.barcode?.trim() || null,
+              sku: item.sku?.trim() || null,
+              manufacturer: item.manufacturer?.trim() || null,
+              weight: item.weight?.trim() || null,
+              unit: item.unit?.trim() || null,
+              productVariant: item.variant?.trim() || null,
+              packSize: item.packSize?.trim() || null,
+              lowStockThreshold: item.lowStockThreshold ?? 5
             }
+          });
 
-            if (!insertedProduct?.id) {
-              throw new Error(
-                `Product "${item.name}" was inserted but its ID was not returned.`
-              );
-            }
-
-            addedCount++;
-            if (await attachSharedCatalogueImage(insertedProduct.id, item)) sharedImageCount++;
-            continue;
+          if (importError) throw importError;
+          const result = Array.isArray(data) ? data[0] : data;
+          if (!result?.product_id || !result?.universal_product_id) {
+            throw new Error("The catalogue import did not return product links.");
           }
 
-          /*
-           * -----------------------------------------------------
-           * EXISTING PRODUCT
-           * -----------------------------------------------------
-           *
-           * Compare the incoming CSV values with the actual
-           * vendor product.
-           */
-          const changes =
-            getChangedFields(
-              existingProduct,
-              nextProduct
-            );
-
-          if (
-            Object.keys(changes).length === 0
-          ) {
-            skippedCount++;
-            if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id, item)) sharedImageCount++;
-            continue;
-          }
-
-          /*
-           * Never overwrite vendor_id.
-           * Never overwrite universal_product_id.
-           *
-           * Universal matching belongs to the existing product
-           * architecture and is intentionally untouched here.
-           */
-          delete changes.vendor_id;
-
-          const {
-            error: updateError
-          } = await supabase
-            .from("products")
-            .update({
-              ...changes,
-              updated_at:
-                new Date().toISOString()
-            })
-            .eq(
-              "id",
-              existingProduct.id
-            )
-            .eq(
-              "vendor_id",
-              vendor.id
-            );
-
-          if (updateError) {
-            throw updateError;
-          }
-
-          updatedCount++;
-          if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id, item)) sharedImageCount++;
-        } catch (itemErr) {
+          if (result.created_vendor_listing) addedCount++;
+          else updatedCount++;
+          if (result.created_catalogue_product) catalogueCreatedCount++;
+          if (result.status !== "active") inactiveCount++;
+        } catch (itemError) {
           failedCount++;
-
-          console.error(
-            "Failed to synchronize product:",
-            item.name,
-            itemErr
-          );
+          console.error("Shared catalogue/vendor import failed for:", item.name, itemError);
         }
       }
 
       alert(
         `Import complete:\n` +
-        `- Added ${addedCount} new products\n` +
-        `- Updated ${updatedCount} existing products\n` +
-        `- Skipped ${skippedCount} unchanged products\n` +
-        `- Failed ${failedCount} products\n` +
-        `- Shared catalogue images attached: ${sharedImageCount}`
+        `- Added vendor listings: ${addedCount}\n` +
+        `- Updated vendor listings: ${updatedCount}\n` +
+        `- New shared catalogue products: ${catalogueCreatedCount}\n` +
+        `- Kept inactive (missing selling price or stock): ${inactiveCount}\n` +
+        `- Failed: ${failedCount}`
       );
 
       handleCancel();
       onNavigate("products");
     } catch (err: any) {
-      setError(
-        err?.message ||
-          "An error occurred while importing products."
-      );
+      setError(err?.message || "An error occurred while importing products.");
     } finally {
       setIsLoading(false);
     }
