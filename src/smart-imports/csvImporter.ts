@@ -127,7 +127,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
           const costPrice = parseNumber(normalized.purchasePrice);
           const sellingPrice = parseNumber(normalized.sellingPrice);
           const mrp = parseNumber(normalized.mrp);
-          if ([quantity, costPrice, sellingPrice, mrp].every(value => value === null)) continue;
+          // Keep every named catalogue row in the review table, even when a vendor has not entered stock or pricing yet. The import pipeline marks price-less rows as Needs Review so they cannot be accidentally committed.
 
           const gst = parseNumber(normalized.gst);
           const category = String(normalized.category ?? '').trim() || null;
