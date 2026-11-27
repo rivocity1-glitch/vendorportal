@@ -252,8 +252,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
 
       name: item.name?.trim() || "",
       brand: item.brand?.trim() || null,
-      universal_product_id: item.catalogProductId || null,
-      image_url: item.imageUrl || null,
+      image_url: item.imageUrl && /^https?:\/\//i.test(item.imageUrl) ? item.imageUrl : null,
 
       description: "",
 
@@ -476,7 +475,6 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
       "name",
       "brand",
       "image_url",
-      "universal_product_id",
       "description",
       "category_id",
       "subcategory",
@@ -1059,7 +1057,6 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                       ["Expiry Date", "expiry"],
                       ["Manufacturing Date", "manufacturingDate"],
                       ["Brand", "brand"],
-                      ["Brand", "brand"],
                       ["Manufacturer", "manufacturer"],
                       ["Barcode", "barcode"],
                       ["SKU", "sku"],
@@ -1236,7 +1233,6 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                           "manufacturingDate",
                           item.manufacturingDate
                         ],
-                        ["brand", item.brand],
                         ["brand", item.brand],
                         [
                           "manufacturer",
