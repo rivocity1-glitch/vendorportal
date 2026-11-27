@@ -251,6 +251,9 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
       vendor_id: vendorId,
 
       name: item.name?.trim() || "",
+      brand: item.brand?.trim() || null,
+      universal_product_id: item.catalogProductId || null,
+      image_url: item.imageUrl || null,
 
       description: "",
 
@@ -1042,6 +1045,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                       ["Batch No", "batch"],
                       ["Expiry Date", "expiry"],
                       ["Manufacturing Date", "manufacturingDate"],
+                      ["Brand", "brand"],
                       ["Manufacturer", "manufacturer"],
                       ["Barcode", "barcode"],
                       ["SKU", "sku"],
@@ -1218,6 +1222,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                           "manufacturingDate",
                           item.manufacturingDate
                         ],
+                        ["brand", item.brand],
                         [
                           "manufacturer",
                           item.manufacturer
