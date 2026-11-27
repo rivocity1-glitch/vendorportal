@@ -582,7 +582,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
           imageUrl = typeof gallery?.[0]?.image_url === "string" ? gallery[0].image_url.trim() : "";
         }
       }
-      if (!imageUrl || !/^https?:\\/\\//i.test(imageUrl)) return false;
+      if (!imageUrl || !/^https?:\/\//i.test(imageUrl)) return false;
 
       const { error: imageUpdateError } = await supabase
         .from("products")
