@@ -113,7 +113,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
         );
 
         const isRivoCatalogueLayout = headers.some(header =>
-          ["brandid", "catalogProductId".toLowerCase(), "imageUrl".toLowerCase(), "categoryId".toLowerCase(), "verificationStatus".toLowerCase()].includes(header)
+          ["brandId", "catalogProductId", "imageUrl", "categoryId", "verificationStatus"].includes(header)
         );
         if (!hasNameHeader || (!hasUsefulHeader && !isRivoCatalogueLayout)) {
           throw new Error(
