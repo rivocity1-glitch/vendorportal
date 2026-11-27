@@ -1046,6 +1046,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                       ["Expiry Date", "expiry"],
                       ["Manufacturing Date", "manufacturingDate"],
                       ["Brand", "brand"],
+                      ["Brand", "brand"],
                       ["Manufacturer", "manufacturer"],
                       ["Barcode", "barcode"],
                       ["SKU", "sku"],
@@ -1222,6 +1223,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                           "manufacturingDate",
                           item.manufacturingDate
                         ],
+                        ["brand", item.brand],
                         ["brand", item.brand],
                         [
                           "manufacturer",
