@@ -605,11 +605,14 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     setIsLoading(true);
     setError(null);
 
-    let addedCount = 0;
-    let updatedCount = 0;
-    let failedCount = 0;
-    let inactiveCount = 0;
-    let catalogueCreatedCount = 0;
+    const totals = {
+      added_vendor_listings: 0,
+      updated_vendor_listings: 0,
+      new_shared_catalogue_products: 0,
+      inactive_vendor_listings: 0,
+      failed: 0
+    };
+    const errors: Array<{ name?: string; error?: string }> = [];
 
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -617,64 +620,57 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
         throw new Error("Authentication failed: no active vendor session was found.");
       }
 
-      for (const item of selectedItems) {
-        if (!item.name?.trim()) {
-          failedCount++;
-          continue;
-        }
+      const toPayload = (item: ReviewItem) => ({
+        name: item.name?.trim() || "",
+        brand: item.brand?.trim() || null,
+        description: item.description?.trim() || null,
+        categoryId: item.category || item.categoryId || null,
+        sellingPrice: item.sellingPrice != null && Number(item.sellingPrice) > 0
+          ? Number(item.sellingPrice)
+          : null,
+        costPrice: item.costPrice != null ? Number(item.costPrice) : null,
+        purchaseRate: item.purchaseRate != null ? Number(item.purchaseRate) : null,
+        mrp: item.mrp != null ? Number(item.mrp) : null,
+        stock: item.stock != null ? Number(item.stock) : 0,
+        imageUrl: item.imageUrl?.trim() || null,
+        barcode: item.barcode?.trim() || null,
+        sku: item.sku?.trim() || null,
+        manufacturer: item.manufacturer?.trim() || null,
+        weight: item.weight?.trim() || null,
+        unit: item.unit?.trim() || null,
+        productVariant: item.variant?.trim() || null,
+        packSize: item.packSize?.trim() || null,
+        lowStockThreshold: item.lowStockThreshold ?? 5
+      });
 
-        try {
-          // The database function derives vendor_id from auth.uid(), resolves
-          // the shared universal product, then creates/updates only this
-          // vendor's offer. Never use MRP or purchase cost as selling price.
-          const { data, error: importError } = await supabase.rpc("import_vendor_product", {
-            p_product: {
-              name: item.name.trim(),
-              brand: item.brand?.trim() || null,
-              description: item.description?.trim() || null,
-              categoryId: item.category || item.categoryId || null,
-              sellingPrice: item.sellingPrice != null && Number(item.sellingPrice) > 0
-                ? Number(item.sellingPrice)
-                : null,
-              costPrice: item.costPrice != null ? Number(item.costPrice) : null,
-              purchaseRate: item.purchaseRate != null ? Number(item.purchaseRate) : null,
-              mrp: item.mrp != null ? Number(item.mrp) : null,
-              stock: item.stock != null ? Number(item.stock) : 0,
-              imageUrl: item.imageUrl?.trim() || null,
-              barcode: item.barcode?.trim() || null,
-              sku: item.sku?.trim() || null,
-              manufacturer: item.manufacturer?.trim() || null,
-              weight: item.weight?.trim() || null,
-              unit: item.unit?.trim() || null,
-              productVariant: item.variant?.trim() || null,
-              packSize: item.packSize?.trim() || null,
-              lowStockThreshold: item.lowStockThreshold ?? 5
-            }
-          });
+      // Keep payloads bounded. Each batch is handled in one database transaction
+      // per product, avoiding thousands of individual browser-to-database calls.
+      for (let offset = 0; offset < selectedItems.length; offset += 100) {
+        const batch = selectedItems.slice(offset, offset + 100).map(toPayload);
+        const { data, error: batchError } = await supabase.rpc("import_vendor_products_batch", {
+          p_products: batch
+        });
+        if (batchError) throw batchError;
 
-          if (importError) throw importError;
-          const result = Array.isArray(data) ? data[0] : data;
-          if (!result?.product_id || !result?.universal_product_id) {
-            throw new Error("The catalogue import did not return product links.");
-          }
+        const result = Array.isArray(data) ? data[0] : data;
+        if (!result) throw new Error("The database returned an empty import result.");
 
-          if (result.created_vendor_listing) addedCount++;
-          else updatedCount++;
-          if (result.created_catalogue_product) catalogueCreatedCount++;
-          if (result.status !== "active") inactiveCount++;
-        } catch (itemError) {
-          failedCount++;
-          console.error("Shared catalogue/vendor import failed for:", item.name, itemError);
-        }
+        totals.added_vendor_listings += Number(result.added_vendor_listings || 0);
+        totals.updated_vendor_listings += Number(result.updated_vendor_listings || 0);
+        totals.new_shared_catalogue_products += Number(result.new_shared_catalogue_products || 0);
+        totals.inactive_vendor_listings += Number(result.inactive_vendor_listings || 0);
+        totals.failed += Number(result.failed || 0);
+        if (Array.isArray(result.errors)) errors.push(...result.errors);
       }
 
       alert(
         `Import complete:\n` +
-        `- Added vendor listings: ${addedCount}\n` +
-        `- Updated vendor listings: ${updatedCount}\n` +
-        `- New shared catalogue products: ${catalogueCreatedCount}\n` +
-        `- Kept inactive (missing selling price or stock): ${inactiveCount}\n` +
-        `- Failed: ${failedCount}`
+        `- Added vendor listings: ${totals.added_vendor_listings}\n` +
+        `- Updated vendor listings: ${totals.updated_vendor_listings}\n` +
+        `- New shared catalogue products: ${totals.new_shared_catalogue_products}\n` +
+        `- Kept inactive (missing selling price or stock): ${totals.inactive_vendor_listings}\n` +
+        `- Failed: ${totals.failed}` +
+        (errors.length ? `\n\nFirst error: ${errors[0].name || "Product"} — ${errors[0].error || "Unknown error"}` : "")
       );
 
       handleCancel();
