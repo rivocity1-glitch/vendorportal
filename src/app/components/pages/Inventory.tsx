@@ -27,6 +27,7 @@ type FilterType = "all" | "low" | "out" | "expired" | "7days" | "30days" | "dead
 type InventoryItem = {
   id: string;
   name: string;
+  brand: string;
   sku: string;
   barcode: string | null;
   category: string;
@@ -228,6 +229,7 @@ export function Inventory() {
         return {
           id: p.id,
           name: p.name || "Unnamed Product",
+          brand: p.brand || "",
           sku: p.sku || "—",
           barcode: p.barcode || null,
           category: p.category || "General",
@@ -333,6 +335,7 @@ export function Inventory() {
         !q ||
         [
           p.name,
+          p.brand || "",
           p.sku,
           p.barcode || "",
           p.category,
@@ -737,6 +740,7 @@ export function Inventory() {
                       />
                     </th>
                     <th className="p-3 text-left">Product</th>
+                    <th className="p-3 text-left">Brand</th>
                     <th className="p-3 text-left">SKU</th>
                     <th className="p-3 text-left">Category</th>
                     <th className="p-3 text-right">Stock</th>
@@ -805,6 +809,7 @@ export function Inventory() {
                               </div>
                             )}
                           </td>
+                          <td className="p-3 text-muted-foreground">{item.brand || "—"}</td>
                           <td className="p-3 font-mono text-xs">{item.sku}</td>
                           <td className="p-3">
                             <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs">
