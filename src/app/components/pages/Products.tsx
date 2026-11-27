@@ -510,10 +510,6 @@ export function Products({
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
                   Brand
                 </th>
-
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
-                  Brand
-                </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
                   Category
                 </th>
