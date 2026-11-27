@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { CheckSquare, Square } from "lucide-react";
 import {
   Search,
   Plus,
@@ -65,6 +64,7 @@ export function Products({
   const [productList, setProductList] = useState<any[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [isSelectingAll, setIsSelectingAll] = useState(false);
   const [openMenu, setOpenMenu] = useState<any | null>(null);
 
   const [showImportOptionsModal, setShowImportOptionsModal] = useState(false);
@@ -421,6 +421,42 @@ export function Products({
         </div>
 
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              if (isSelectingAll) return;
+              setIsSelectingAll(true);
+              try {
+                const { data: authData, error: authError } = await supabase.auth.getUser();
+                if (authError || !authData.user) throw new Error("Your vendor session could not be verified.");
+                const { data: vendor, error: vendorError } = await supabase
+                  .from("vendors").select("id").eq("auth_user_id", authData.user.id).single();
+                if (vendorError || !vendor) throw new Error("Vendor profile could not be verified.");
+                let allIds: string[] = [];
+                let from = 0;
+                const pageSize = 1000;
+                while (true) {
+                  const { data, error } = await supabase.from("products").select("id")
+                    .eq("vendor_id", vendor.id).order("created_at", { ascending: false })
+                    .range(from, from + pageSize - 1);
+                  if (error) throw error;
+                  const batch = (data || []).map((row) => row.id);
+                  allIds = allIds.concat(batch);
+                  if (batch.length < pageSize) break;
+                  from += pageSize;
+                }
+                setSelectedIds(allIds);
+              } catch (err) {
+                window.alert(err instanceof Error ? err.message : "Could not select all vendor products.");
+              } finally {
+                setIsSelectingAll(false);
+              }
+            }}
+            disabled={isSelectingAll || productList.length === 0}
+            className="h-9 px-3 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground disabled:opacity-50"
+          >
+            {isSelectingAll ? "Selecting…" : "Select All"}
+          </button>
           <button
             type="button"
             onClick={() =>
