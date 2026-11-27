@@ -62,6 +62,8 @@ export function Products({
   const [search, setSearch] = useState("");
   const [activeCategoryId, setActiveCategoryId] = useState("All");
   const [productList, setProductList] = useState<any[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [openMenu, setOpenMenu] = useState<any | null>(null);
 
   const [showImportOptionsModal, setShowImportOptionsModal] = useState(false);
@@ -226,6 +228,9 @@ export function Products({
           return {
             id: p.id,
             name: p.name || "Unnamed Product",
+            brand: p.brand || "",
+            manufacturer: p.manufacturer || "",
+            universal_product_id: p.universal_product_id || null,
 
             /*
              * Keep the actual database category UUID.
@@ -269,6 +274,7 @@ export function Products({
         });
 
         setProductList(mapped);
+      setSelectedIds((current) => current.filter((id) => mapped.some((p) => p.id === id)));
       }
     } catch (err) {
       console.error("Failed to query records:", err);
@@ -319,29 +325,52 @@ export function Products({
     return matchedCategory?.id;
   };
 
-  const handleDelete = async (id: any) => {
+  const handleDelete = async (id: string) => {
     const confirmation = window.confirm(
       "Are you sure you want to permanently delete this product listing?"
     );
-
     if (!confirmation) return;
-
     try {
-      const { error } = await supabase
-        .from("products")
-        .delete()
-        .eq("id", id);
-
+      const { error } = await supabase.from("products").delete().eq("id", id);
       if (error) throw error;
-
       setOpenMenu(null);
-
+      setSelectedIds((current) => current.filter((selectedId) => selectedId !== id));
       await fetchLiveProducts();
     } catch (err) {
-      console.error(
-        "Delete sequence failed:",
-        err
-      );
+      console.error("Delete sequence failed:", err);
+      window.alert(err instanceof Error ? err.message : "Could not delete product.");
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = selectedIds.filter((id) => productList.some((product) => product.id === id));
+    if (ids.length === 0 || isBulkDeleting) return;
+    const confirmation = window.confirm(
+      `Permanently delete ${ids.length} selected product listing(s)? This cannot be undone.`
+    );
+    if (!confirmation) return;
+    setIsBulkDeleting(true);
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData.user) throw new Error("Your vendor session could not be verified.");
+      const { data: vendor, error: vendorError } = await supabase
+        .from("vendors").select("id").eq("auth_user_id", authData.user.id).single();
+      if (vendorError || !vendor) throw new Error("Vendor profile could not be verified.");
+      // Chunk requests to stay comfortably below PostgREST URL/filter limits.
+      for (let offset = 0; offset < ids.length; offset += 100) {
+        const chunk = ids.slice(offset, offset + 100);
+        const { error } = await supabase.from("products").delete()
+          .in("id", chunk).eq("vendor_id", vendor.id);
+        if (error) throw error;
+      }
+      setSelectedIds([]);
+      await fetchLiveProducts();
+    } catch (err) {
+      console.error("Bulk delete failed:", err);
+      window.alert(err instanceof Error ? err.message : "Could not delete selected products.");
+      await fetchLiveProducts();
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -449,16 +478,38 @@ export function Products({
         ))}
       </div>
 
+      {/* BULK SELECTION ACTIONS */}
+      {selectedIds.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <span className="text-sm font-semibold text-emerald-900">{selectedIds.length} product(s) selected</span>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => setSelectedIds([])} className="h-8 rounded-lg border border-emerald-200 bg-white px-3 text-xs font-semibold text-emerald-800">Clear selection</button>
+            <button type="button" onClick={handleBulkDelete} disabled={isBulkDeleting} className="h-8 rounded-lg bg-red-600 px-3 text-xs font-semibold text-white disabled:opacity-50">
+              {isBulkDeleting ? "Deleting…" : `Delete selected (${selectedIds.length})`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* PRODUCT TABLE */}
       <div className="bg-card rounded-xl border border-border overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-[1050px]">
             <thead>
               <tr className="border-b border-border bg-muted/40">
+                <th className="px-3 py-3 w-10">
+                  <input type="checkbox" aria-label="Select all filtered products"
+                    checked={filtered.length > 0 && filtered.every((p) => selectedIds.includes(p.id))}
+                    onChange={(event) => setSelectedIds(event.target.checked ? filtered.map((p) => p.id) : [])}
+                  />
+                </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
                   Product
                 </th>
 
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
+                  Brand
+                </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
                   Category
                 </th>
@@ -519,6 +570,14 @@ export function Products({
                     key={p.id}
                     className="hover:bg-muted/20 transition-colors group"
                   >
+                    <td className="px-3 py-3">
+                      <input type="checkbox" aria-label={`Select ${p.name}`}
+                        checked={selectedIds.includes(p.id)}
+                        onChange={(event) => setSelectedIds((current) => event.target.checked
+                          ? [...current, p.id]
+                          : current.filter((id) => id !== p.id))}
+                      />
+                    </td>
                     {/* PRODUCT */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
@@ -565,6 +624,11 @@ export function Products({
                           </div>
                         </div>
                       </div>
+                    </td>
+
+                    {/* BRAND */}
+                    <td className="px-4 py-3 text-sm text-muted-foreground">
+                      {p.brand || "—"}
                     </td>
 
                     {/* CATEGORY */}
@@ -683,7 +747,7 @@ export function Products({
               {filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-4 py-12 text-center text-muted-foreground text-sm"
                   >
                     No products found
