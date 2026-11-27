@@ -158,10 +158,15 @@ BEGIN
     v_mrp := NULLIF(regexp_replace(coalesce(r."MRP",''), '[^0-9.]', '', 'g'), '')::numeric;
 
     -- Serialize same-key imports to reduce concurrent duplicate creation.
-    PERFORM pg_advisory_xact_lock(hashtextextended(
-      coalesce(nullif(trim(r.barcode),''), lower(trim(r.product_name)) || '|' || lower(trim(coalesce(r.brand,''))),
-      0
-    ));
+    PERFORM pg_advisory_xact_lock(
+      hashtextextended(
+        coalesce(
+          nullif(trim(r.barcode), ''),
+          lower(trim(r.product_name)) || '|' || lower(trim(coalesce(r.brand, '')))
+        ),
+        0
+      )
+    );
 
     v_id := NULL;
     IF nullif(trim(r.barcode),'') IS NOT NULL THEN
