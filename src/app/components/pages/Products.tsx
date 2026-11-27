@@ -4,7 +4,6 @@ import {
   Plus,
   Upload,
   Edit2,
-  Trash2,
   MoreVertical,
   Loader2,
   Calendar,
