@@ -536,50 +536,60 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
    * references the canonical image URL, matching the manual product flow.
    * Image lookup is best-effort and never invalidates a successful import.
    */
-  const attachSharedCatalogueImage = async (productId: string): Promise<boolean> => {
+  const attachSharedCatalogueImage = async (productId: string, item?: ReviewItem): Promise<boolean> => {
     try {
-      const { data: resolverData, error: resolverError } = await supabase.rpc(
-        "resolve_product_master",
-        { p_product_id: productId }
-      );
-      if (resolverError) {
-        console.warn("Shared image resolution failed:", resolverError.message);
-        return false;
-      }
-      const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
-      const universalId = resolverResult?.universal_product_id;
-      if (!universalId) return false;
+      // An explicit catalogue image URL is preferred when supplied by the CSV.
+      let imageUrl = typeof item?.imageUrl === "string" ? item.imageUrl.trim() : "";
+      const universalId = item?.catalogProductId?.trim() || "";
 
-      const { data: universalProduct, error: universalError } = await supabase
-        .from("universal_products")
-        .select("image_url")
-        .eq("id", universalId)
-        .maybeSingle();
-      if (universalError) console.warn("Could not read canonical image:", universalError.message);
-
-      let imageUrl = typeof universalProduct?.image_url === "string" ? universalProduct.image_url.trim() : "";
+      // Otherwise resolve the existing shared master and its primary image.
       if (!imageUrl) {
-        const { data: gallery, error: galleryError } = await supabase
-          .from("universal_product_images")
-          .select("image_url, is_primary, created_at")
-          .eq("universal_product_id", universalId)
-          .order("is_primary", { ascending: false })
-          .order("created_at", { ascending: true })
-          .limit(1);
-        if (galleryError) {
-          console.warn("Could not read shared image gallery:", galleryError.message);
-          return false;
+        let resolvedUniversalId = universalId;
+        if (!resolvedUniversalId) {
+          const { data: resolverData, error: resolverError } = await supabase.rpc(
+            "resolve_product_master",
+            { p_product_id: productId }
+          );
+          if (resolverError) {
+            console.warn("Shared image resolution failed:", resolverError.message);
+            return false;
+          }
+          const resolverResult = Array.isArray(resolverData) ? resolverData[0] : resolverData;
+          resolvedUniversalId = resolverResult?.universal_product_id || "";
         }
-        imageUrl = typeof gallery?.[0]?.image_url === "string" ? gallery[0].image_url.trim() : "";
+        if (!resolvedUniversalId) return false;
+
+        const { data: universalProduct, error: universalError } = await supabase
+          .from("universal_products")
+          .select("image_url")
+          .eq("id", resolvedUniversalId)
+          .maybeSingle();
+        if (universalError) console.warn("Could not read canonical image:", universalError.message);
+
+        imageUrl = typeof universalProduct?.image_url === "string" ? universalProduct.image_url.trim() : "";
+        if (!imageUrl) {
+          const { data: gallery, error: galleryError } = await supabase
+            .from("universal_product_images")
+            .select("image_url, is_primary, created_at")
+            .eq("universal_product_id", resolvedUniversalId)
+            .order("is_primary", { ascending: false })
+            .order("created_at", { ascending: true })
+            .limit(1);
+          if (galleryError) {
+            console.warn("Could not read shared image gallery:", galleryError.message);
+            return false;
+          }
+          imageUrl = typeof gallery?.[0]?.image_url === "string" ? gallery[0].image_url.trim() : "";
+        }
       }
-      if (!imageUrl) return false;
+      if (!imageUrl || !/^https?:\\/\\//i.test(imageUrl)) return false;
 
       const { error: imageUpdateError } = await supabase
         .from("products")
         .update({ image_url: imageUrl })
         .eq("id", productId);
       if (imageUpdateError) {
-        console.warn("Shared image found but could not attach it:", imageUpdateError.message);
+        console.warn("Could not attach catalogue image:", imageUpdateError.message);
         return false;
       }
       return true;
@@ -677,7 +687,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
             }
 
             addedCount++;
-            if (await attachSharedCatalogueImage(insertedProduct.id)) sharedImageCount++;
+            if (await attachSharedCatalogueImage(insertedProduct.id, item)) sharedImageCount++;
             continue;
           }
 
@@ -699,7 +709,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
             Object.keys(changes).length === 0
           ) {
             skippedCount++;
-            if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id)) sharedImageCount++;
+            if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id, item)) sharedImageCount++;
             continue;
           }
 
@@ -735,7 +745,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
           }
 
           updatedCount++;
-          if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id)) sharedImageCount++;
+          if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id, item)) sharedImageCount++;
         } catch (itemErr) {
           failedCount++;
 
