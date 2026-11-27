@@ -431,3 +431,67 @@ GRANT EXECUTE ON FUNCTION public.import_vendor_product(jsonb) TO authenticated;
 REVOKE ALL ON FUNCTION public.import_rivocity_catalogue_staging() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.import_rivocity_catalogue_staging() TO authenticated, service_role;
 
+
+
+-- Batch wrapper keeps large vendor imports efficient while isolating bad rows.
+-- The UI sends at most 100 records per RPC call.
+CREATE OR REPLACE FUNCTION public.import_vendor_products_batch(p_products jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_item jsonb;
+  v_result jsonb;
+  v_added integer := 0;
+  v_updated integer := 0;
+  v_catalogue_created integer := 0;
+  v_inactive integer := 0;
+  v_failed integer := 0;
+  v_errors jsonb := '[]'::jsonb;
+BEGIN
+  IF jsonb_typeof(p_products) <> 'array' THEN
+    RAISE EXCEPTION 'p_products must be a JSON array';
+  END IF;
+  IF jsonb_array_length(p_products) > 100 THEN
+    RAISE EXCEPTION 'Maximum 100 products per batch';
+  END IF;
+
+  FOR v_item IN SELECT value FROM jsonb_array_elements(p_products)
+  LOOP
+    BEGIN
+      v_result := public.import_vendor_product(v_item);
+      IF (v_result->>'created_vendor_listing')::boolean THEN
+        v_added := v_added + 1;
+      ELSE
+        v_updated := v_updated + 1;
+      END IF;
+      IF (v_result->>'created_catalogue_product')::boolean THEN
+        v_catalogue_created := v_catalogue_created + 1;
+      END IF;
+      IF v_result->>'status' <> 'active' THEN
+        v_inactive := v_inactive + 1;
+      END IF;
+    EXCEPTION WHEN OTHERS THEN
+      v_failed := v_failed + 1;
+      v_errors := v_errors || jsonb_build_array(jsonb_build_object(
+        'name', v_item->>'name',
+        'error', SQLERRM
+      ));
+    END;
+  END LOOP;
+
+  RETURN jsonb_build_object(
+    'added_vendor_listings', v_added,
+    'updated_vendor_listings', v_updated,
+    'new_shared_catalogue_products', v_catalogue_created,
+    'inactive_vendor_listings', v_inactive,
+    'failed', v_failed,
+    'errors', v_errors
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.import_vendor_products_batch(jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.import_vendor_products_batch(jsonb) TO authenticated;
