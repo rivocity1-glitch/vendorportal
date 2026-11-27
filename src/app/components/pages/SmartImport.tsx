@@ -1000,7 +1000,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                           type="checkbox"
                           checked={item.status === "Needs Review" ? false : item.selected}
                           disabled={item.status === "Needs Review"}
-                          title={item.status === "Needs Review" ? "Add a valid selling price, MRP or purchase rate before importing" : "Select product for import"}
+                          title={item.status === "Needs Review" ? "This document row needs a product name or manual review" : "Select product; missing vendor price or stock keeps the listing inactive"}
                           onChange={e =>
                             updateItemField(
                               item.id,
