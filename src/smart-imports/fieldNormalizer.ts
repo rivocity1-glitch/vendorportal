@@ -11,10 +11,18 @@ function normalizeHeaderKey(header: string): string {
     .replace(/[^a-z0-9]/g, '');
 
   // Product identity
+  if (['subcategoryname'].includes(clean)) return 'subcategory';
+  if (['variantname', 'productvariant'].includes(clean)) return 'variant';
+  if (['packsize', 'netsize', 'netquantity', 'packquantity', 'quantityperpack'].includes(clean)) return 'packSize';
+  if (['mrpinr', 'printedmrp'].includes(clean)) return 'mrp';
   if (['brandid', 'canonicalbrandid'].includes(clean)) return 'brandId';
   if (['brand', 'brandname', 'productbrand'].includes(clean)) return 'brand';
   if (['productid', 'catalogproductid', 'masterproductid', 'universalproductid'].includes(clean)) return 'catalogProductId';
+  if (['categoryid', 'productcategoryid'].includes(clean)) return 'categoryId';
   if (['productimageurl', 'imageurl', 'image', 'imagepath', 'imagelocalpath'].includes(clean)) return 'imageUrl';
+  if (['productdescription', 'description', 'details'].includes(clean)) return 'description';
+  if (['verificationstatus', 'verificationstate'].includes(clean)) return 'verificationStatus';
+  if (['manufacturername', 'manufacturer', 'manufacturercompany'].includes(clean)) return 'manufacturer';
   if ([
     'product', 'item', 'name', 'description', 'itemname', 'productname',
     'particulars', 'itemdescription', 'productdescription', 'producttitle',
