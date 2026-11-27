@@ -19,7 +19,8 @@ ALTER TABLE public.universal_products
   ADD COLUMN IF NOT EXISTS verification_status text,
   ADD COLUMN IF NOT EXISTS data_review_status text,
   ADD COLUMN IF NOT EXISTS data_review_note text,
-  ADD COLUMN IF NOT EXISTS source_catalogue_id text;
+  ADD COLUMN IF NOT EXISTS source_catalogue_id text,
+  ADD COLUMN IF NOT EXISTS candidate_image_url text;
 
 CREATE INDEX IF NOT EXISTS idx_universal_products_barcode
   ON public.universal_products (barcode) WHERE barcode IS NOT NULL AND barcode <> '';
@@ -180,7 +181,7 @@ BEGIN
     IF v_id IS NULL THEN
       INSERT INTO public.universal_products (
         name, brand, description, category_id, barcode, manufacturer, unit, weight,
-        image_url, status, product_variant, pack_size, parent_company, marketer,
+        image_url, candidate_image_url, status, product_variant, pack_size, parent_company, marketer,
         product_type, country_of_origin, source_url, image_source, image_license,
         image_attribution, verification_status, data_review_status, data_review_note,
         source_catalogue_id, created_at, updated_at
@@ -188,8 +189,9 @@ BEGIN
         trim(r.product_name), nullif(trim(r.brand),''), nullif(trim(r.product_description),''),
         v_category_id, nullif(trim(r.barcode),''), nullif(trim(r.manufacturer),''),
         nullif(trim(r.unit),''), coalesce(nullif(trim(r.pack_size),''), nullif(trim(r.pack_quantity),'') || ' ' || nullif(trim(r.unit),'')),
+        NULL,
         CASE WHEN r.image_url ~* '^https?://' THEN r.image_url ELSE NULL END,
-        'active', nullif(trim(r.product_variant),''), nullif(trim(r.pack_size),''),
+        'active', nullif(trim(r.product_variant),''), nullif(trim(r.pack_size),'');
         nullif(trim(r.parent_company),''), nullif(trim(r.marketer),''), nullif(trim(r.product_type),''),
         nullif(trim(r.country_of_origin),''), nullif(trim(r.source_url),''), nullif(trim(r.image_source),''),
         nullif(trim(r.image_license),''), nullif(trim(r.image_attribution),''),
@@ -207,7 +209,7 @@ BEGIN
         manufacturer = coalesce(nullif(trim(manufacturer),''), nullif(trim(r.manufacturer),'')),
         unit = coalesce(nullif(trim(unit),''), nullif(trim(r.unit),'')),
         weight = coalesce(nullif(trim(weight),''), nullif(trim(r.pack_size),'')),
-        image_url = coalesce(nullif(trim(image_url),''), CASE WHEN r.image_url ~* '^https?://' THEN r.image_url END),
+        candidate_image_url = coalesce(nullif(trim(candidate_image_url),''), CASE WHEN r.image_url ~* '^https?://' THEN r.image_url END),
         product_variant = coalesce(nullif(trim(product_variant),''), nullif(trim(r.product_variant),'')),
         pack_size = coalesce(nullif(trim(pack_size),''), nullif(trim(r.pack_size),'')),
         parent_company = coalesce(nullif(trim(parent_company),''), nullif(trim(r.parent_company),'')),
@@ -227,20 +229,9 @@ BEGIN
       v_updated := v_updated + 1;
     END IF;
 
-    IF r.image_url ~* '^https?://' THEN
-      INSERT INTO public.universal_product_images (
-        universal_product_id, image_url, is_primary, source
-      )
-      SELECT v_id, r.image_url, NOT EXISTS (
-        SELECT 1 FROM public.universal_product_images upi
-        WHERE upi.universal_product_id = v_id AND upi.is_primary = true
-      ), coalesce(nullif(trim(r.image_source),''), 'catalogue_import')
-      WHERE NOT EXISTS (
-        SELECT 1 FROM public.universal_product_images upi
-        WHERE upi.universal_product_id = v_id AND upi.image_url = r.image_url
-      );
-      IF FOUND THEN v_image_count := v_image_count + 1; END IF;
-    END IF;
+    -- Source image URLs are candidates only. The CSV marks them review-required;
+    -- do not publish them as shared canonical images until licensing/quality review.
+
 
     UPDATE public.rivocity_catalogue_staging
     SET processed_at = now(), universal_product_id = v_id
@@ -330,7 +321,7 @@ BEGIN
     ) VALUES (
       v_name, v_brand, nullif(trim(p_product->>'description'),''), v_category_id,
       v_barcode, nullif(trim(p_product->>'manufacturer'),''), nullif(trim(p_product->>'unit'),''),
-      nullif(trim(p_product->>'weight'),''), v_image, 'active',
+      nullif(trim(p_product->>'weight'),''), NULL, 'active',
       nullif(trim(p_product->>'productVariant'),''), nullif(trim(p_product->>'packSize'),'')
     ) RETURNING id INTO v_universal_id;
     v_created_catalogue := true;
@@ -340,24 +331,16 @@ BEGIN
       category_id = coalesce(category_id, v_category_id),
       manufacturer = coalesce(nullif(trim(manufacturer),''), nullif(trim(p_product->>'manufacturer'),'')),
       description = coalesce(nullif(trim(description),''), nullif(trim(p_product->>'description'),'')),
-      image_url = coalesce(nullif(trim(image_url),''), v_image),
+      candidate_image_url = coalesce(nullif(trim(candidate_image_url),''), v_image),
       product_variant = coalesce(nullif(trim(product_variant),''), nullif(trim(p_product->>'productVariant'),'')),
       pack_size = coalesce(nullif(trim(pack_size),''), nullif(trim(p_product->>'packSize'),'')),
       updated_at = now()
     WHERE id = v_universal_id;
   END IF;
 
-  IF v_image IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM public.universal_product_images
-    WHERE universal_product_id = v_universal_id AND image_url = v_image
-  ) THEN
-    INSERT INTO public.universal_product_images(universal_product_id,image_url,is_primary,source)
-    VALUES (
-      v_universal_id, v_image,
-      NOT EXISTS (SELECT 1 FROM public.universal_product_images WHERE universal_product_id = v_universal_id AND is_primary),
-      'vendor_import'
-    );
-  END IF;
+  -- Vendor-supplied image remains on the vendor listing. It is not promoted
+  -- into the shared image gallery without catalogue image review.
+
 
   -- Find this vendor's existing offer to make repeat imports idempotent.
   SELECT * INTO v_existing FROM public.products
