@@ -481,7 +481,6 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
       "status",
       "barcode",
       "sku",
-      "manufacturer",
       "batch_number",
       "weight",
       "unit",
