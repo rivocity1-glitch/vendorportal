@@ -115,12 +115,19 @@ export async function runImportPipeline(file: File, existingProducts: ExistingPr
 
   if (parsedProducts.length === 0) return { items: [], summary: { total: 0, newProducts: 0, existingProducts: 0, needsReview: 0 } };
 
-  const [{ data: categories }, { data: masterRows, error: masterError }, { data: aliasRows, error: aliasError }] = await Promise.all([
-    supabase.from('product_categories').select('id,name'),
-    supabase.from('universal_products').select('id,name,brand,category_id,barcode,manufacturer,weight,source_catalogue_id'),
-    supabase.from('universal_product_aliases').select('universal_product_id,alias')
-  ]);
-  if (masterError) throw new Error(`Could not load the shared product catalogue for matching: ${masterError.message}`);
+  const { data: categories } = await supabase.from('product_categories').select('id,name');
+  const masterRows: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.from('universal_products')
+      .select('id,name,brand,category_id,barcode,manufacturer,weight,source_catalogue_id')
+      .order('created_at', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(`Could not load the shared product catalogue for matching: ${error.message}`);
+    masterRows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  const { data: aliasRows, error: aliasError } = await supabase
+    .from('universal_product_aliases').select('universal_product_id,alias');
   const aliasesByMaster = new Map<string, string[]>();
   if (!aliasError) {
     for (const row of aliasRows || []) {
