@@ -132,7 +132,9 @@ export async function runImportPipeline(file: File, existingProducts: ExistingPr
     const hasUsablePrice = [product.sellingPrice, product.mrp, product.costPrice].some(v => v !== null && v !== undefined && Number(v) > 0);
 
     let status: typeof IMPORT_STATUS[keyof typeof IMPORT_STATUS];
-    if (!product.name || !hasUsablePrice) {
+    // Catalogue CSV rows may intentionally omit vendor price and stock. Keep them selectable;
+    // the database creates an inactive vendor offer until the vendor supplies both.
+    if (!product.name || (!isCsvFile(file) && !hasUsablePrice)) {
       status = IMPORT_STATUS.NEEDS_REVIEW;
       needsReviewCount++;
     } else if (productMatch.matchType === 'Exact' || productMatch.matchType === 'Fuzzy') {
