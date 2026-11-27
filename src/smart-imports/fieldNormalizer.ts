@@ -11,6 +11,10 @@ function normalizeHeaderKey(header: string): string {
     .replace(/[^a-z0-9]/g, '');
 
   // Product identity
+  if (['brandid', 'canonicalbrandid'].includes(clean)) return 'brandId';
+  if (['brand', 'brandname', 'productbrand'].includes(clean)) return 'brand';
+  if (['productid', 'catalogproductid', 'masterproductid', 'universalproductid'].includes(clean)) return 'catalogProductId';
+  if (['productimageurl', 'imageurl', 'image', 'imagepath', 'imagelocalpath'].includes(clean)) return 'imageUrl';
   if ([
     'product', 'item', 'name', 'description', 'itemname', 'productname',
     'particulars', 'itemdescription', 'productdescription', 'producttitle',
@@ -54,7 +58,7 @@ function normalizeHeaderKey(header: string): string {
 
   if (['scheme', 'schemepct', 'sch'].includes(clean)) return 'scheme';
   if (['schemedisc', 'schemediscount'].includes(clean)) return 'schemeDiscount';
-  if (['manufacturer', 'mfg', 'company', 'brand', 'brandname', 'make'].includes(clean)) return 'manufacturer';
+  if (['manufacturer', 'mfg', 'company', 'make'].includes(clean)) return 'manufacturer';
 
   // Keep vendor/category/subcategory fields distinct.
   if (['vendorcategory', 'category', 'cat', 'group', 'department', 'productgroup'].includes(clean)) return 'category';
