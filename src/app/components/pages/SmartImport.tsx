@@ -622,6 +622,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
 
       const toPayload = (item: ReviewItem) => ({
         name: item.name?.trim() || "",
+        catalogProductId: item.catalogProductId?.trim() || null,
         brand: item.brand?.trim() || null,
         description: item.description?.trim() || null,
         categoryId: item.category || item.categoryId || null,
