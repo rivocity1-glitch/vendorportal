@@ -377,10 +377,15 @@ export function Products({
   };
 
   const filtered = productList.filter((p) => {
-    const matchSearch =
-      p.name
-        .toLowerCase()
-        .includes(search.toLowerCase());
+    const query = search.trim().toLowerCase();
+    const matchSearch = !query || [
+      p.name || "",
+      p.brand || "",
+      p.manufacturer || "",
+      p.sku || "",
+      p.barcode || "",
+      p.variant || ""
+    ].some((value) => String(value).toLowerCase().includes(query));
 
     const matchCat =
       activeCategoryId === "All" ||
