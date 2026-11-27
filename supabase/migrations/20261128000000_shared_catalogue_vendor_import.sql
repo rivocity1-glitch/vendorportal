@@ -67,6 +67,14 @@ CREATE TABLE IF NOT EXISTS public.rivocity_catalogue_staging (
   universal_product_id uuid
 );
 
+ALTER TABLE public.rivocity_catalogue_staging ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rivocity_catalogue_staging_admin_access ON public.rivocity_catalogue_staging;
+CREATE POLICY rivocity_catalogue_staging_admin_access
+  ON public.rivocity_catalogue_staging
+  FOR ALL TO authenticated
+  USING (EXISTS (SELECT 1 FROM public.admin_users au WHERE au.auth_user_id = auth.uid()))
+  WITH CHECK (EXISTS (SELECT 1 FROM public.admin_users au WHERE au.auth_user_id = auth.uid()));
+
 -- Map the 32 catalogue labels to the existing 14-category master.
 -- Keep this mapping centralized so CSV and vendor imports use the same category IDs.
 CREATE OR REPLACE FUNCTION public.rivocity_catalogue_category_id(p_category text)
@@ -317,11 +325,12 @@ BEGIN
   IF v_universal_id IS NULL THEN
     INSERT INTO public.universal_products (
       name, brand, description, category_id, barcode, manufacturer, unit,
-      weight, image_url, status
+      weight, image_url, status, product_variant, pack_size
     ) VALUES (
       v_name, v_brand, nullif(trim(p_product->>'description'),''), v_category_id,
       v_barcode, nullif(trim(p_product->>'manufacturer'),''), nullif(trim(p_product->>'unit'),''),
-      nullif(trim(p_product->>'weight'),''), v_image, 'active'
+      nullif(trim(p_product->>'weight'),''), v_image, 'active',
+      nullif(trim(p_product->>'productVariant'),''), nullif(trim(p_product->>'packSize'),'')
     ) RETURNING id INTO v_universal_id;
     v_created_catalogue := true;
   ELSE
@@ -331,6 +340,8 @@ BEGIN
       manufacturer = coalesce(nullif(trim(manufacturer),''), nullif(trim(p_product->>'manufacturer'),'')),
       description = coalesce(nullif(trim(description),''), nullif(trim(p_product->>'description'),'')),
       image_url = coalesce(nullif(trim(image_url),''), v_image),
+      product_variant = coalesce(nullif(trim(product_variant),''), nullif(trim(p_product->>'productVariant'),'')),
+      pack_size = coalesce(nullif(trim(pack_size),''), nullif(trim(p_product->>'packSize'),'')),
       updated_at = now()
     WHERE id = v_universal_id;
   END IF;
