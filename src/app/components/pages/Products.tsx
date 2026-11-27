@@ -231,6 +231,7 @@ export function Products({
             name: p.name || "Unnamed Product",
             brand: p.brand || "",
             manufacturer: p.manufacturer || "",
+            variant: p.variant || p.pack_size || p.packaging || "",
             universal_product_id: p.universal_product_id || null,
 
             /*
@@ -550,6 +551,18 @@ export function Products({
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
                   Category
                 </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
+                  Variant / Pack
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
+                  SKU
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
+                  Barcode
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
+                  Manufacturer
+                </th>
 
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">
                   Rate (Excl. Tax)
@@ -668,17 +681,16 @@ export function Products({
                       {p.brand || "—"}
                     </td>
 
-                    {/* BRAND */}
-                    <td className="px-4 py-3 text-sm text-muted-foreground">
-                      {p.brand || "—"}
-                    </td>
-
                     {/* CATEGORY */}
                     <td className="px-4 py-3">
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-[#EFF6FF] text-[#1D4ED8]">
                         {categoryLabel}
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{p.variant || "—"}</td>
+                    <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{p.sku || "—"}</td>
+                    <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{p.barcode || "—"}</td>
+                    <td className="px-4 py-3 text-sm text-muted-foreground">{p.manufacturer || "—"}</td>
 
                     {/* RATE */}
                     <td className="px-4 py-3 text-sm font-medium text-muted-foreground">
@@ -789,7 +801,7 @@ export function Products({
               {filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={10}
+                    colSpan={14}
                     className="px-4 py-12 text-center text-muted-foreground text-sm"
                   >
                     No products found
