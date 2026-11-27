@@ -474,6 +474,9 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
 
     const textFields = [
       "name",
+      "brand",
+      "image_url",
+      "universal_product_id",
       "description",
       "category_id",
       "subcategory",
