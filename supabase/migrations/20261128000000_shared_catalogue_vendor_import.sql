@@ -6,6 +6,7 @@ ALTER TABLE public.products
   ADD COLUMN IF NOT EXISTS brand text;
 
 ALTER TABLE public.universal_products
+  ADD COLUMN IF NOT EXISTS mrp numeric,
   ADD COLUMN IF NOT EXISTS product_variant text,
   ADD COLUMN IF NOT EXISTS pack_size text,
   ADD COLUMN IF NOT EXISTS parent_company text,
@@ -181,7 +182,7 @@ BEGIN
     IF v_id IS NULL THEN
       INSERT INTO public.universal_products (
         name, brand, description, category_id, barcode, manufacturer, unit, weight,
-        image_url, candidate_image_url, status, product_variant, pack_size, parent_company, marketer,
+        image_url, candidate_image_url, mrp, status, product_variant, pack_size, parent_company, marketer,
         product_type, country_of_origin, source_url, image_source, image_license,
         image_attribution, verification_status, data_review_status, data_review_note,
         source_catalogue_id, created_at, updated_at
@@ -191,6 +192,7 @@ BEGIN
         nullif(trim(r.unit),''), coalesce(nullif(trim(r.pack_size),''), nullif(trim(r.pack_quantity),'') || ' ' || nullif(trim(r.unit),'')),
         NULL,
         CASE WHEN r.image_url ~* '^https?://' THEN r.image_url ELSE NULL END,
+        v_mrp,
         'active', nullif(trim(r.product_variant),''), nullif(trim(r.pack_size),''),
         nullif(trim(r.parent_company),''), nullif(trim(r.marketer),''), nullif(trim(r.product_type),''),
         nullif(trim(r.country_of_origin),''), nullif(trim(r.source_url),''), nullif(trim(r.image_source),''),
@@ -204,6 +206,7 @@ BEGIN
       UPDATE public.universal_products
       SET
         brand = coalesce(nullif(trim(brand),''), nullif(trim(r.brand),'')),
+        mrp = coalesce(mrp, v_mrp),
         description = coalesce(nullif(trim(description),''), nullif(trim(r.product_description),'')),
         category_id = coalesce(category_id, v_category_id),
         manufacturer = coalesce(nullif(trim(manufacturer),''), nullif(trim(r.manufacturer),'')),
