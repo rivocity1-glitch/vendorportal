@@ -42,11 +42,14 @@ function scoreHeaderRow(row: string[]): number {
     headers.includes('subcategory') &&
     headers.includes('category') &&
     headers.includes('productCategory');
+  const isRivoCatalogueLayout = headers.some(header =>
+    ['brandId', 'catalogProductId', 'imageUrl', 'categoryId', 'verificationStatus'].includes(header)
+  );
   const hasPriceOrQuantity = headers.some(header =>
     ['quantity', 'purchasePrice', 'sellingPrice', 'mrp'].includes(header)
   );
   const recognized = headers.filter(header => header !== '').length;
-  return (hasName || isLegacyRivoLayout) && hasPriceOrQuantity ? 100 + recognized : 0;
+  return (hasName || isLegacyRivoLayout) && (hasPriceOrQuantity || isRivoCatalogueLayout) ? 100 + recognized : 0;
 }
 
 export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
@@ -80,7 +83,7 @@ export async function parseCsvFile(file: File): Promise<ParsedProduct[]> {
 
         if (headerRowIndex < 0) {
           throw new Error(
-            'Could not identify the CSV header row. Include a product/item name column and at least one quantity or price column (for example: Product, Qty, Rate, Selling Price or MRP).'
+            'Could not identify the CSV header row. Include a product name column plus vendor quantity/price fields or Rivo catalogue identifiers.'
           );
         }
 
