@@ -115,7 +115,33 @@ export async function runImportPipeline(file: File, existingProducts: ExistingPr
 
   if (parsedProducts.length === 0) return { items: [], summary: { total: 0, newProducts: 0, existingProducts: 0, needsReview: 0 } };
 
-  const { data: categories } = await supabase.from('product_categories').select('id,name');
+  const [{ data: categories }, { data: masterRows, error: masterError }, { data: aliasRows, error: aliasError }] = await Promise.all([
+    supabase.from('product_categories').select('id,name'),
+    supabase.from('universal_products').select('id,name,brand,category_id,barcode,manufacturer,weight,source_catalogue_id'),
+    supabase.from('universal_product_aliases').select('universal_product_id,alias')
+  ]);
+  if (masterError) throw new Error(`Could not load the shared product catalogue for matching: ${masterError.message}`);
+  const aliasesByMaster = new Map<string, string[]>();
+  if (!aliasError) {
+    for (const row of aliasRows || []) {
+      const list = aliasesByMaster.get(row.universal_product_id) || [];
+      list.push(row.alias);
+      aliasesByMaster.set(row.universal_product_id, list);
+    }
+  } else {
+    console.warn('Catalogue aliases unavailable; matching will use barcode and product names only:', aliasError.message);
+  }
+  const categoryNames = new Map((categories || []).map((category: any) => [category.id, category.name]));
+  const sharedProducts: ExistingProduct[] = (masterRows || []).map((row: any) => ({
+    id: row.id,
+    name: row.name || '',
+    brand: row.brand || null,
+    category: categoryNames.get(row.category_id) || null,
+    barcode: row.barcode || null,
+    sku: row.source_catalogue_id || null,
+    weight: row.weight || null,
+    aliases: aliasesByMaster.get(row.id) || []
+  }));
   const reviewItems: ReviewItem[] = [];
   let newProductsCount = 0;
   let existingProductsCount = 0;
@@ -124,7 +150,7 @@ export async function runImportPipeline(file: File, existingProducts: ExistingPr
   for (let i = 0; i < parsedProducts.length; i++) {
     const product = parsedProducts[i];
     const categoryMatch = matchCategory(product);
-    const productMatch = matchProduct(product, existingProducts);
+    const productMatch = matchProduct(product, [...sharedProducts, ...existingProducts]);
 
     // For CSVs, the explicit Vendor Category always wins over name-based guessing.
     const finalCategory = resolveCategoryId(product, categories, categoryMatch.categoryName);
@@ -134,10 +160,10 @@ export async function runImportPipeline(file: File, existingProducts: ExistingPr
     let status: typeof IMPORT_STATUS[keyof typeof IMPORT_STATUS];
     // Catalogue CSV rows may intentionally omit vendor price and stock. Keep them selectable;
     // the database creates an inactive vendor offer until the vendor supplies both.
-    if (!product.name || (!isCsvFile(file) && !hasUsablePrice)) {
+    if (!product.name || (!isCsvFile(file) && !hasUsablePrice) || productMatch.matchType === 'Fuzzy') {
       status = IMPORT_STATUS.NEEDS_REVIEW;
       needsReviewCount++;
-    } else if (productMatch.matchType === 'Exact' || productMatch.matchType === 'Fuzzy') {
+    } else if (productMatch.matchType === 'Exact') {
       status = IMPORT_STATUS.MATCH_FOUND;
       existingProductsCount++;
     } else {
@@ -158,7 +184,7 @@ export async function runImportPipeline(file: File, existingProducts: ExistingPr
       mrp: product.mrp ?? null,
       manufacturer: product.manufacturer ?? null,
       brand: product.brand ?? null,
-      catalogProductId: product.catalogProductId ?? null,
+      catalogProductId: product.catalogProductId ?? (productMatch.matchType === 'Exact' ? productMatch.productId : null),
       imageUrl: product.imageUrl ?? null,
       description: product.description ?? null,
       categoryId: product.categoryId ?? null,
