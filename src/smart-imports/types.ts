@@ -7,6 +7,9 @@ export interface ParsedProduct {
   expiry: string | null;
   batch: string | null;
   manufacturer: string | null;
+  brand?: string | null;
+  catalogProductId?: string | null;
+  imageUrl?: string | null;
   rawText: string;
 
   // CSV/catalog metadata
