@@ -10,6 +10,9 @@ export interface ParsedProduct {
   brand?: string | null;
   catalogProductId?: string | null;
   imageUrl?: string | null;
+  description?: string | null;
+  categoryId?: string | null;
+  verificationStatus?: string | null;
   rawText: string;
 
   // CSV/catalog metadata
