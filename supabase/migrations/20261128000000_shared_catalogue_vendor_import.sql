@@ -191,7 +191,7 @@ BEGIN
         nullif(trim(r.unit),''), coalesce(nullif(trim(r.pack_size),''), nullif(trim(r.pack_quantity),'') || ' ' || nullif(trim(r.unit),'')),
         NULL,
         CASE WHEN r.image_url ~* '^https?://' THEN r.image_url ELSE NULL END,
-        'active', nullif(trim(r.product_variant),''), nullif(trim(r.pack_size),'');
+        'active', nullif(trim(r.product_variant),''), nullif(trim(r.pack_size),''),
         nullif(trim(r.parent_company),''), nullif(trim(r.marketer),''), nullif(trim(r.product_type),''),
         nullif(trim(r.country_of_origin),''), nullif(trim(r.source_url),''), nullif(trim(r.image_source),''),
         nullif(trim(r.image_license),''), nullif(trim(r.image_attribution),''),
