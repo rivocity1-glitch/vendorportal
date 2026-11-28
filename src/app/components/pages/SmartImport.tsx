@@ -599,180 +599,85 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
     }
   };
   const handleImportSelected = async () => {
-    const selectedItems =
-      items.filter(item => item.selected && item.status !== "Needs Review");
-
-    if (selectedItems.length === 0) {
-      return;
-    }
+    const selectedItems = items.filter(item => item.selected && item.status !== "Needs Review");
+    if (selectedItems.length === 0) return;
 
     setIsLoading(true);
     setError(null);
 
-    let addedCount = 0;
-    let updatedCount = 0;
-    let skippedCount = 0;
-    let failedCount = 0;
-    let sharedImageCount = 0;
+    const totals = {
+      added_vendor_listings: 0,
+      updated_vendor_listings: 0,
+      new_shared_catalogue_products: 0,
+      inactive_vendor_listings: 0,
+      failed: 0
+    };
+    const errors: Array<{ name?: string; error?: string }> = [];
 
     try {
-      const {
-        data: { user },
-        error: authError
-      } = await supabase.auth.getUser();
-
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new Error(
-          "Authentication failed: No active profile session detected."
-        );
+        throw new Error("Authentication failed: no active vendor session was found.");
       }
 
-      const {
-        data: vendor,
-        error: vendorError
-      } = await supabase
-        .from("vendors")
-        .select("id")
-        .eq("auth_user_id", user.id)
-        .single();
+      const toPayload = (item: ReviewItem) => ({
+        name: item.name?.trim() || "",
+        catalogProductId: item.catalogProductId?.trim() || null,
+        brand: item.brand?.trim() || null,
+        description: item.description?.trim() || null,
+        categoryId: item.category || item.categoryId || null,
+        sellingPrice: item.sellingPrice != null && Number(item.sellingPrice) > 0
+          ? Number(item.sellingPrice)
+          : null,
+        costPrice: item.costPrice != null ? Number(item.costPrice) : null,
+        purchaseRate: item.purchaseRate != null ? Number(item.purchaseRate) : null,
+        mrp: item.mrp != null ? Number(item.mrp) : null,
+        stock: item.stock != null ? Number(item.stock) : 0,
+        imageUrl: item.imageUrl?.trim() || null,
+        barcode: item.barcode?.trim() || null,
+        sku: item.sku?.trim() || null,
+        manufacturer: item.manufacturer?.trim() || null,
+        weight: item.weight?.trim() || null,
+        unit: item.unit?.trim() || null,
+        productVariant: item.variant?.trim() || null,
+        packSize: item.packSize?.trim() || null,
+        lowStockThreshold: item.lowStockThreshold ?? 5
+      });
 
-      if (vendorError || !vendor) {
-        throw new Error(
-          "Failed to map inventory profile: Vendor catalog entry not found."
-        );
-      }
+      // Keep payloads bounded. Each batch is handled in one database transaction
+      // per product, avoiding thousands of individual browser-to-database calls.
+      for (let offset = 0; offset < selectedItems.length; offset += 100) {
+        const batch = selectedItems.slice(offset, offset + 100).map(toPayload);
+        const { data, error: batchError } = await supabase.rpc("import_vendor_products_batch", {
+          p_products: batch
+        });
+        if (batchError) throw batchError;
 
-      for (const item of selectedItems) {
-        if (!item.name?.trim() || item.status === "Needs Review") {
-          failedCount++;
-          continue;
-        }
+        const result = Array.isArray(data) ? data[0] : data;
+        if (!result) throw new Error("The database returned an empty import result.");
 
-        try {
-          const existingProduct =
-            await findExistingProduct(
-              vendor.id,
-              item
-            );
-
-          const nextProduct =
-            buildProductPayload(
-              item,
-              vendor.id
-            );
-
-          /*
-           * -----------------------------------------------------
-           * NEW PRODUCT
-           * -----------------------------------------------------
-           */
-          if (!existingProduct) {
-            const {
-              data: insertedProduct,
-              error: insertError
-            } = await supabase
-              .from("products")
-              .insert(nextProduct)
-              .select("id")
-              .single();
-
-            if (insertError) {
-              throw insertError;
-            }
-
-            if (!insertedProduct?.id) {
-              throw new Error(
-                `Product "${item.name}" was inserted but its ID was not returned.`
-              );
-            }
-
-            addedCount++;
-            if (await attachSharedCatalogueImage(insertedProduct.id, item)) sharedImageCount++;
-            continue;
-          }
-
-          /*
-           * -----------------------------------------------------
-           * EXISTING PRODUCT
-           * -----------------------------------------------------
-           *
-           * Compare the incoming CSV values with the actual
-           * vendor product.
-           */
-          const changes =
-            getChangedFields(
-              existingProduct,
-              nextProduct
-            );
-
-          if (
-            Object.keys(changes).length === 0
-          ) {
-            skippedCount++;
-            if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id, item)) sharedImageCount++;
-            continue;
-          }
-
-          /*
-           * Never overwrite vendor_id.
-           * Never overwrite universal_product_id.
-           *
-           * Universal matching belongs to the existing product
-           * architecture and is intentionally untouched here.
-           */
-          delete changes.vendor_id;
-
-          const {
-            error: updateError
-          } = await supabase
-            .from("products")
-            .update({
-              ...changes,
-              updated_at:
-                new Date().toISOString()
-            })
-            .eq(
-              "id",
-              existingProduct.id
-            )
-            .eq(
-              "vendor_id",
-              vendor.id
-            );
-
-          if (updateError) {
-            throw updateError;
-          }
-
-          updatedCount++;
-          if (!existingProduct.image_url && await attachSharedCatalogueImage(existingProduct.id, item)) sharedImageCount++;
-        } catch (itemErr) {
-          failedCount++;
-
-          console.error(
-            "Failed to synchronize product:",
-            item.name,
-            itemErr
-          );
-        }
+        totals.added_vendor_listings += Number(result.added_vendor_listings || 0);
+        totals.updated_vendor_listings += Number(result.updated_vendor_listings || 0);
+        totals.new_shared_catalogue_products += Number(result.new_shared_catalogue_products || 0);
+        totals.inactive_vendor_listings += Number(result.inactive_vendor_listings || 0);
+        totals.failed += Number(result.failed || 0);
+        if (Array.isArray(result.errors)) errors.push(...result.errors);
       }
 
       alert(
         `Import complete:\n` +
-        `- Added ${addedCount} new products\n` +
-        `- Updated ${updatedCount} existing products\n` +
-        `- Skipped ${skippedCount} unchanged products\n` +
-        `- Failed ${failedCount} products\n` +
-        `- Shared catalogue images attached: ${sharedImageCount}`
+        `- Added vendor listings: ${totals.added_vendor_listings}\n` +
+        `- Updated vendor listings: ${totals.updated_vendor_listings}\n` +
+        `- New shared catalogue products: ${totals.new_shared_catalogue_products}\n` +
+        `- Kept inactive (missing selling price or stock): ${totals.inactive_vendor_listings}\n` +
+        `- Failed: ${totals.failed}` +
+        (errors.length ? `\n\nFirst error: ${errors[0].name || "Product"} — ${errors[0].error || "Unknown error"}` : "")
       );
 
       handleCancel();
       onNavigate("products");
     } catch (err: any) {
-      setError(
-        err?.message ||
-          "An error occurred while importing products."
-      );
+      setError(err?.message || "An error occurred while importing products.");
     } finally {
       setIsLoading(false);
     }
@@ -1092,7 +997,7 @@ export default function SmartImport({ onNavigate }: SmartImportProps) {
                           type="checkbox"
                           checked={item.status === "Needs Review" ? false : item.selected}
                           disabled={item.status === "Needs Review"}
-                          title={item.status === "Needs Review" ? "Add a valid selling price, MRP or purchase rate before importing" : "Select product for import"}
+                          title={item.status === "Needs Review" ? "This document row needs a product name or manual review" : "Select product; missing vendor price or stock keeps the listing inactive"}
                           onChange={e =>
                             updateItemField(
                               item.id,

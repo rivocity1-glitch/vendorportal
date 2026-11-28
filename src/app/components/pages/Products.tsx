@@ -29,22 +29,26 @@ interface StoreCategory {
   name: string;
 }
 
-function getPrimaryProductImage(value: unknown): string | null {
-  if (typeof value !== "string" || !value.trim()) return null;
+function getProductImageUrls(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string" && /^https?:\/\//i.test(item.trim())).map(item => item.trim());
+  }
+  if (typeof value !== "string" || !value.trim()) return [];
   const raw = value.trim();
   try {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      const firstUrl = parsed.find(
-        (item): item is string =>
-          typeof item === "string" && /^https?:\/\//i.test(item.trim())
-      );
-      return firstUrl?.trim() || null;
+      return parsed.filter((item): item is string => typeof item === "string" && /^https?:\/\//i.test(item.trim())).map(item => item.trim());
     }
+    if (typeof parsed === "string" && /^https?:\/\//i.test(parsed.trim())) return [parsed.trim()];
   } catch {
     // A normal URL is stored as a plain string.
   }
-  return /^https?:\/\//i.test(raw) ? raw : null;
+  return /^https?:\/\//i.test(raw) ? [raw] : [];
+}
+
+function getPrimaryProductImage(value: unknown): string | null {
+  return getProductImageUrls(value)[0] || null;
 }
 
 const statusStyles: Record<string, string> = {
@@ -207,7 +211,67 @@ export function Products({
       if (error) throw error;
 
       if (data) {
-        const mapped = data.map((p: any) => {
+        // The vendor listing owns its own image. If it has no image, fall back
+        // to the linked shared catalogue gallery, then universal_products.image_url.
+        const rows = data as any[];
+        const missingImageRows = rows.filter(row => getProductImageUrls(row.image_url).length === 0);
+        const universalIds = Array.from(new Set(
+          missingImageRows
+            .map(row => row.universal_product_id)
+            .filter((id): id is string => typeof id === "string" && !!id)
+        ));
+        const sharedImagesByMaster = new Map<string, string[]>();
+        const canonicalImagesByMaster = new Map<string, string[]>();
+
+        if (universalIds.length > 0) {
+          const [galleryResult, masterResult] = await Promise.all([
+            supabase
+              .from("universal_product_images")
+              .select("universal_product_id, image_url, is_primary, created_at")
+              .in("universal_product_id", universalIds)
+              .order("is_primary", { ascending: false })
+              .order("created_at", { ascending: true }),
+            supabase
+              .from("universal_products")
+              .select("id, image_url")
+              .in("id", universalIds)
+          ]);
+
+          if (galleryResult.error) {
+            console.warn("Shared catalogue product images could not be loaded:", galleryResult.error.message);
+          } else {
+            (galleryResult.data || []).forEach((imageRow: any) => {
+              const current = sharedImagesByMaster.get(imageRow.universal_product_id) || [];
+              getProductImageUrls(imageRow.image_url).forEach(url => {
+                if (!current.includes(url) && current.length < 5) current.push(url);
+              });
+              sharedImagesByMaster.set(imageRow.universal_product_id, current);
+            });
+          }
+
+          if (masterResult.error) {
+            console.warn("Canonical product images could not be loaded:", masterResult.error.message);
+          } else {
+            (masterResult.data || []).forEach((master: any) => {
+              canonicalImagesByMaster.set(master.id, getProductImageUrls(master.image_url));
+            });
+          }
+        }
+
+        const mapped = rows.map((p: any) => {
+          const vendorImages = getProductImageUrls(p.image_url);
+          const sharedImages = p.universal_product_id
+            ? sharedImagesByMaster.get(p.universal_product_id) || []
+            : [];
+          const canonicalImages = p.universal_product_id
+            ? canonicalImagesByMaster.get(p.universal_product_id) || []
+            : [];
+          const resolvedImageUrls = vendorImages.length
+            ? vendorImages
+            : sharedImages.length
+              ? sharedImages
+              : canonicalImages;
+          const resolvedImageUrl = resolvedImageUrls.length ? JSON.stringify(resolvedImageUrls.slice(0, 5)) : p.image_url;
           const currentStock = Number(p.stock ?? 0);
 
           let evaluatedStatus = "Active";
@@ -253,7 +317,7 @@ export function Products({
               .slice(0, 2)
               .toUpperCase(),
 
-            image_url: p.image_url,
+            image_url: resolvedImageUrl,
 
             cost_price: p.cost_price,
             gst_slab: p.gst_slab,
